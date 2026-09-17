@@ -23,6 +23,9 @@
 <meta name="theme-color" content="#b3f900" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#b3f900" media="(prefers-color-scheme: dark)">
 
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400..900&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -89,7 +92,7 @@
   </div>
 
   <div class="live-comp">
-    <div class="wrap live-comp-inner">
+    <div class="wrap live-comp-inner app-ui">
       <div class="live-clock">
         <p class="col-label">Match <span>Ninety Six vs Dixie</span></p>
         <p class="scoreblock">
@@ -130,7 +133,7 @@
   </div>
 
   <div class="wrap">
-    <div class="scoring-bar" role="img" aria-label="The scoring bar: the last event recorded was a steal by number 10 Sanders at 18:10. Undo, Edit, Event Log and Review controls sit beside it, with one item waiting for review.">
+    <div class="scoring-bar app-ui" role="img" aria-label="The scoring bar: the last event recorded was a steal by number 10 Sanders at 18:10. Undo, Edit, Event Log and Review controls sit beside it, with one item waiting for review.">
       <span class="bar-time num">18:10</span>
       <span class="bar-title">Steal</span>
       <span class="bar-detail">#10 Sanders</span>
@@ -160,7 +163,7 @@
   </div>
 
   <div class="wrap">
-    <div class="spread" id="spread">
+    <div class="spread app-ui" id="spread">
       <div class="spread-page spread-page--left">
         <p class="col-label">On the field <span>11/11</span></p>
         <ul class="roster">
@@ -316,7 +319,7 @@
     <div class="ledger-head">
       <p class="col-label">Needs review <span>2 open</span></p>
     </div>
-    <ul class="issues">
+    <ul class="issues app-ui">
       <li>
         <span class="sev sev--review" aria-hidden="true"></span>
         <span class="issue-title">Unidentified player</span>
@@ -364,6 +367,7 @@
     <div class="tables">
       <div class="table-block">
         <p class="col-label">Players</p>
+        <div class="table-scroll">
         <table class="stat-table">
           <thead>
             <tr><th scope="col">Player</th><th scope="col">GP</th><th scope="col">GS</th><th scope="col">MIN</th><th scope="col">G</th><th scope="col">A</th><th scope="col">PTS</th><th scope="col">SH</th><th scope="col">SOG</th></tr>
@@ -377,10 +381,12 @@
             <tr><th scope="row"><span class="jersey num">6</span> Kinard</th><td class="num">16</td><td class="num">12</td><td class="num">902</td><td class="num">1</td><td class="num">5</td><td class="num">7</td><td class="num">14</td><td class="num">6</td></tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div class="table-block">
         <p class="col-label">Goalkeeping</p>
+        <div class="table-scroll">
         <table class="stat-table stat-table--keepers">
           <thead>
             <tr><th scope="col">Goalkeeper</th><th scope="col">GP</th><th scope="col">MIN</th><th scope="col">SV</th><th scope="col">GA</th><th scope="col">SV%</th><th scope="col">GAA</th><th scope="col">SHO</th></tr>
@@ -390,6 +396,7 @@
             <tr><th scope="row"><span class="jersey num">22</span> Brannon</th><td class="num">5</td><td class="num">304</td><td class="num">17</td><td class="num">4</td><td class="num">.810</td><td class="num">1.05</td><td class="num">1.5</td></tr>
           </tbody>
         </table>
+        </div>
         <p class="caption caption--tight">A clean sheet split between two goalkeepers is recorded as a shared shutout, so season totals never overstate either one.</p>
       </div>
     </div>
@@ -506,7 +513,7 @@
       </div>
     </div>
 
-    <div class="resume" role="img" aria-label="Programme's resume prompt at launch: Resume Ninety Six vs Dixie, last event 8:17 PM, 184 events safely stored, with Review and Resume buttons.">
+    <div class="resume app-ui" role="img" aria-label="Programme's resume prompt at launch: Resume Ninety Six vs Dixie, last event 8:17 PM, 184 events safely stored, with Review and Resume buttons.">
       <p class="resume-title">Resume Ninety Six vs Dixie</p>
       <p class="resume-meta num">Last event 8:17 PM · 184 events safely stored</p>
       <p class="resume-actions"><span class="ctl">Review</span><span class="ctl ctl--accent">Resume</span></p>

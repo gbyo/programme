@@ -51,11 +51,14 @@
   --critical: #c00c00;
   --critical-mark: #ff3b30;
 
-  /* Type */
-  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+  /* The website and the product intentionally speak in different voices.
+     Schibsted Grotesk is the editorial scorebook; system faces are reserved
+     for faithful representations of Programme's native interface. */
+  --editorial: "Schibsted Grotesk", "Arial Narrow", Arial, sans-serif;
+  --system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
-  --rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, sans-serif;
+  --system-rounded: ui-rounded, "SF Pro Rounded", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   /* Geometry. Programme.Metrics: 12pt controls, 18pt large surfaces. */
   --r-ctl: 10px;
@@ -129,9 +132,10 @@ body {
   margin: 0;
   background: var(--lime);
   color: var(--c-ink);
-  font-family: var(--sans);
+  font-family: var(--editorial);
   font-size: 17px;
-  line-height: 1.55;
+  font-weight: 420;
+  line-height: 1.58;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -140,9 +144,9 @@ h1,
 h2,
 h3 {
   margin: 0;
-  font-weight: 650;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  font-weight: 760;
+  line-height: 1.01;
+  letter-spacing: -0.035em;
   text-wrap: balance;
 }
 
@@ -205,12 +209,21 @@ button {
   top: 10px;
 }
 
-/* Numbers are a major part of the identity. Programme's score, clock and
-   jersey numbers all use rounded, monospaced digits. */
+/* Website figures use the editorial face and align like a printed scorebook. */
 .num {
-  font-family: var(--rounded);
+  font-family: var(--editorial);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  font-weight: 700;
+}
+
+/* Faithful Programme UI remains native-looking inside the editorial page. */
+.app-ui {
+  font-family: var(--system);
+}
+
+.app-ui .num {
+  font-family: var(--system-rounded);
   font-weight: 600;
 }
 
@@ -292,14 +305,14 @@ button {
 /* Programme's .programmeSectionHeader(): small, semibold, wide-tracked, quiet. */
 .label {
   font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.11em;
+  font-weight: 640;
+  letter-spacing: 0.085em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
 
 .label--tight {
-  letter-spacing: 0.08em;
+  letter-spacing: 0.065em;
   color: var(--ink-2);
 }
 
@@ -311,15 +324,15 @@ button {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--rule);
   font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.1em;
+  font-weight: 640;
+  letter-spacing: 0.075em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
 
 .col-label span {
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.035em;
   text-transform: none;
   font-weight: 560;
 }
@@ -340,14 +353,15 @@ button {
 }
 
 .head-copy h2 {
-  font-size: clamp(30px, 3.7vw, 54px);
+  max-width: 17ch;
+  font-size: clamp(32px, 3.9vw, 56px);
 }
 
 .body {
-  max-width: 34em;
-  margin-top: 18px;
+  max-width: 31em;
+  margin-top: 20px;
   font-size: clamp(16px, 1.15vw, 18px);
-  line-height: 1.55;
+  line-height: 1.58;
   color: var(--ink-2);
   text-wrap: pretty;
 }
@@ -359,7 +373,7 @@ button {
 }
 
 .caption {
-  max-width: 46em;
+  max-width: 50em;
   margin-top: 22px;
   font-size: 13.5px;
   line-height: 1.5;
@@ -372,10 +386,44 @@ button {
 
 .note-label {
   font-size: 10px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.085em;
   text-transform: uppercase;
-  font-weight: 650;
+  font-weight: 640;
   color: var(--ink-3);
+}
+
+@media (max-width: 720px) {
+  .wrap {
+    width: min(100% - 32px, var(--page));
+  }
+
+  .band {
+    padding-block: clamp(56px, 16vw, 76px);
+  }
+
+  .head {
+    margin-bottom: 34px;
+  }
+
+  .head--split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 13px;
+  }
+
+  .head--split .label {
+    padding-top: 0;
+  }
+
+  .head-copy h2 {
+    max-width: 13ch;
+    font-size: clamp(32px, 10.5vw, 44px);
+    line-height: 0.99;
+  }
+
+  .body {
+    max-width: 33em;
+    margin-top: 16px;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -391,8 +439,8 @@ button {
   border: 1px solid transparent;
   border-radius: var(--r-ctl);
   font-size: 16px;
-  font-weight: 620;
-  letter-spacing: -0.01em;
+  font-weight: 630;
+  letter-spacing: -0.006em;
   text-decoration: none;
   cursor: pointer;
   transition: background-color 200ms ease, color 200ms ease;
@@ -501,7 +549,7 @@ button {
 .nav-inner {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 20px;
   min-height: 64px;
 }
 
@@ -510,8 +558,8 @@ button {
   align-items: center;
   gap: 10px;
   font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-weight: 690;
+  letter-spacing: -0.018em;
   text-decoration: none;
 }
 
@@ -539,7 +587,7 @@ button {
 .nav-links {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   margin-left: auto;
 }
 
@@ -547,9 +595,10 @@ button {
   display: inline-flex;
   align-items: center;
   min-height: 40px;
-  padding: 0 12px;
-  font-size: 15px;
-  font-weight: 540;
+  padding: 0 11px;
+  font-size: 14.5px;
+  font-weight: 610;
+  letter-spacing: -0.005em;
   text-decoration: none;
   opacity: 0.72;
   transition: opacity 180ms ease;
@@ -567,7 +616,7 @@ button {
   border: 1px solid currentColor;
   border-radius: var(--r-ctl);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 630;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -583,6 +632,30 @@ button {
 
   .nav-github {
     margin-left: auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .nav-inner {
+    width: calc(100% - 28px);
+    gap: 8px;
+    min-height: 62px;
+  }
+
+  .nav-brand {
+    gap: 8px;
+    font-size: 15px;
+  }
+
+  .nav-brand img {
+    width: 24px;
+    height: 24px;
+  }
+
+  .nav-github {
+    min-height: 38px;
+    padding-inline: 12px;
+    font-size: 14px;
   }
 }
 
@@ -602,7 +675,7 @@ button {
   display: grid;
   grid-template-columns:
     minmax(20px, 1fr)
-    minmax(0, 470px)
+    minmax(0, 500px)
     clamp(24px, 3.4vw, 64px)
     minmax(0, 606px)
     minmax(20px, 1fr);
@@ -616,16 +689,19 @@ button {
 }
 
 .hero h1 {
-  margin-top: 16px;
-  font-size: clamp(38px, 4.9vw, 70px);
-  letter-spacing: -0.035em;
+  max-width: 10.2ch;
+  margin-top: 18px;
+  font-size: clamp(42px, 5.1vw, 74px);
+  font-weight: 780;
+  line-height: 0.96;
+  letter-spacing: -0.043em;
 }
 
 .hero-body {
-  max-width: 31em;
-  margin-top: 22px;
+  max-width: 29em;
+  margin-top: 26px;
   font-size: clamp(16px, 1.2vw, 19px);
-  line-height: 1.5;
+  line-height: 1.56;
   color: var(--ink-2);
   text-wrap: pretty;
 }
@@ -635,7 +711,7 @@ button {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 26px;
-  margin-top: 32px;
+  margin-top: 34px;
 }
 
 .hero-sheet {
@@ -888,6 +964,21 @@ button {
 }
 
 @media (max-width: 620px) {
+  .hero-copy {
+    padding-block: 38px 28px;
+  }
+
+  .hero h1 {
+    max-width: 10.4ch;
+    font-size: clamp(40px, 12.6vw, 48px);
+    line-height: 0.97;
+  }
+
+  .hero-body {
+    max-width: 32em;
+    margin-top: 24px;
+  }
+
   .hero-sheet {
     height: 300px;
   }
@@ -914,7 +1005,7 @@ button {
 
 .clock-huge {
   margin-top: 18px;
-  font-family: var(--sans);
+  font-family: var(--system);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   font-size: clamp(56px, 8vw, 116px);
@@ -1157,27 +1248,28 @@ button {
 
 .event-time {
   margin-top: 26px;
-  font-family: var(--sans);
+  font-family: var(--editorial);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   font-size: clamp(34px, 3.6vw, 50px);
-  font-weight: 520;
-  letter-spacing: -0.03em;
+  font-weight: 680;
+  letter-spacing: -0.025em;
   color: var(--ink-2);
 }
 
 .event-kind {
   margin-top: 2px;
   font-size: clamp(38px, 4.6vw, 68px);
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  line-height: 1;
+  font-weight: 760;
+  letter-spacing: -0.04em;
+  line-height: 0.98;
 }
 
 .event-who {
   font-size: clamp(54px, 7vw, 104px);
-  letter-spacing: -0.05em;
-  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.96;
   color: var(--accent);
 }
 
@@ -1211,11 +1303,11 @@ button {
 
 .ledger dd {
   font-size: clamp(22px, 2.2vw, 30px);
-  letter-spacing: -0.025em;
-  font-family: var(--rounded);
+  letter-spacing: -0.018em;
+  font-family: var(--editorial);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
-  font-weight: 600;
+  font-weight: 720;
 }
 
 .ledger .v-from,
@@ -1452,27 +1544,31 @@ button {
 
 .season-head dt {
   font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.1em;
+  font-weight: 640;
+  letter-spacing: 0.075em;
   text-transform: uppercase;
   color: var(--ink-3);
 }
 
 .season-head dd {
   margin-top: 4px;
-  font-family: var(--rounded);
+  font-family: var(--editorial);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   font-size: clamp(32px, 3.6vw, 50px);
-  font-weight: 620;
-  letter-spacing: -0.035em;
-  line-height: 1;
+  font-weight: 780;
+  letter-spacing: -0.028em;
+  line-height: 0.96;
 }
 
 .tables {
   margin-top: clamp(30px, 3.6vw, 50px);
   display: grid;
   gap: clamp(34px, 4vw, 54px);
+}
+
+.table-block {
+  min-width: 0;
 }
 
 .stat-table {
@@ -1496,8 +1592,8 @@ button {
   padding-top: 10px;
   padding-bottom: 8px;
   font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  font-weight: 640;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-3);
   border-bottom-color: var(--rule);
@@ -1523,8 +1619,8 @@ button {
 }
 
 .stat-table td.num {
-  font-family: var(--rounded);
-  font-weight: 560;
+  font-family: var(--editorial);
+  font-weight: 600;
 }
 
 .stat-table col,
@@ -1534,10 +1630,20 @@ button {
 }
 
 @media (max-width: 720px) {
-  .stat-table {
-    display: block;
+  .table-scroll {
+    width: 100%;
     overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .stat-table {
+    min-width: 760px;
     white-space: nowrap;
+  }
+
+  .stat-table--keepers {
+    min-width: 680px;
   }
 
   .stat-table tbody th {
@@ -1832,9 +1938,9 @@ button {
 
 .closing-name {
   font-size: clamp(34px, 4.6vw, 64px);
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1;
+  font-weight: 760;
+  letter-spacing: -0.042em;
+  line-height: 0.98;
 }
 
 .closing-line {
