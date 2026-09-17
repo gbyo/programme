@@ -89,7 +89,7 @@ struct SubstitutionStage: View {
                 .keyboardShortcut(.escape, modifiers: [])
             Button(commitTitle) { commit() }
                 .accessibilityIdentifier("sub.commit")
-                .buttonStyle(.borderedProminent)
+                .programmePrimaryAction()
                 .disabled(!canCommit)
                 .keyboardShortcut(.return, modifiers: [])
         }
@@ -134,35 +134,21 @@ struct SubstitutionStage: View {
                                     .font(.caption)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.7)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                             }
                             .frame(maxWidth: .infinity, minHeight: tileHeight)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .background(
-                            isSelected ? AnyShapeStyle(tint.opacity(0.18)) : AnyShapeStyle(Color(.secondarySystemFill)),
-                            in: RoundedRectangle(cornerRadius: 12)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(isSelected ? tint : .clear, lineWidth: 2)
-                        )
+                        .programmeSelectable(isSelected: isSelected, tint: tint)
                         .overlay(alignment: .topTrailing) {
                             if isSelected {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.caption)
-                                    .foregroundStyle(tint)
-                                    .padding(5)
-                            }
-                            if session.snapshot.activeGoalkeeper == player.id {
+                                    .padding(6)
+                            } else if session.snapshot.activeGoalkeeper == player.id {
                                 Text("GK")
                                     .font(.caption2.weight(.bold))
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(Color(.tertiarySystemFill), in: Capsule())
-                                    .padding(4)
-                                    .opacity(isSelected ? 0 : 1)
+                                    .foregroundStyle(.secondary)
+                                    .padding(6)
                             }
                         }
                         .accessibilityIdentifier(
@@ -198,18 +184,10 @@ struct SubstitutionStage: View {
                                     .lineLimit(1)
                             }
                             .frame(width: 84, height: 56)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .background(
-                            newGoalkeeper == player.id
-                                ? AnyShapeStyle(Color.accentColor.opacity(0.18))
-                                : AnyShapeStyle(Color(.secondarySystemFill)),
-                            in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(newGoalkeeper == player.id ? Color.accentColor : .clear, lineWidth: 2)
-                        )
+                        .programmeSelectable(
+                            isSelected: newGoalkeeper == player.id,
+                            shape: .roundedRectangle(radius: 10))
                         .accessibilityLabel("\(player.accessibilityLabel) in goal")
                     }
                 }
@@ -217,8 +195,6 @@ struct SubstitutionStage: View {
             }
             .scrollIndicators(.hidden)
         }
-        .padding(12)
-        .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var footer: some View {

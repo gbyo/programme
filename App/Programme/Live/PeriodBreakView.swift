@@ -42,7 +42,7 @@ struct PeriodBreakView: View {
                 Button("Back to Match") { dismiss() }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaBar(edge: .bottom) {
             HStack(spacing: 12) {
                 if session.needsReviewCount > 0 || !session.issues.needingReview.isEmpty {
                     Button {
@@ -62,7 +62,7 @@ struct PeriodBreakView: View {
                             .font(.headline)
                             .frame(maxWidth: .infinity, minHeight: 50)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .programmePrimaryAction(in: .control)
                 } else if session.canStartNextPeriod {
                     Button {
                         onContinue()
@@ -71,7 +71,7 @@ struct PeriodBreakView: View {
                             .font(.headline)
                             .frame(maxWidth: .infinity, minHeight: 50)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .programmePrimaryAction(in: .control)
                 } else {
                     Button {
                         onFinalize()
@@ -80,11 +80,9 @@ struct PeriodBreakView: View {
                             .font(.headline)
                             .frame(maxWidth: .infinity, minHeight: 50)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .programmePrimaryAction(in: .control)
                 }
             }
-            .padding(16)
-            .background(.bar)
         }
     }
 

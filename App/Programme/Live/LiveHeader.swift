@@ -15,28 +15,40 @@ struct LiveHeader: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .center, spacing: isCompact ? 12 : 22) {
-            scoreBlock
-            Spacer(minLength: 8)
-            clockBlock
-            controls
+        // The scoreboard is Programme's, the layer it sits in is Apple's: a
+        // floating glass bar above content that scrolls underneath. The score,
+        // the clock and the period rule keep their own typography; the surface
+        // they sit on is the system's Liquid Glass, not a hand-made imitation.
+        GlassEffectContainer(spacing: isCompact ? 8 : 14) {
+            HStack(alignment: .center, spacing: isCompact ? 8 : 14) {
+                HStack(alignment: .center, spacing: isCompact ? 12 : 22) {
+                    scoreBlock
+                    Spacer(minLength: 8)
+                    clockBlock
+                }
+                .padding(.horizontal, isCompact ? 14 : 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .glassEffect(.regular, in: .capsule)
+                .overlay(alignment: .bottomLeading) {
+                    // A quiet progress rule through the period. No numbers, no
+                    // chrome — it rides the bottom of the scoreboard, inset so it
+                    // stays inside the capsule rather than cutting across it.
+                    GeometryReader { proxy in
+                        Capsule()
+                            .fill(Color.accentColor)
+                            .frame(width: proxy.size.width * session.clock.periodProgress, height: 3)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    .padding(.horizontal, isCompact ? 14 : 20)
+                    .padding(.bottom, 6)
+                    .allowsHitTesting(false)
+                }
+
+                controls
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .overlay(alignment: .bottomLeading) {
-            // A quiet progress rule through the period. No numbers, no chrome.
-            GeometryReader { proxy in
-                Rectangle()
-                    .fill(Color.accentColor.opacity(0.5))
-                    .frame(width: proxy.size.width * session.clock.periodProgress, height: 2)
-            }
-            .frame(height: 2)
-            .allowsHitTesting(false)
-        }
     }
 
     private var scoreBlock: some View {
@@ -123,18 +135,13 @@ struct LiveHeader: View {
                 Button {
                     onStartPeriod()
                 } label: {
-                    Group {
-                        if isCompact {
-                            Image(systemName: "play.fill")
-                        } else {
-                            Label(startTitle, systemImage: "play.fill")
-                        }
+                    if isCompact {
+                        Image(systemName: "play.fill")
+                    } else {
+                        Label(startTitle, systemImage: "play.fill")
                     }
-                    .font(.headline)
-                    .frame(minHeight: 40)
-                    .padding(.horizontal, isCompact ? 8 : 6)
                 }
-                .buttonStyle(.borderedProminent)
+                .programmePrimaryAction(in: .control)
                 .disabled(!session.canStartNextPeriod || !session.hasStartingLineup)
                 .accessibilityIdentifier("live.startPeriod")
                 .accessibilityLabel(startTitle)
@@ -144,22 +151,16 @@ struct LiveHeader: View {
                     onToggleClock()
                 } label: {
                     Image(systemName: session.clock.isRunning ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                        .frame(width: 44, height: 40)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 .accessibilityIdentifier("live.toggleClock")
                 .accessibilityLabel(session.clock.isRunning ? "Stop the clock" : "Start the clock")
 
-                Button {
+                Button("End \(session.clock.periodShortLabel)") {
                     onEndPeriod()
-                } label: {
-                    Text("End \(session.clock.periodShortLabel)")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(minHeight: 40)
-                        .padding(.horizontal, 4)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .accessibilityIdentifier("live.endPeriod")
 
             case .awaitingFinalization, .finalized:
@@ -170,12 +171,16 @@ struct LiveHeader: View {
                 onMenu()
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.title3)
-                    .frame(width: 44, height: 40)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
             .accessibilityIdentifier("live.options")
             .accessibilityLabel("Match options")
         }
+        // One place decides how big a live control is, instead of every button
+        // carrying its own frame. `.extraLarge` keeps every target comfortably
+        // past 44pt and scales with Dynamic Type.
+        .controlSize(.extraLarge)
+        .font(.headline)
     }
 }

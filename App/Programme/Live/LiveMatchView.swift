@@ -63,26 +63,42 @@ struct LiveMatchView: View {
     var body: some View {
         GeometryReader { proxy in
             let mode = layoutMode(for: proxy.size.width)
-            VStack(spacing: 0) {
-                LiveHeader(
-                    session: session,
-                    isCompact: mode == .compact,
-                    onMenu: { activeSheet = .options },
-                    onToggleClock: { session.toggleClock() },
-                    onEndPeriod: { endPeriod() },
-                    onStartPeriod: { startPeriod() }
-                )
-
-                content(mode: mode)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                ScoringBar(
-                    session: session,
-                    onEdit: { editLastEvent() },
-                    onLog: { activeSheet = .eventLog },
-                    onReview: { activeSheet = .review }
-                )
-            }
+            content(mode: mode)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The two live bars are the control layer, so they are attached
+                // with the system's bar API rather than stacked as ordinary
+                // views. That is what gives them the current bar appearance, the
+                // scroll-edge treatment and the correct safe-area behaviour in
+                // every iPad window size.
+                .safeAreaBar(edge: .top) {
+                    LiveHeader(
+                        session: session,
+                        isCompact: mode == .compact,
+                        onMenu: { activeSheet = .options },
+                        onToggleClock: { session.toggleClock() },
+                        onEndPeriod: { endPeriod() },
+                        onStartPeriod: { startPeriod() }
+                    )
+                }
+                .safeAreaBar(edge: .bottom) {
+                    ScoringBar(
+                        session: session,
+                        onEdit: { editLastEvent() },
+                        onLog: { activeSheet = .eventLog },
+                        onReview: { activeSheet = .review }
+                    )
+                }
+                // A notice is transient, floating control-layer UI, so it sits
+                // above the content rather than inside either bar.
+                .overlay(alignment: .bottom) {
+                    if let notice = session.notice {
+                        NoticeBanner(notice: notice) { session.dismissNotice() }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 10)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
         }
         .background(Color(.systemBackground))
         .inspector(isPresented: $isShowingInspector) {
@@ -256,6 +272,7 @@ struct LiveMatchView: View {
             .padding(14)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .scrollEdgeEffectStyle(.hard, for: .all)
     }
 
     @ViewBuilder
@@ -634,13 +651,7 @@ struct PenaltyOutcomeStage: View {
             Label(title, systemImage: symbol)
                 .font(.title3.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 66)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(tint == .accentColor ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
-        .background(
-            tint == .accentColor
-                ? AnyShapeStyle(Color.accentColor.opacity(0.14)) : AnyShapeStyle(Color(.secondarySystemFill)),
-            in: RoundedRectangle(cornerRadius: 14))
+        .programmeTile(tint: tint, shape: .roundedRectangle(radius: 14))
     }
 }

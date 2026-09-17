@@ -19,9 +19,7 @@ struct MatchesView: View {
                         Button {
                             appModel.navigation.open(.match(match.matchID))
                         } label: {
-                            MatchRow(
-                                match: match,
-                                insets: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            MatchRow(match: match)
                         }
                         .buttonStyle(.plain)
                         .swipeActions(edge: .trailing) {
@@ -60,7 +58,7 @@ struct MatchesView: View {
                     Text("Create a match to prepare a lineup and start scoring.")
                 } actions: {
                     Button("Create a Match") { appModel.navigation.isPresentingNewMatch = true }
-                        .buttonStyle(.borderedProminent)
+                        .programmePrimaryAction()
                 }
             } else if filtered.isEmpty {
                 ContentUnavailableView.search(text: searchText)

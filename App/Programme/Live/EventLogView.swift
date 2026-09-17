@@ -69,7 +69,7 @@ struct EventLogView: View {
         .listStyle(.plain)
         .navigationTitle("Event Log")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .top) {
+        .safeAreaBar(edge: .top) {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(LogFilter.allCases) { option in
@@ -84,18 +84,17 @@ struct EventLogView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden)
-            .background(.bar)
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaBar(edge: .bottom) {
             TipView(timeTip)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
         }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
+            ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -227,21 +226,10 @@ struct FilterChip: View {
                     Text(badge)
                         .font(.caption2.weight(.bold))
                         .monospacedDigit()
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Programme.Palette.caution.opacity(0.25), in: Capsule())
                 }
             }
-            .padding(.horizontal, 12)
-            .frame(minHeight: 34)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(
-            isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.18)) : AnyShapeStyle(Color(.secondarySystemFill)),
-            in: Capsule()
-        )
-        .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+        .programmeSelectable(isSelected: isSelected, shape: .capsule)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }

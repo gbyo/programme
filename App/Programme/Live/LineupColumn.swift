@@ -3,6 +3,12 @@ import ProgrammeUI
 import SwiftUI
 
 /// A player as a tappable target. Sized for someone who is not looking at it.
+///
+/// This is a list row, not a card. It fills the row, takes its pressed and
+/// hovered appearance from the list, and shows selection with a row background
+/// and a check rather than a hand-drawn ring — so the whole column reads as one
+/// surface instead of a stack of floating tiles. The row is still tall enough to
+/// hit without looking, which is the part that is genuinely Programme's.
 struct PlayerTile: View {
     let player: PlayerSnapshot
     var minutes: Int?
@@ -12,7 +18,6 @@ struct PlayerTile: View {
     var badge: String?
     var perform: () -> Void
 
-    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @ScaledMetric(relativeTo: .body) private var height: CGFloat = Programme.Metrics.playerRowHeight
 
     var body: some View {
@@ -25,7 +30,7 @@ struct PlayerTile: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(player.displaySurname)
-                        .font(.body.weight(.medium))
+                        .font(.body.weight(isArmed ? .semibold : .medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     if let minutes {
@@ -41,9 +46,7 @@ struct PlayerTile: View {
                 if isGoalkeeper {
                     Text("GK")
                         .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color(.tertiarySystemFill), in: Capsule())
+                        .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
                 if let badge {
@@ -52,28 +55,27 @@ struct PlayerTile: View {
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 }
+                // Selection is never carried by colour alone.
+                if isArmed {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                }
             }
-            .padding(.horizontal, 10)
+            .opacity(isDimmed ? 0.6 : 1)
             .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
-            .contentShape(Rectangle())
+            .contentShape(.rect)
+            // The system's pointer highlight, rather than a bespoke hover state.
+            .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
-        .background(background, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(
-                    isArmed ? Color.accentColor : .clear,
-                    lineWidth: isArmed ? (differentiateWithoutColor ? 3 : 2) : 0)
-        )
-        .opacity(isDimmed ? 0.45 : 1)
+        .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14))
+        .listRowBackground(isArmed ? Color.accentColor.opacity(0.16) : nil)
         .accessibilityIdentifier("player.\(player.jerseyNumber.map(String.init) ?? player.displaySurname)")
         .accessibilityLabel(player.accessibilityLabel)
         .accessibilityValue(accessibilityValue)
         .accessibilityAddTraits(isArmed ? [.isSelected, .isButton] : .isButton)
-    }
-
-    private var background: some ShapeStyle {
-        isArmed ? AnyShapeStyle(Color.accentColor.opacity(0.16)) : AnyShapeStyle(Color(.secondarySystemFill))
     }
 
     private var accessibilityValue: String {
@@ -92,86 +94,82 @@ struct LineupColumn: View {
     var onSubstitute: () -> Void
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8, pinnedViews: [.sectionHeaders]) {
+        // A plain List rather than a hand-built scrolling stack: pinned section
+        // headers, separators, row highlighting, pointer hover and keyboard
+        // focus are all things the system already does well here.
+        List {
+            Section {
+                ForEach(session.onFieldPlayers) { player in
+                    PlayerTile(
+                        player: player,
+                        minutes: session.snapshot.player(player.id).minutesPlayed,
+                        isGoalkeeper: session.snapshot.activeGoalkeeper == player.id,
+                        isArmed: session.armedPlayer == player.id,
+                        badge: contributionBadge(for: player)
+                    ) {
+                        onSelect(player)
+                    }
+                }
+            } header: {
+                sectionHeader(
+                    "On Field", count: session.onFieldPlayers.count,
+                    expected: session.rules.playersPerSide)
+            }
+
+            Section {
+                ForEach(session.benchPlayers) { player in
+                    PlayerTile(
+                        player: player,
+                        minutes: minutesIfPlayed(player),
+                        isArmed: session.armedPlayer == player.id,
+                        isDimmed: true,
+                        badge: contributionBadge(for: player)
+                    ) {
+                        onSelect(player)
+                    }
+                }
+                if session.benchPlayers.isEmpty {
+                    Text("Every player is on the field.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                sectionHeader("Bench", count: session.benchPlayers.count, expected: nil)
+            }
+
+            if !session.dismissedPlayers.isEmpty {
                 Section {
-                    ForEach(session.onFieldPlayers) { player in
+                    ForEach(session.dismissedPlayers) { player in
                         PlayerTile(
                             player: player,
                             minutes: session.snapshot.player(player.id).minutesPlayed,
-                            isGoalkeeper: session.snapshot.activeGoalkeeper == player.id,
-                            isArmed: session.armedPlayer == player.id,
-                            badge: contributionBadge(for: player)
-                        ) {
-                            onSelect(player)
-                        }
-                    }
-                } header: {
-                    sectionHeader(
-                        "On Field", count: session.onFieldPlayers.count,
-                        expected: session.rules.playersPerSide)
-                }
-
-                Section {
-                    ForEach(session.benchPlayers) { player in
-                        PlayerTile(
-                            player: player,
-                            minutes: minutesIfPlayed(player),
-                            isArmed: session.armedPlayer == player.id,
                             isDimmed: true,
-                            badge: contributionBadge(for: player)
-                        ) {
-                            onSelect(player)
-                        }
-                    }
-                    if session.benchPlayers.isEmpty {
-                        Text("Every player is on the field.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
+                            badge: "SENT OFF"
+                        ) {}
+                            .disabled(true)
                     }
                 } header: {
-                    sectionHeader("Bench", count: session.benchPlayers.count, expected: nil)
-                }
-
-                if !session.dismissedPlayers.isEmpty {
-                    Section {
-                        ForEach(session.dismissedPlayers) { player in
-                            PlayerTile(
-                                player: player,
-                                minutes: session.snapshot.player(player.id).minutesPlayed,
-                                isDimmed: true,
-                                badge: "SENT OFF"
-                            ) {}
-                                .disabled(true)
-                        }
-                    } header: {
-                        sectionHeader("Sent Off", count: session.dismissedPlayers.count, expected: nil)
-                    }
+                    sectionHeader("Sent Off", count: session.dismissedPlayers.count, expected: nil)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 12)
         }
+        .listStyle(.plain)
         .scrollBounceBehavior(.basedOnSize)
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                Divider()
-                Button {
-                    onSubstitute()
-                } label: {
-                    Label("Substitution", systemImage: "arrow.left.arrow.right")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("lineup.substitution")
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+        // A firm edge rather than a soft fade: the score, the clock and the last
+        // event have to stay readable while the column scrolls behind them.
+        .scrollEdgeEffectStyle(.hard, for: .all)
+        .safeAreaBar(edge: .bottom) {
+            Button {
+                onSubstitute()
+            } label: {
+                Label("Substitution", systemImage: "arrow.left.arrow.right")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
-            .background(.bar)
+            .programmePrimaryAction(in: .control)
+            .controlSize(.extraLarge)
+            .accessibilityIdentifier("lineup.substitution")
+            .padding(.horizontal, 12)
         }
     }
 
@@ -202,9 +200,6 @@ struct LineupColumn: View {
                 .foregroundStyle(
                     expected != nil && count != expected ? Programme.Palette.caution : Color.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.bar)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             expected != nil ? "\(title), \(count) of \(expected!) players" : "\(title), \(count) players")

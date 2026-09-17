@@ -34,57 +34,57 @@ struct TodayView: View {
         }
     }
 
+    /// An inset-grouped List rather than a stack of hand-drawn cards: the
+    /// section headers, the row separators, the press highlight, pointer hover
+    /// and keyboard focus are all things the system already provides here.
     private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+        List {
+            Section {
                 header
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
 
-                if let live = liveMatch {
-                    SectionBox(title: "In Progress") {
-                        ResumeMatchCard(match: live) {
-                            Task { await appModel.openLiveSession(matchID: live.matchID) }
-                        }
-                    }
-                }
-
-                if let next = nextMatch {
-                    SectionBox(title: "Next Match") {
-                        NextMatchCard(match: next) {
-                            Task { await appModel.openLiveSession(matchID: next.matchID) }
-                        }
-                    }
-                } else if liveMatch == nil {
-                    SectionBox(title: "Next Match") {
-                        EmptyHint(
-                            title: "No match scheduled",
-                            message: "Create a match to prepare a lineup before kickoff.",
-                            actionTitle: "Create a Match"
-                        ) {
-                            appModel.navigation.isPresentingNewMatch = true
-                        }
-                    }
-                }
-
-                if !recentMatches.isEmpty {
-                    SectionBox(title: "Recent") {
-                        VStack(spacing: 0) {
-                            ForEach(recentMatches) { match in
-                                Button {
-                                    appModel.navigation.open(.match(match.matchID))
-                                } label: {
-                                    MatchRow(match: match)
-                                }
-                                .buttonStyle(.plain)
-                                if match.id != recentMatches.last?.id { Divider() }
-                            }
-                        }
+            if let live = liveMatch {
+                Section("In Progress") {
+                    ResumeMatchCard(match: live) {
+                        Task { await appModel.openLiveSession(matchID: live.matchID) }
                     }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 760, alignment: .leading)
-            .frame(maxWidth: .infinity)
+
+            if let next = nextMatch {
+                Section("Next Match") {
+                    NextMatchCard(match: next) {
+                        Task { await appModel.openLiveSession(matchID: next.matchID) }
+                    }
+                }
+            } else if liveMatch == nil {
+                Section("Next Match") {
+                    EmptyHint(
+                        title: "No match scheduled",
+                        message: "Create a match to prepare a lineup before kickoff.",
+                        actionTitle: "Create a Match"
+                    ) {
+                        appModel.navigation.isPresentingNewMatch = true
+                    }
+                }
+            }
+
+            if !recentMatches.isEmpty {
+                Section("Recent") {
+                    ForEach(recentMatches) { match in
+                        Button {
+                            appModel.navigation.open(.match(match.matchID))
+                        } label: {
+                            MatchRow(match: match)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
+        .listStyle(.insetGrouped)
     }
 
     private var header: some View {
@@ -168,9 +168,9 @@ struct ResumeMatchCard: View {
                     .frame(minHeight: 46)
                     .padding(.horizontal, 10)
             }
-            .buttonStyle(.borderedProminent)
+            .programmePrimaryAction()
         }
-        .padding(18)
+        .padding(.vertical, 6)
     }
 }
 
@@ -197,16 +197,15 @@ struct NextMatchCard: View {
                     .frame(minHeight: 46)
                     .padding(.horizontal, 10)
             }
-            .buttonStyle(.borderedProminent)
+            .programmePrimaryAction()
         }
-        .padding(18)
+        .padding(.vertical, 6)
     }
 }
 
 struct MatchRow: View {
     let match: MatchModel
-    /// Cards on Today draw their own inset; List rows already have one.
-    var insets = EdgeInsets(top: 12, leading: 18, bottom: 12, trailing: 18)
+    var insets = EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
 
     var body: some View {
         HStack(spacing: 14) {
@@ -280,11 +279,11 @@ struct EmptyHint: View {
             Text(message).font(.subheadline).foregroundStyle(.secondary)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(.borderedProminent)
+                    .programmePrimaryAction()
                     .padding(.top, 2)
             }
         }
-        .padding(18)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -302,7 +301,7 @@ struct FirstRunView: View {
             Text("Create your team to start keeping statistics. Everything stays on this iPad — no account, and nothing needed during a match except the iPad itself.")
         } actions: {
             Button("Create Your First Team") { isCreatingTeam = true }
-                .buttonStyle(.borderedProminent)
+                .programmePrimaryAction()
                 .controlSize(.large)
             Button("Explore with a Sample Team") {
                 isLoadingSample = true

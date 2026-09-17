@@ -16,25 +16,21 @@ struct ScoringBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 10) {
-            lastEvent
-            Spacer(minLength: 8)
-            actions
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .frame(minHeight: 62)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-        .overlay(alignment: .top) {
-            if let notice = session.notice {
-                NoticeBanner(notice: notice) { session.dismissNotice() }
+        // This bar floats above the workspace, so it is built the way the
+        // platform builds floating bars: Liquid Glass elements in a shared
+        // container, over content that scrolls underneath. Nothing here paints a
+        // material, a stroke or a rounded rectangle of its own.
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                lastEvent
                     .padding(.horizontal, 16)
-                    .offset(y: -50)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.vertical, 12)
+                    .glassEffect(.regular, in: .capsule)
+                Spacer(minLength: 8)
+                actions
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
+        .padding(.horizontal, 16)
         .animation(
             reduceMotion ? nil : .snappy(duration: 0.22), value: session.lastEventDescription?.id)
     }
@@ -95,55 +91,37 @@ struct ScoringBar: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
-            Button {
+            Button("Undo", systemImage: "arrow.uturn.backward") {
                 session.undo()
-            } label: {
-                Label("Undo", systemImage: "arrow.uturn.backward")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minHeight: 42)
-                    .padding(.horizontal, 6)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
             .accessibilityIdentifier("scoring.undo")
             .disabled(!session.canUndo)
             .keyboardShortcut("z", modifiers: .command)
 
             if session.canRedo {
-                Button {
+                Button("Redo", systemImage: "arrow.uturn.forward") {
                     session.redo()
-                } label: {
-                    Image(systemName: "arrow.uturn.forward")
-                        .frame(width: 40, height: 42)
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Redo")
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
             }
 
-            Button {
-                onEdit()
-            } label: {
-                Text("Edit")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minHeight: 42)
-                    .padding(.horizontal, 8)
-            }
-            .buttonStyle(.bordered)
-            .disabled(session.lastEventDescription == nil)
+            Button("Edit") { onEdit() }
+                .buttonStyle(.glass)
+                .disabled(session.lastEventDescription == nil)
 
-            Button {
-                onLog()
-            } label: {
-                Label("Event Log", systemImage: "list.bullet")
-                    .font(.subheadline.weight(.semibold))
-                    .labelStyle(.iconOnly)
-                    .frame(width: 44, height: 42)
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("scoring.eventLog")
-            .accessibilityLabel("Event log")
+            Button("Event Log", systemImage: "list.bullet") { onLog() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityIdentifier("scoring.eventLog")
 
             ReviewIndicator(count: session.needsReviewCount, issues: session.issues, action: onReview)
         }
+        .controlSize(.extraLarge)
+        .font(.subheadline.weight(.semibold))
     }
 }
 
@@ -161,18 +139,15 @@ struct ReviewIndicator: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: totalCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle")
-                    .font(.system(size: 14, weight: .semibold))
+            Label {
                 Text(totalCount > 0 ? "\(totalCount)" : "OK")
-                    .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
+            } icon: {
+                Image(systemName: totalCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle")
             }
-            .frame(minHeight: 42)
-            .padding(.horizontal, 12)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
         .tint(tint)
         .accessibilityIdentifier("scoring.review")
         .accessibilityLabel(
@@ -186,6 +161,12 @@ struct ReviewIndicator: View {
     }
 }
 
+/// A transient confirmation that floats over the workspace.
+///
+/// This is the one piece of Programme that genuinely belongs to the control
+/// layer above the content, so it uses the real Liquid Glass effect rather than
+/// a material and a hand-drawn ring pretending to be one. The tint carries the
+/// meaning; the glass carries the "this is temporary, the match is underneath".
 struct NoticeBanner: View {
     let notice: LiveNotice
     let dismiss: () -> Void
@@ -202,14 +183,20 @@ struct NoticeBanner: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(tint.opacity(0.4))
-        )
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .glassEffect(.regular.tint(glassTint), in: .capsule)
         .accessibilityElement(children: .combine)
+    }
+
+    /// Undo is deliberately untinted: taking something back should not read as
+    /// an alarm.
+    private var glassTint: Color? {
+        switch notice.kind {
+        case .confirmation: Programme.Palette.confirmed
+        case .undo: nil
+        case .warning: Programme.Palette.caution
+        }
     }
 
     private var symbolName: String {
@@ -220,11 +207,4 @@ struct NoticeBanner: View {
         }
     }
 
-    private var tint: Color {
-        switch notice.kind {
-        case .confirmation: Programme.Palette.confirmed
-        case .undo: .secondary
-        case .warning: Programme.Palette.caution
-        }
-    }
 }

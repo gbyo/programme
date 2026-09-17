@@ -24,21 +24,25 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: navigation.isShowingLiveMatch)
-        .safeAreaInset(edge: .top) {
-            // An inset rather than an overlay: an unfinished match is important
-            // enough to move the interface down rather than cover it.
+        // A system bar rather than a hand-drawn card: an unfinished match is
+        // important enough to move the interface down rather than cover it, and
+        // the bar's own background is the one the platform wants here.
+        .safeAreaBar(edge: .top) {
             if !appModel.recoveryCandidates.isEmpty && !navigation.isShowingLiveMatch {
                 RecoveryBanner()
                     .padding(.horizontal)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
             }
         }
-        .alert(item: $navigation.errorToShow) { error in
-            Alert(
-                title: Text(error.title),
-                message: Text(error.message),
-                dismissButton: .default(Text("OK")))
+        .alert(
+            navigation.errorToShow?.title ?? "",
+            isPresented: Binding(
+                get: { navigation.errorToShow != nil },
+                set: { if !$0 { navigation.errorToShow = nil } }),
+            presenting: navigation.errorToShow
+        ) { _ in
+            Button("OK", role: .cancel) { navigation.errorToShow = nil }
+        } message: { error in
+            Text(error.message)
         }
         .sheet(isPresented: $navigation.isPresentingNewMatch) {
             NewMatchView()
@@ -183,14 +187,9 @@ struct RecoveryBanner: View {
                     Button("Resume") {
                         Task { await appModel.openLiveSession(matchID: candidate.matchID) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .programmePrimaryAction(in: .control)
                 }
-                .padding(14)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(.separator.opacity(0.6))
-                )
+                .padding(.vertical, 4)
             }
         }
         .sheet(item: $selected) { candidate in

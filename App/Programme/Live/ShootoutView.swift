@@ -28,10 +28,7 @@ struct ShootoutView: View {
     private var score: SidePair<Int> { session.snapshot.shootoutScore }
 
     var body: some View {
-        VStack(spacing: 0) {
-            scoreboard
-            Divider()
-            List {
+        List {
                 Section {
                     Picker("Taker", selection: $pendingSide) {
                         Text(session.descriptor.teamShortName).tag(TeamSide.us)
@@ -51,7 +48,7 @@ struct ShootoutView: View {
                                 .font(.headline)
                                 .frame(maxWidth: .infinity, minHeight: 52)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .programmePrimaryAction()
                         .disabled(pendingSide == .us && pendingTaker == nil)
 
                         Button {
@@ -108,7 +105,7 @@ struct ShootoutView: View {
                     }
                 }
             }
-        }
+        .safeAreaBar(edge: .top) { scoreboard }
         .navigationTitle("Shootout")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -131,7 +128,6 @@ struct ShootoutView: View {
         }
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
-        .background(.bar)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "Shootout, \(session.descriptor.teamShortName) \(score.us), \(session.descriptor.opponentShortName) \(score.opponent)"
@@ -154,19 +150,10 @@ struct ShootoutView: View {
                                 .lineLimit(1)
                         }
                         .frame(width: 84, height: 58)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .background(
-                        pendingTaker == player.id
-                            ? AnyShapeStyle(Color.accentColor.opacity(0.18))
-                            : AnyShapeStyle(Color(.secondarySystemFill)),
-                        in: RoundedRectangle(cornerRadius: 10)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(pendingTaker == player.id ? Color.accentColor : .clear, lineWidth: 2)
-                    )
+                    .programmeSelectable(
+                        isSelected: pendingTaker == player.id,
+                        shape: .roundedRectangle(radius: 10))
                     .accessibilityLabel(player.accessibilityLabel)
                     .accessibilityAddTraits(pendingTaker == player.id ? .isSelected : [])
                 }

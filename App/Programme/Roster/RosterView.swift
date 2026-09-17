@@ -48,7 +48,7 @@ struct RosterView: View {
                     Text("Add players to begin preparing matches. You can type them in, import a CSV, or drag a roster file here.")
                 } actions: {
                     Button("Add a Player") { isAddingPlayer = true }
-                        .buttonStyle(.borderedProminent)
+                        .programmePrimaryAction()
                     Button("Import a Roster") { isImporting = true }
                 }
             } else if filtered.isEmpty {

@@ -71,7 +71,7 @@ struct FinalizeView: View {
                 Button("Not Yet") { dismiss() }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaBar(edge: .bottom) {
             VStack(spacing: 8) {
                 if !blockingIssues.isEmpty {
                     Label(
@@ -88,11 +88,9 @@ struct FinalizeView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 50)
                 }
-                .buttonStyle(.borderedProminent)
+                .programmePrimaryAction(in: .control)
                 .disabled(!blockingIssues.isEmpty)
             }
-            .padding(16)
-            .background(.bar)
         }
         .confirmationDialog(
             "Finalize this match?", isPresented: $isConfirming, titleVisibility: .visible
