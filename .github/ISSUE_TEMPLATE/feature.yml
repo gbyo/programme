@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a capability that is not primarily a live-scoring UX fix.
+title: "Feature: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What task or limitation motivates this feature?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe what success looks like from the user's perspective.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Match setup
+        - Roster / season management
+        - Live scoring
+        - Statistics / analysis
+        - Import / export
+        - MaxPreps compatibility
+        - Widgets / Live Activities / App Intents
+        - Accessibility
+        - Developer tooling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or compatibility concerns
+      description: Note offline requirements, export compatibility, Apple-platform behavior, or migration concerns if relevant.

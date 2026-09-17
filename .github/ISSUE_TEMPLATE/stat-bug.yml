@@ -1,0 +1,63 @@
+name: Stat / derivation bug
+description: A score, minute total, goalkeeper line, validation result, or other derived statistic is wrong.
+title: "Stats: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Stat correctness bugs are high priority. Programme derives statistics from events, so the most useful report is the smallest event sequence that produces the wrong result.
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Match scenario
+      description: List the relevant events in order, including period/time when it matters.
+      placeholder: |
+        00:00 Starting lineup …
+        20:00 #7 out, #12 in
+        35:00 #12 out, #7 in
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Programme calculated
+      description: What value or validation result did Programme produce?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What should the derived result be, and why?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Score / result
+        - Playing time
+        - Goal / assist / shot
+        - Goalkeeping
+        - Cards / discipline
+        - Shootout
+        - Season aggregation
+        - Validation
+        - Tracked vs not tracked
+        - Exported statistics
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: attachment
+    attributes:
+      label: Reproduction data
+      description: If possible, attach a minimal .programme archive or sanitized event sequence. Do not attach real student personal data.
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Regression expectation
+      options:
+        - label: This should receive a ProgrammeCore regression test when fixed.
+          required: true

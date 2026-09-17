@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: programme-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect UI-impacting changes
+    runs-on: ubuntu-latest
+    outputs:
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          changed="$(git diff --name-only "$base" "$GITHUB_SHA")"
+          printf '%s\n' "$changed"
+
+          if grep -Eq '^(App/|Packages/ProgrammeKit/Sources/|project\.yml$|scripts/|Mintfile$|Brewfile$|\.swift-format$|\.github/workflows/ci\.yml$)' <<< "$changed"; then
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ui=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  package-tests:
+    name: Package tests
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Swift version
+        run: swift --version
+      - name: Run ProgrammeKit tests
+        run: swift test --package-path Packages/ProgrammeKit
+
+  formatting:
+    name: Swift formatting
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check formatting
+        run: bash scripts/format.sh --check
+
+  build:
+    name: App + widget build
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned developer tools
+        run: |
+          brew bundle --file Brewfile
+          mint bootstrap --mintfile Mintfile
+      - name: Generate project
+        run: bash scripts/xcodegen.sh generate --spec project.yml
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Programme.xcodeproj \
+            -scheme Programme \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+  ui-tests:
+    name: iPad UI tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.ui == 'true'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned developer tools
+        run: |
+          brew bundle --file Brewfile
+          mint bootstrap --mintfile Mintfile
+      - name: Run UI tests
+        env:
+          PROGRAMME_XCRESULT_PATH: ${{ runner.temp }}/ProgrammeUITests.xcresult
+        run: bash scripts/test-ui.sh
+      - name: Upload test result on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ProgrammeUITests-xcresult
+          path: ${{ runner.temp }}/ProgrammeUITests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,165 @@
+# Architecture
+
+Programme is built around one rule:
+
+> **Events are truth. Statistics are derived.**
+
+A match is an ordered event log plus match metadata and rules. Score, minutes, player lines, goalkeeper lines, season totals, validation results, and exports are projections of that log. No view or database row independently owns an official total.
+
+## Dependency direction
+
+```text
+ProgrammeCore                    no app-framework dependency
+    ↑
+ProgrammePersistence             SwiftData + recovery journal
+ProgrammeExport                  archive/import/export
+ProgrammeUI                      reusable platform UI
+    ↑
+Programme app + widget extension composition and presentation
+```
+
+`Packages/ProgrammeKit/Package.swift` enforces the library boundaries.
+
+### ProgrammeCore
+
+Owns the deterministic domain:
+
+- `MatchEvent` and event payloads
+- `MatchEngine`
+- `LineupEngine`
+- `StatEngine`
+- `ValidationEngine`
+- `SeasonEngine`
+- match rules and match time
+- stat profiles and completeness
+- value snapshots used across boundaries
+
+It must remain testable without SwiftUI, SwiftData, a simulator, or network access.
+
+### ProgrammePersistence
+
+Owns durable app storage:
+
+- SwiftData models and schema
+- `@ModelActor` store
+- model ↔ domain mapping
+- recovery journal
+- denormalized list-screen caches that are never authoritative
+
+SwiftData model instances stay inside this layer. Actor boundaries use stable IDs and `Sendable` value types.
+
+### ProgrammeExport
+
+Owns portable representations:
+
+- `.programme` archives
+- CSV
+- PDF/stat sheets
+- MaxPreps entry summary
+- roster import
+
+Exporters consume verified domain snapshots rather than querying SwiftData or recalculating statistics themselves.
+
+### ProgrammeUI
+
+Owns reusable Apple-platform presentation pieces, including the vector pitch, visual tokens, Live Activity attributes, and statistic rendering helpers.
+
+## Event model
+
+A `MatchEvent` has stable identity, match time, stable sequence ordering, recorded wall-clock date, revision/audit information, and a closed event payload.
+
+Important properties:
+
+- A goal is a shot outcome, not a second unrelated counter-changing event.
+- A save is an opponent shot outcome.
+- Substitutions change the lineup timeline; playing time is calculated from intervals.
+- Unknown attribution is represented explicitly and can be resolved later.
+- Soft deletion/revisions preserve the audit trail and make undo deterministic.
+- Clock adjustments are events and do not silently rewrite already-recorded match facts.
+
+## Command flow
+
+The live app follows this shape:
+
+```text
+SwiftUI gesture / keyboard action
+    ↓
+LiveMatchSession
+    ↓
+MatchCommand
+    ↓
+MatchEngine performs validation and produces effects
+    ↓
+match context updates immediately
+    ↓
+recovery journal is appended/flushed
+    ↓
+SwiftData write is queued through MatchStore
+    ↓
+StatEngine + ValidationEngine derive a new snapshot
+    ↓
+UI renders the new state
+```
+
+The UI never repairs a total after an edit. If an earlier substitution changes time, the event history changes and `LineupEngine` produces a different set of intervals.
+
+## Determinism
+
+For the same match context and event sequence, Programme must always derive the same result.
+
+Do not derive official output from:
+
+- dictionary or set enumeration order
+- task scheduling order
+- wall-clock timing outside the explicit clock model
+- SwiftData fetch order without an explicit sort
+- UI state
+
+When a tie needs a rule, define a stable tie-break and test repeated derivation.
+
+## Statistics
+
+`StatEngine` is the only authority for official derived statistics.
+
+Examples:
+
+- points = `goals × 2 + assists`
+- SOG comes from shot outcomes
+- saves and goals allowed determine goalkeeper SOG faced
+- save percentage is undefined when a keeper faced no SOG
+- GAA scales goals allowed by that match's configured regulation length
+- game-winning goal is derived from the chronological scoring sequence
+
+Ratios and totals are outputs, not stored facts.
+
+## Tracked state
+
+Programme records which categories a match was tracking. A statistic is therefore not just an integer; it can be a count/rate, not applicable, or not tracked.
+
+This distinction must survive every layer:
+
+```text
+Match event/profile
+→ snapshot
+→ UI
+→ season aggregation
+→ CSV/PDF/archive/export
+```
+
+Never turn `not tracked` into numeric zero.
+
+## Validation
+
+`ValidationEngine` reports issues without becoming a second rule engine. It checks coherence of the recorded facts, such as lineup size, attribution to benched players, goalkeeper state, unresolved attribution, period boundaries, re-entry rules, and inconsistent event relationships.
+
+Normal scoring is not interrupted for review-level issues. Blocking validation matters at clean finalization.
+
+## Persistence notes
+
+Event payloads are stored in a versioned form while sortable/filterable fields are denormalized into explicit columns. Match list caches may contain score/event/review summaries, but those values are convenience caches refreshed from authoritative derivation.
+
+A played match freezes the roster identity it was played with so later roster edits do not rewrite history.
+
+## Testing rule
+
+When changing a domain rule, construct the smallest event sequence that demonstrates it and test the derived output in `ProgrammeCoreTests`. Tests for official statistics should not require a simulator.

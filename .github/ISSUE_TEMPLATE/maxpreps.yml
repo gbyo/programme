@@ -1,0 +1,42 @@
+name: MaxPreps compatibility
+description: MaxPreps terminology, transcription order, or a future official supplier format is incompatible with Programme output.
+title: "MaxPreps: "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Entry Summary field/column mismatch
+        - Missing statistic
+        - Statistic definition mismatch
+        - Manual Team Admin workflow friction
+        - Official supplier format/specification
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current Programme output
+    validations:
+      required: true
+  - type: textarea
+    id: maxpreps
+    attributes:
+      label: MaxPreps behavior or requirement
+      description: Link to public documentation or describe the Team Admin field/order. Do not include account credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / example
+      description: Sanitized screenshots or sample values are helpful.
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Integration boundary
+      options:
+        - label: This report does not depend on scraping or inventing an undocumented MaxPreps API.
+          required: true

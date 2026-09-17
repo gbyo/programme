@@ -1,0 +1,42 @@
+name: Import / export problem
+description: A .programme archive, roster import, CSV/PDF, or MaxPreps summary is wrong or cannot be used.
+title: "Import/export: "
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - .programme archive import/export
+        - Roster CSV/paste import
+        - Box score CSV
+        - Season totals CSV
+        - PDF/stat sheet
+        - MaxPreps Entry Summary
+        - Share/Files/Transferable behavior
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include a minimal sanitized input/example when possible. Do not attach real student personal data.
+  - type: checkboxes
+    id: semantics
+    attributes:
+      label: Data semantics checked
+      options:
+        - label: I checked whether the problem involves a tracked zero versus a category that was not tracked.
