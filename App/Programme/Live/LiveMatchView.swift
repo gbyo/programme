@@ -61,48 +61,52 @@ struct LiveMatchView: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let mode = layoutMode(for: proxy.size.width)
-            content(mode: mode)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // The two live bars are the control layer, so they are attached
-                // with the system's bar API rather than stacked as ordinary
-                // views. That is what gives them the current bar appearance, the
-                // scroll-edge treatment and the correct safe-area behaviour in
-                // every iPad window size.
-                .safeAreaBar(edge: .top) {
-                    LiveHeader(
-                        session: session,
-                        isCompact: mode == .compact,
-                        onMenu: { activeSheet = .options },
-                        onToggleClock: { session.toggleClock() },
-                        onEndPeriod: { endPeriod() },
-                        onStartPeriod: { startPeriod() }
-                    )
-                }
-                .safeAreaBar(edge: .bottom) {
-                    ScoringBar(
-                        session: session,
-                        isCompact: mode == .compact,
-                        onSubstitute: beginSubstitution,
-                        onEdit: { editLastEvent() },
-                        onLog: { activeSheet = .eventLog },
-                        onReview: { activeSheet = .review }
-                    )
-                }
-                // A notice is transient, floating control-layer UI, so it sits
-                // above the content rather than inside either bar.
-                .overlay(alignment: .bottom) {
-                    if let notice = session.notice {
-                        NoticeBanner(notice: notice) { session.dismissNotice() }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 10)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+        // A navigation container so the bottom strip can be a real system
+        // toolbar. The navigation bar itself is hidden: Programme's scoreboard
+        // is far taller than one and must not be squeezed into a title.
+        NavigationStack {
+            GeometryReader { proxy in
+                let mode = layoutMode(for: proxy.size.width)
+                content(mode: mode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // The scoreboard is genuinely custom bar content rather than
+                    // a set of toolbar items, so it uses the system's custom-bar
+                    // API — which still gives it the scroll-edge treatment and
+                    // the right safe area in every iPad window size.
+                    .safeAreaBar(edge: .top) {
+                        LiveHeader(
+                            session: session,
+                            isCompact: mode == .compact,
+                            onMenu: { activeSheet = .options },
+                            onToggleClock: { session.toggleClock() },
+                            onEndPeriod: { endPeriod() },
+                            onStartPeriod: { startPeriod() }
+                        )
                     }
-                }
-                .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
+                    // A notice is transient, floating control-layer UI, so it
+                    // sits above the content rather than inside either bar.
+                    .overlay(alignment: .bottom) {
+                        if let notice = session.notice {
+                            NoticeBanner(notice: notice) { session.dismissNotice() }
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 10)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
+            }
+            .background(Color(.systemBackground))
+            .toolbarVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ScoringToolbar(
+                    session: session,
+                    onSubstitute: beginSubstitution,
+                    onEdit: { editLastEvent() },
+                    onLog: { activeSheet = .eventLog },
+                    onReview: { activeSheet = .review }
+                )
+            }
         }
-        .background(Color(.systemBackground))
         .inspector(isPresented: $isShowingInspector) {
             NavigationStack {
                 MatchStatsInspector(session: session) {
