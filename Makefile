@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: bootstrap doctor generate open test test-ui build format lint verify verify-fast clean
+.PHONY: bootstrap doctor generate open test test-ui build format lint lint-all verify verify-fast clean
 
 bootstrap:
 	bash scripts/bootstrap.sh
@@ -32,6 +32,9 @@ format:
 	bash scripts/format.sh
 
 lint:
+	bash scripts/format.sh --check-changed
+
+lint-all:
 	bash scripts/format.sh --check
 
 verify:

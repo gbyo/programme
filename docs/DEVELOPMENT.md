@@ -41,9 +41,10 @@ make open          generate and open the project
 make test          run the fast ProgrammeKit package tests
 make test-ui       run ProgrammeUITests on an available iPad simulator
 make build         unsigned app + widget simulator build
-make format        rewrite tracked Swift files with swift-format
-make lint          check Swift formatting without modifying files
-make verify-fast   doctor + formatting + package tests + app/widget build
+make format        rewrite all tracked Swift files with swift-format
+make lint          check Swift files changed from the development base
+make lint-all      audit the entire Swift tree without modifying it
+make verify-fast   doctor + changed-file formatting + package tests + app/widget build
 make verify        full gate, including iPad UI tests
 make clean         remove generated/local build artifacts
 ```
@@ -98,19 +99,27 @@ Keep the XcodeGen values synchronized when deliberately upgrading it.
 
 Programme uses the `swift-format` binary bundled with Xcode and `.swift-format` at the repo root.
 
-Apply formatting:
+Programme adopted this policy after the first implementation was already written. To avoid mixing a whole-repository style rewrite into unrelated functional changes, formatting is enforced as a ratchet: **every Swift file touched by new work must conform**. Existing untouched files can be normalized separately over time.
+
+Apply formatting to the entire tracked Swift tree:
 
 ```bash
 make format
 ```
 
-Check only:
+Check the Swift files changed from your development base, including staged and unstaged edits:
 
 ```bash
 make lint
 ```
 
-The configuration is intentionally conservative. Formatting policy changes that cause broad source churn should be isolated from behavioral changes.
+Audit the entire current tree without rewriting it:
+
+```bash
+make lint-all
+```
+
+CI uses the same changed-file rule against the pull request base (or the previous `main` commit for pushes). Formatting policy changes that cause broad source churn should be isolated from behavioral changes.
 
 ## Package/domain tests
 
@@ -157,7 +166,7 @@ CI uses that path and uploads the `.xcresult` only when the UI-test job fails.
 Jobs:
 
 - **Package tests** — fast ProgrammeKit suite
-- **Swift formatting** — `swift-format lint --strict`
+- **Swift formatting** — changed Swift files must satisfy `swift-format lint --strict`
 - **App + widget build** — generate the Xcode project and build unsigned for the simulator
 - **iPad UI tests** — always on `main`; on PRs only when app/source/project/tooling paths that can affect behavior changed
 

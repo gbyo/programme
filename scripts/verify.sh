@@ -15,8 +15,8 @@ fi
 printf '==> Environment\n'
 bash "$ROOT/scripts/doctor.sh"
 
-printf '\n==> Formatting\n'
-bash "$ROOT/scripts/format.sh" --check
+printf '\n==> Formatting (changed Swift files)\n'
+bash "$ROOT/scripts/format.sh" --check-changed
 
 printf '\n==> Package tests\n'
 swift test --package-path Packages/ProgrammeKit
