@@ -2,82 +2,99 @@ import ProgrammeCore
 import ProgrammeUI
 import SwiftUI
 
-/// The bottom strip: what was just recorded, and how to fix it.
+/// The bottom strip: match management, what was just recorded, and how to fix it.
+///
+/// This is a real system toolbar rather than a bar Programme draws. `.bottomBar`
+/// items already get Liquid Glass, their grouping (items either side of a
+/// `ToolbarSpacer` sit on separate glass), their sizing, their narrow-width
+/// adaptation and their scroll-edge behaviour from the system — so there is no
+/// `GlassEffectContainer` here, no `glassEffect`, no `buttonBorderShape`, and no
+/// hand-written compact layout to keep in sync.
 ///
 /// Undo is a single tap and never asks for confirmation — deleting an event you
 /// recorded two seconds ago is a correction, not a destructive act.
-struct ScoringBar: View {
+struct ScoringToolbar: ToolbarContent {
     let session: LiveMatchSession
-    let isCompact: Bool
     var onSubstitute: () -> Void
     var onEdit: () -> Void
     var onLog: () -> Void
     var onReview: () -> Void
 
+    var body: some ToolbarContent {
+        // The one primary action down here, so it gets its own glass.
+        ToolbarItem(placement: .bottomBar) {
+            Button(action: onSubstitute) {
+                Label("Substitution", systemImage: "arrow.left.arrow.right")
+            }
+            .programmePrimaryAction(in: .control)
+            .accessibilityIdentifier("scoring.substitution")
+            .keyboardShortcut("b", modifiers: [])
+        }
+
+        ToolbarSpacer(.fixed, placement: .bottomBar)
+
+        // Status, not a control, so it opts out of the shared control background
+        // rather than drawing its own capsule to look different.
+        ToolbarItem(placement: .bottomBar) {
+            LastEventSummary(session: session)
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+
+        // Correcting what was just recorded: one group, because undo, redo and
+        // edit are the same job.
+        ToolbarItemGroup(placement: .bottomBar) {
+            Button("Undo", systemImage: "arrow.uturn.backward") {
+                session.undo()
+            }
+            .disabled(!session.canUndo)
+            .keyboardShortcut("z", modifiers: .command)
+            .accessibilityIdentifier("scoring.undo")
+
+            if session.canRedo {
+                Button("Redo", systemImage: "arrow.uturn.forward") {
+                    session.redo()
+                }
+                .labelStyle(.iconOnly)
+            }
+
+            Button("Edit", systemImage: "pencil") { onEdit() }
+                .accessibilityLabel("Edit last event")
+                .disabled(session.lastEventDescription == nil)
+        }
+
+        ToolbarSpacer(.fixed, placement: .bottomBar)
+
+        // Looking at the record as a whole: a different job, so its own glass.
+        ToolbarItemGroup(placement: .bottomBar) {
+            Button("Event Log", systemImage: "list.bullet") { onLog() }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("scoring.eventLog")
+
+            ReviewIndicator(
+                count: session.needsReviewCount, issues: session.issues, action: onReview)
+        }
+    }
+}
+
+/// What was recorded a moment ago, so the scorer can confirm it landed without
+/// opening the log.
+struct LastEventSummary: View {
+    let session: LiveMatchSession
+
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // One shared control layer keeps match management, live feedback and
-        // correction tools reading as a single dock. Only the controls use
-        // glass; the recent event is a quiet status chip within that dock.
-        GlassEffectContainer(spacing: 10) {
-            if isCompact {
-                compactDock
-            } else {
-                regularDock
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .animation(
-            reduceMotion ? nil : .snappy(duration: 0.22), value: session.lastEventDescription?.id)
-    }
-
-    private var regularDock: some View {
-        HStack(spacing: 12) {
-            substitutionButton
-            lastEventChip
-                .frame(maxWidth: .infinity, alignment: .leading)
-            actions(showLabels: true)
-        }
-    }
-
-    private var compactDock: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                substitutionButton
-                    .fixedSize(horizontal: true, vertical: false)
-                lastEventChip
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            actions(showLabels: false)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-    }
-
-    private var substitutionButton: some View {
-        Button(action: onSubstitute) {
-            Label("Substitution", systemImage: "arrow.left.arrow.right")
-                .font(.subheadline.weight(.semibold))
-        }
-        .programmePrimaryAction(in: .control)
-        .controlSize(.extraLarge)
-        .accessibilityIdentifier("scoring.substitution")
-        .keyboardShortcut("b", modifiers: [])
-    }
-
-    private var lastEventChip: some View {
-        lastEvent
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.secondary.opacity(0.08), in: .capsule)
+        content
+            .animation(
+                reduceMotion ? nil : .snappy(duration: 0.22),
+                value: session.lastEventDescription?.id)
     }
 
     @ViewBuilder
-    private var lastEvent: some View {
+    private var content: some View {
         if let description = session.lastEventDescription {
             HStack(spacing: 10) {
                 Image(systemName: description.symbolName)
@@ -86,7 +103,6 @@ struct ScoringBar: View {
                         description.category == .goal && !differentiateWithoutColor
                             ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary)
                     )
-                    .frame(width: 22)
                     .accessibilityHidden(true)
 
                 Text(description.timeText)
@@ -97,12 +113,12 @@ struct ScoringBar: View {
                 Text(description.title)
                     .font(.subheadline.weight(.semibold))
 
-                if !isCompact, !description.detail.isEmpty {
+                if !description.detail.isEmpty {
                     Text(description.detail)
                         .font(.subheadline)
                         .lineLimit(1)
                 }
-                if !isCompact, let secondary = description.secondaryDetail {
+                if let secondary = description.secondaryDetail {
                     Text(secondary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -120,6 +136,7 @@ struct ScoringBar: View {
                         .labelStyle(.titleAndIcon)
                 }
             }
+            .lineLimit(1)
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("scoring.lastEvent")
             .accessibilityLabel("Last event: \(description.accessibilityLabel)")
@@ -128,57 +145,6 @@ struct ScoringBar: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private func actions(showLabels: Bool) -> some View {
-        HStack(spacing: showLabels ? 8 : 6) {
-            Button {
-                session.undo()
-            } label: {
-                Label {
-                    if showLabels { Text("Undo") }
-                } icon: {
-                    Image(systemName: "arrow.uturn.backward")
-                }
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(showLabels ? .capsule : .circle)
-            .accessibilityIdentifier("scoring.undo")
-            .accessibilityLabel("Undo")
-            .disabled(!session.canUndo)
-            .keyboardShortcut("z", modifiers: .command)
-
-            if session.canRedo {
-                Button("Redo", systemImage: "arrow.uturn.forward") {
-                    session.redo()
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-            }
-
-            Button(action: onEdit) {
-                Label {
-                    if showLabels { Text("Edit") }
-                } icon: {
-                    Image(systemName: "pencil")
-                }
-            }
-                .buttonStyle(.glass)
-                .buttonBorderShape(showLabels ? .capsule : .circle)
-                .accessibilityLabel("Edit last event")
-                .disabled(session.lastEventDescription == nil)
-
-            Button("Event Log", systemImage: "list.bullet") { onLog() }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityIdentifier("scoring.eventLog")
-
-            ReviewIndicator(count: session.needsReviewCount, issues: session.issues, action: onReview)
-        }
-        .controlSize(showLabels ? .extraLarge : .regular)
-        .font(.subheadline.weight(.semibold))
     }
 }
 
@@ -203,8 +169,7 @@ struct ReviewIndicator: View {
                 Image(systemName: totalCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle")
             }
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.capsule)
+        .labelStyle(.titleAndIcon)
         .tint(tint)
         .accessibilityIdentifier("scoring.review")
         .accessibilityLabel(
