@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Programme behaves incorrectly or crashes.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. For incorrect soccer statistics, use the **Stat / derivation bug** form instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the behavior you saw and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Tap …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Programme version / commit
+      placeholder: 0.1.0 or commit SHA
+  - type: input
+    id: device
+    attributes:
+      label: Device and OS
+      placeholder: iPad Pro 11-inch (M5), iPadOS 27.0
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots, logs, or exports
+      description: Attach anything that makes the failure easier to reproduce. Remove real student data first.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials and real student/player personal data from anything attached.
+          required: true
