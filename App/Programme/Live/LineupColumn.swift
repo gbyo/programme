@@ -15,6 +15,10 @@ struct PlayerTile: View {
     var isGoalkeeper: Bool = false
     var isArmed: Bool = false
     var isDimmed: Bool = false
+    /// Whether tapping this row arms the player for the next action. Bench rows
+    /// stay readable and stay in the list, but ordinary live play cannot be
+    /// credited to someone who is not on the field.
+    var isArmable: Bool = true
     var badge: String?
     var perform: () -> Void
 
@@ -75,12 +79,17 @@ struct PlayerTile: View {
         .accessibilityIdentifier("player.\(player.jerseyNumber.map(String.init) ?? player.displaySurname)")
         .accessibilityLabel(player.accessibilityLabel)
         .accessibilityValue(accessibilityValue)
+        .accessibilityHint(
+            isArmable
+                ? "" : "On the bench. Use Substitution to bring them on, or More for a card."
+        )
         .accessibilityAddTraits(isArmed ? [.isSelected, .isButton] : .isButton)
     }
 
     private var accessibilityValue: String {
         var parts: [String] = []
         if isGoalkeeper { parts.append("goalkeeper") }
+        if !isArmable { parts.append("on the bench") }
         if let minutes { parts.append("\(minutes) minutes played") }
         if isArmed { parts.append("selected") }
         return parts.joined(separator: ", ")
@@ -120,8 +129,8 @@ struct LineupColumn: View {
                     PlayerTile(
                         player: player,
                         minutes: minutesIfPlayed(player),
-                        isArmed: session.armedPlayer == player.id,
                         isDimmed: true,
+                        isArmable: false,
                         badge: contributionBadge(for: player)
                     ) {
                         onSelect(player)
@@ -143,9 +152,10 @@ struct LineupColumn: View {
                             player: player,
                             minutes: session.snapshot.player(player.id).minutesPlayed,
                             isDimmed: true,
+                            isArmable: false,
                             badge: "SENT OFF"
                         ) {}
-                            .disabled(true)
+                        .disabled(true)
                     }
                 } header: {
                     sectionHeader("Sent Off", count: session.dismissedPlayers.count, expected: nil)
@@ -154,10 +164,9 @@ struct LineupColumn: View {
         }
         .listStyle(.plain)
         .scrollBounceBehavior(.basedOnSize)
-        // The shared scoring dock now owns the lower control layer. A soft edge
-        // lets this content recede into it without drawing a hard rule across
-        // the workspace.
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        // No scroll-edge override. `.automatic` lets the system decide how this
+        // list meets the scoreboard above and the real bottom toolbar below,
+        // which is exactly the sort of thing it should be deciding.
     }
 
     private func minutesIfPlayed(_ player: PlayerSnapshot) -> Int? {

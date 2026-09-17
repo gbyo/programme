@@ -25,7 +25,12 @@ struct SubstitutionStage: View {
         VStack(spacing: 12) {
             header
 
-            TipView(multiSubTip)
+            // The tip is donated on every visit but only shown when play is
+            // stopped. A scorer making a substitution during play needs the two
+            // columns, not a lesson about them.
+            if session.showsContextualTips {
+                TipView(multiSubTip)
+            }
 
             HStack(alignment: .top, spacing: 14) {
                 column(
@@ -65,6 +70,12 @@ struct SubstitutionStage: View {
             footer
         }
         .padding(16)
+        // View-state selection is a declarative fact about this screen, so the
+        // feedback for it is declarative too. Recording an event stays imperative
+        // in the session, where the domain meaning lives.
+        .sensoryFeedback(.selection, trigger: goingOut)
+        .sensoryFeedback(.selection, trigger: comingIn)
+        .sensoryFeedback(.selection, trigger: newGoalkeeper)
         .onAppear {
             newGoalkeeper = session.snapshot.activeGoalkeeper
             Task { await MultiSubstitutionTip.didOpenSubstitution.donate() }
@@ -125,7 +136,6 @@ struct SubstitutionStage: View {
                         let isSelected = selection.contains(player.id)
                         Button {
                             toggle(player)
-                            Haptics.selectionChanged()
                         } label: {
                             VStack(spacing: 1) {
                                 Text(player.jerseyNumber.map(String.init) ?? "–")
@@ -152,7 +162,8 @@ struct SubstitutionStage: View {
                             }
                         }
                         .accessibilityIdentifier(
-                            "sub.\(title.lowercased()).\(player.jerseyNumber.map(String.init) ?? player.displaySurname)")
+                            "sub.\(title.lowercased()).\(player.jerseyNumber.map(String.init) ?? player.displaySurname)"
+                        )
                         .accessibilityLabel(player.accessibilityLabel)
                         .accessibilityValue(isSelected ? "selected to go \(title.lowercased())" : "")
                         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -174,7 +185,6 @@ struct SubstitutionStage: View {
                     ForEach(goalkeeperCandidates) { player in
                         Button {
                             newGoalkeeper = player.id
-                            Haptics.selectionChanged()
                         } label: {
                             VStack(spacing: 1) {
                                 Text(player.jerseyNumber.map(String.init) ?? "–")
@@ -187,7 +197,8 @@ struct SubstitutionStage: View {
                         }
                         .programmeSelectable(
                             isSelected: newGoalkeeper == player.id,
-                            shape: .roundedRectangle(radius: 10))
+                            shape: .roundedRectangle(radius: 10)
+                        )
                         .accessibilityLabel("\(player.accessibilityLabel) in goal")
                     }
                 }
@@ -212,9 +223,10 @@ struct SubstitutionStage: View {
             if goingOut.count != comingIn.count && !(goingOut.isEmpty && comingIn.isEmpty) {
                 Label(
                     "This changes the number of players on the field",
-                    systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(Programme.Palette.caution)
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(Programme.Palette.caution)
             }
         }
         .frame(minHeight: 34)
@@ -224,15 +236,18 @@ struct SubstitutionStage: View {
     // MARK: - Logic
 
     private var needsGoalkeeper: Bool {
-        guard let keeper = session.snapshot.activeGoalkeeper else { return !comingIn.isEmpty && session.profile.tracks(.goalkeeping) && session.snapshot.activeGoalkeeper == nil }
+        guard let keeper = session.snapshot.activeGoalkeeper else {
+            return !comingIn.isEmpty && session.profile.tracks(.goalkeeping) && session.snapshot.activeGoalkeeper == nil
+        }
         return goingOut.contains(keeper)
     }
 
+    /// Who can take the gloves *after* this substitution: whoever is staying on,
+    /// plus whoever is coming on. Recognised goalkeepers first.
     private var goalkeeperCandidates: [PlayerSnapshot] {
         let staying = session.onFieldPlayers.filter { !goingOut.contains($0.id) }
         let incoming = session.benchPlayers.filter { comingIn.contains($0.id) }
         return (staying + incoming).sorted {
-            // Recognised goalkeepers first, then by number.
             if ($0.position == .goalkeeper) != ($1.position == .goalkeeper) {
                 return $0.position == .goalkeeper
             }

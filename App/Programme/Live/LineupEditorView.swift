@@ -2,11 +2,29 @@ import ProgrammeCore
 import ProgrammeUI
 import SwiftUI
 
+/// Which half of the editor a player is in.
+enum LineupGroup: String, Hashable, Sendable, CaseIterable, Identifiable {
+    case field
+    case bench
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .field: "Starting Lineup"
+        case .bench: "Bench"
+        }
+    }
+}
+
 /// Choosing who starts.
 ///
-/// Drag and drop works between the two columns, and every drag has a plain tap
-/// equivalent, because a drag is not reachable with VoiceOver or Switch Control
-/// and this is not an optional step.
+/// On a landscape iPad the two groups sit side by side, because that is the
+/// question being asked: *these* eleven, and *those* substitutes. A narrow window
+/// stacks them.
+///
+/// Every drag has a plain tap equivalent. A drag is not reachable with VoiceOver
+/// or Switch Control, and setting the lineup is not an optional step.
 struct LineupEditorView: View {
     let session: LiveMatchSession
 
@@ -14,7 +32,7 @@ struct LineupEditorView: View {
     @State private var onField: [PlayerID] = []
     @State private var goalkeeper: PlayerID?
     @State private var formationID: String?
-    @State private var dropTargetIsField = false
+    @State private var dropTarget: LineupGroup?
 
     private var bench: [PlayerSnapshot] {
         session.roster.activeRoster.filter { !onField.contains($0.id) }
@@ -25,20 +43,11 @@ struct LineupEditorView: View {
     }
 
     var body: some View {
-        ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    column(
-                        title: "Starting Lineup",
-                        subtitle: "\(onField.count) of \(session.rules.playersPerSide)",
-                        players: fieldPlayers,
-                        isField: true)
-                    column(
-                        title: "Bench",
-                        subtitle: "\(bench.count) available",
-                        players: bench,
-                        isField: false)
-                }
-                .padding(18)
+        LineupReorderContainer(move: move(_:to:before:)) {
+            ViewThatFits(in: .horizontal) {
+                sideBySide
+                stacked
+            }
         }
         .safeAreaBar(edge: .top) { statusBar }
         .navigationTitle("Starting Lineup")
@@ -62,10 +71,36 @@ struct LineupEditorView: View {
                 Button("Confirm") { confirm() }
                     .disabled(!isValid)
                     .fontWeight(.semibold)
+                    .accessibilityIdentifier("lineup.confirm")
                     .programmeConfirmationTint()
             }
         }
+        .sensoryFeedback(.selection, trigger: onField)
+        .sensoryFeedback(.selection, trigger: goalkeeper)
         .onAppear(perform: load)
+    }
+
+    // MARK: - Layout
+
+    /// The landscape arrangement: both groups visible, each scrolling on its own.
+    private var sideBySide: some View {
+        HStack(alignment: .top, spacing: 16) {
+            column(.field)
+                .frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
+            column(.bench)
+                .frame(minWidth: 260, idealWidth: 260, maxWidth: .infinity)
+        }
+        .padding(18)
+    }
+
+    private var stacked: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                columnBody(.field)
+                columnBody(.bench)
+            }
+            .padding(18)
+        }
     }
 
     private var statusBar: some View {
@@ -88,49 +123,73 @@ struct LineupEditorView: View {
             .pickerStyle(.menu)
             .accessibilityLabel("Formation, optional")
             Spacer()
-            if let keeper = goalkeeper, let player = session.roster[keeper] {
-                Label("\(player.shortLabel) in goal", systemImage: "hand.raised.fill")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-            } else {
-                Label("Choose a goalkeeper", systemImage: "hand.raised")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Programme.Palette.caution)
-            }
+            goalkeeperStatus
         }
         .padding(.horizontal, 18)
+        .padding(.vertical, 4)
     }
 
-    private func column(title: String, subtitle: String, players: [PlayerSnapshot], isField: Bool)
-        -> some View
-    {
-        VStack(alignment: .leading, spacing: 10) {
+    /// A lineup with nobody in goal cannot be confirmed, so the editor says which
+    /// one thing is missing rather than leaving Confirm inexplicably dimmed.
+    @ViewBuilder
+    private var goalkeeperStatus: some View {
+        if let keeper = goalkeeper, let player = session.roster[keeper] {
+            Label("\(player.shortLabel) in goal", systemImage: "hand.raised.fill")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("lineup.goalkeeper")
+        } else {
+            Label("Choose a goalkeeper", systemImage: "hand.raised")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Programme.Palette.caution)
+                .accessibilityIdentifier("lineup.goalkeeper")
+                .accessibilityHint(
+                    "Touch and hold a player in the starting lineup, then choose Make Goalkeeper.")
+        }
+    }
+
+    private func column(_ group: LineupGroup) -> some View {
+        ScrollView {
+            columnBody(group)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private func columnBody(_ group: LineupGroup) -> some View {
+        let players = group == .field ? fieldPlayers : bench
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(title).programmeSectionHeader()
+                Text(group.title).programmeSectionHeader()
                 Spacer()
-                Text(subtitle)
+                Text(subtitle(for: group, count: players.count))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(
-                        isField && players.count != session.rules.playersPerSide
+                        group == .field && players.count != session.rules.playersPerSide
                             ? Programme.Palette.caution : .secondary)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 132, maximum: 200), spacing: 10)], spacing: 10) {
-                ForEach(players) { player in
-                    LineupTile(
-                        player: player,
-                        isGoalkeeper: goalkeeper == player.id,
-                        isOnField: isField,
-                        onToggle: { toggle(player) },
-                        onMakeGoalkeeper: { makeGoalkeeper(player) }
-                    )
-                    .draggable(player.id.rawValue.uuidString) {
-                        Text(player.shortLabel).padding(8)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 132, maximum: 200), spacing: 10)], spacing: 10
+            ) {
+                if #available(iOS 27.0, *) {
+                    // The system's own reordering: one container, two collections,
+                    // drags within and between them, and the same lift, spacing
+                    // and drop behaviour as every other iPadOS 27 collection.
+                    ForEach(players) { player in
+                        tile(player, group: group)
+                    }
+                    .reorderable(collectionID: group)
+                } else {
+                    ForEach(players) { player in
+                        tile(player, group: group)
+                            .draggable(player.id.rawValue.uuidString) {
+                                Text(player.shortLabel).padding(8)
+                            }
                     }
                 }
                 if players.isEmpty {
-                    Text(isField ? "Tap players below to add them." : "Everyone is in the lineup.")
+                    Text(group == .field ? "Tap players on the bench to add them." : "Everyone is in the lineup.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -138,23 +197,32 @@ struct LineupEditorView: View {
                 }
             }
             .padding(10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color(.secondarySystemBackground))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(
-                        isField && dropTargetIsField ? Color.accentColor : .clear, lineWidth: 2)
+                    .strokeBorder(dropTarget == group ? Color.accentColor : .clear, lineWidth: 2)
             )
-            .animation(.snappy(duration: 0.15), value: dropTargetIsField)
-            .dropDestination(for: String.self) { items, _ in
-                move(identifiers: items, toField: isField)
-                return true
-            } isTargeted: { targeted in
-                if isField { dropTargetIsField = targeted }
-            }
+            .animation(.snappy(duration: 0.15), value: dropTarget)
+            .modifier(LegacyDropTarget(group: group, dropTarget: $dropTarget, move: move(identifiers:to:)))
         }
+    }
+
+    private func subtitle(for group: LineupGroup, count: Int) -> String {
+        group == .field ? "\(count) of \(session.rules.playersPerSide)" : "\(count) available"
+    }
+
+    private func tile(_ player: PlayerSnapshot, group: LineupGroup) -> some View {
+        LineupTile(
+            player: player,
+            isGoalkeeper: goalkeeper == player.id,
+            isOnField: group == .field,
+            onToggle: { toggle(player) },
+            onMakeGoalkeeper: { makeGoalkeeper(player) }
+        )
     }
 
     // MARK: - Logic
@@ -177,46 +245,83 @@ struct LineupEditorView: View {
     }
 
     private func toggle(_ player: PlayerSnapshot) {
-        Haptics.selectionChanged()
-        if let index = onField.firstIndex(of: player.id) {
-            onField.remove(at: index)
-            if goalkeeper == player.id { goalkeeper = nil }
+        if onField.contains(player.id) {
+            remove(player.id)
         } else {
-            guard onField.count < session.rules.playersPerSide else {
-                session.show(
-                    notice: LiveNotice(
-                        text: "That would be \(onField.count + 1) players. Remove one first.",
-                        kind: .warning))
-                return
-            }
-            onField.append(player.id)
-            if goalkeeper == nil && player.position == .goalkeeper { goalkeeper = player.id }
+            add(player.id, before: nil)
+        }
+    }
+
+    private func add(_ id: PlayerID, before: PlayerID?) {
+        guard !onField.contains(id) else { return }
+        guard onField.count < session.rules.playersPerSide else {
+            session.show(
+                notice: LiveNotice(
+                    text: "That would be \(onField.count + 1) players. Remove one first.",
+                    kind: .warning))
+            return
+        }
+        if let before, let index = onField.firstIndex(of: before) {
+            onField.insert(id, at: index)
+        } else {
+            onField.append(id)
+        }
+        if goalkeeper == nil, session.roster[id]?.position == .goalkeeper { goalkeeper = id }
+    }
+
+    private func remove(_ id: PlayerID) {
+        onField.removeAll { $0 == id }
+        if goalkeeper == id {
+            // Moving the goalkeeper out leaves the lineup invalid on purpose:
+            // Confirm stays disabled and the status bar asks for a replacement,
+            // rather than letting a match start with nobody in goal.
+            goalkeeper = nil
+            session.show(
+                notice: LiveNotice(
+                    text: "That was your goalkeeper. Choose who takes the gloves before confirming.",
+                    kind: .warning))
         }
     }
 
     private func makeGoalkeeper(_ player: PlayerSnapshot) {
         if !onField.contains(player.id) {
-            guard onField.count < session.rules.playersPerSide else { return }
+            guard onField.count < session.rules.playersPerSide else {
+                session.show(
+                    notice: LiveNotice(
+                        text: "The lineup is full. Move someone to the bench first.", kind: .warning))
+                return
+            }
             onField.append(player.id)
         }
         goalkeeper = player.id
-        Haptics.selectionChanged()
     }
 
-    private func move(identifiers: [String], toField: Bool) {
-        for identifier in identifiers {
-            guard let uuid = UUID(uuidString: identifier) else { continue }
-            let id = PlayerID(uuid)
-            if toField {
-                guard !onField.contains(id), onField.count < session.rules.playersPerSide else { continue }
-                onField.append(id)
-                if goalkeeper == nil, session.roster[id]?.position == .goalkeeper { goalkeeper = id }
-            } else {
-                onField.removeAll { $0 == id }
-                if goalkeeper == id { goalkeeper = nil }
+    /// The iPadOS 27 reorder callback, and the shape everything else funnels into.
+    private func move(_ sources: [PlayerID], to group: LineupGroup, before: PlayerID?) {
+        for id in sources {
+            switch group {
+            case .field:
+                if let index = onField.firstIndex(of: id) {
+                    // A reorder inside the starting lineup.
+                    onField.remove(at: index)
+                    if let before, let target = onField.firstIndex(of: before) {
+                        onField.insert(id, at: target)
+                    } else {
+                        onField.append(id)
+                    }
+                } else {
+                    add(id, before: before)
+                }
+            case .bench:
+                remove(id)
             }
         }
-        Haptics.selectionChanged()
+    }
+
+    /// The iPadOS 26 drop path, which speaks in item provider strings.
+    private func move(identifiers: [String], to group: LineupGroup) {
+        let ids = identifiers.compactMap { UUID(uuidString: $0).map(PlayerID.init) }
+        move(ids, to: group, before: nil)
     }
 
     private func fillByNumber() {
@@ -240,6 +345,54 @@ struct LineupEditorView: View {
     private func confirm() {
         session.setStartingLineup(onField, goalkeeper: goalkeeper, formationID: formationID)
         dismiss()
+    }
+}
+
+/// The iPadOS 27 reorder container, isolated so no leaf view has to know the
+/// platform differs.
+///
+/// On iPadOS 26 this is transparent and the columns fall back to
+/// `draggable`/`dropDestination`, which stays in the file unchanged.
+private struct LineupReorderContainer<Content: View>: View {
+    let move: (_ sources: [PlayerID], _ group: LineupGroup, _ before: PlayerID?) -> Void
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if #available(iOS 27.0, *) {
+            content
+                .reorderContainer(for: PlayerSnapshot.self, in: LineupGroup.self) { difference in
+                    switch difference.destination.position {
+                    case .before(let id):
+                        move(difference.sources, difference.destination.collectionID, id)
+                    case .end:
+                        move(difference.sources, difference.destination.collectionID, nil)
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+/// `dropDestination` is only wired up where `reorderable` is not available, so
+/// the two never compete for the same drag.
+private struct LegacyDropTarget: ViewModifier {
+    let group: LineupGroup
+    @Binding var dropTarget: LineupGroup?
+    let move: (_ identifiers: [String], _ group: LineupGroup) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 27.0, *) {
+            content
+        } else {
+            content.dropDestination(for: String.self) { items, _ in
+                move(items, group)
+                return true
+            } isTargeted: { targeted in
+                dropTarget = targeted ? group : (dropTarget == group ? nil : dropTarget)
+            }
+        }
     }
 }
 
@@ -281,9 +434,14 @@ struct LineupTile: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggle)
         .contextMenu {
-            Button(isOnField ? "Move to Bench" : "Add to Lineup", systemImage: isOnField ? "minus.circle" : "plus.circle", action: onToggle)
+            Button(
+                isOnField ? "Move to Bench" : "Add to Lineup", systemImage: isOnField ? "minus.circle" : "plus.circle",
+                action: onToggle)
             Button("Make Goalkeeper", systemImage: "hand.raised", action: onMakeGoalkeeper)
         }
+        .accessibilityIdentifier(
+            "lineup.\(player.jerseyNumber.map(String.init) ?? player.displaySurname)"
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(player.accessibilityLabel)
         .accessibilityValue(isGoalkeeper ? "goalkeeper, in the lineup" : (isOnField ? "in the lineup" : "on the bench"))

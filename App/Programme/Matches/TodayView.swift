@@ -54,13 +54,15 @@ struct TodayView: View {
             }
 
             if let next = nextMatch {
-                Section("Next Match") {
+                Section {
                     NextMatchCard(match: next) {
                         Task { await appModel.openLiveSession(matchID: next.matchID) }
                     }
+                } header: {
+                    sectionHeader("Next Match")
                 }
             } else if liveMatch == nil {
-                Section("Next Match") {
+                Section {
                     EmptyHint(
                         title: "No match scheduled",
                         message: "Create a match to prepare a lineup before kickoff.",
@@ -68,11 +70,13 @@ struct TodayView: View {
                     ) {
                         appModel.navigation.isPresentingNewMatch = true
                     }
+                } header: {
+                    sectionHeader("Next Match")
                 }
             }
 
             if !recentMatches.isEmpty {
-                Section("Recent") {
+                Section {
                     ForEach(recentMatches) { match in
                         Button {
                             appModel.navigation.open(.match(match.matchID))
@@ -81,10 +85,17 @@ struct TodayView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                } header: {
+                    sectionHeader("Recent")
                 }
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    /// A plain section header that carries the identifier its coverage asks for.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title).accessibilityIdentifier("section.\(title)")
     }
 
     private var header: some View {

@@ -2,67 +2,55 @@ import ProgrammeCore
 import ProgrammeUI
 import SwiftUI
 
-/// The one thing that must always be legible from several feet away.
+/// The scoreboard: the one thing that must always be legible from several feet
+/// away.
+///
+/// This view owns the score, the clock, the period and the period progress, and
+/// nothing else. Match management — pause, end the period, start the next one,
+/// the options menu — lives in the navigation bar as real toolbar items, because
+/// those are ordinary iPad controls and should be drawn by the system rather
+/// than approximated here. See `MatchControlsToolbar`.
 struct LiveHeader: View {
     let session: LiveMatchSession
-    var isCompact: Bool
-    var onMenu: () -> Void
-    var onToggleClock: () -> Void
-    var onEndPeriod: () -> Void
-    var onStartPeriod: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // The header is structural chrome, so it stays flat. Only the buttons
-        // use the system's Liquid Glass control styles.
-        Group {
-            if isCompact {
-                compactHeader
-            } else {
-                regularHeader
-            }
+        // The header is structural chrome, so it stays flat: no glass, no
+        // shadow, nothing drawn to imitate a control.
+        //
+        // Which arrangement it uses is decided by what fits, not by a device
+        // width: the full-width row states the narrowest width at which the
+        // score and the clock both still read at arm's length, and below that
+        // the tighter arrangement takes over. Now that the controls have moved
+        // to the toolbar, the narrow case no longer needs a second line — the
+        // scoreboard is a single row at every size.
+        ViewThatFits(in: .horizontal) {
+            scoreboard(isCompact: false)
+                .frame(minWidth: 520, idealWidth: 520, maxWidth: .infinity)
+            scoreboard(isCompact: true)
         }
         .frame(maxWidth: .infinity)
         .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
     }
 
-    private var regularHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            scoreAndClock
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .overlay(alignment: .bottomLeading) { progressRule(horizontalPadding: 20) }
-            controls
-        }
-        .padding(.horizontal, 16)
-    }
-
-    private var compactHeader: some View {
-        VStack(spacing: 4) {
-            scoreAndClock
-            HStack {
-                Spacer(minLength: 0)
-                controls
+    private func scoreboard(isCompact: Bool) -> some View {
+        scoreAndClock(isCompact: isCompact)
+            .padding(.horizontal, isCompact ? 14 : 20)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+            .overlay(alignment: .bottomLeading) {
+                progressRule(horizontalPadding: isCompact ? 14 : 20)
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .overlay(alignment: .bottomLeading) { progressRule(horizontalPadding: 14) }
     }
 
-    private var scoreAndClock: some View {
+    private func scoreAndClock(isCompact: Bool) -> some View {
         HStack(alignment: .center, spacing: isCompact ? 8 : 22) {
-            scoreBlock
+            scoreBlock(isCompact: isCompact)
                 .layoutPriority(1)
             Spacer(minLength: 6)
-            clockBlock
+            clockBlock(isCompact: isCompact)
                 .fixedSize(horizontal: true, vertical: false)
         }
     }
@@ -82,17 +70,17 @@ struct LiveHeader: View {
         .allowsHitTesting(false)
     }
 
-    private var scoreBlock: some View {
+    private func scoreBlock(isCompact: Bool) -> some View {
         HStack(alignment: .center, spacing: isCompact ? 8 : 14) {
             teamSide(
                 name: session.descriptor.teamShortName, score: session.snapshot.score.us,
-                isUs: true)
+                isUs: true, isCompact: isCompact)
             Text("–")
                 .font(.programmeScore(isCompact ? 26 : 34))
                 .foregroundStyle(.tertiary)
             teamSide(
                 name: session.descriptor.opponentShortName, score: session.snapshot.score.opponent,
-                isUs: false)
+                isUs: false, isCompact: isCompact)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("live.score")
@@ -101,7 +89,7 @@ struct LiveHeader: View {
         )
     }
 
-    private func teamSide(name: String, score: Int, isUs: Bool) -> some View {
+    private func teamSide(name: String, score: Int, isUs: Bool, isCompact: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if isUs {
                 Text(name)
@@ -127,7 +115,7 @@ struct LiveHeader: View {
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: score)
     }
 
-    private var clockBlock: some View {
+    private func clockBlock(isCompact: Bool) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
             Text(session.clock.displayText)
                 .font(.programmeClock(isCompact ? 24 : 32))
@@ -154,64 +142,64 @@ struct LiveHeader: View {
         }
     }
 
+}
+
+/// Match management, as real navigation-bar items.
+///
+/// Pause, End <period>, Start <period> and the options menu are ordinary iPad
+/// controls, so they are ordinary `ToolbarItem`s. Nothing here sets a button
+/// style, a border shape or a control size: the system already knows how big a
+/// navigation-bar control is, what it looks like when pressed, how it responds
+/// to the pointer, and how it behaves when the window gets too narrow to show
+/// everything. The one exception is Start, which uses Programme's primary-action
+/// style because starting the match is the single prominent action on this
+/// screen — and that is still a stock system style, not drawn chrome.
+///
+/// They sit in one trailing group so the bar stays a single row beside the
+/// scoreboard rather than becoming a second strip of its own.
+struct MatchControlsToolbar: ToolbarContent {
+    let session: LiveMatchSession
+    var onMenu: () -> Void
+    var onToggleClock: () -> Void
+    var onEndPeriod: () -> Void
+    var onStartPeriod: () -> Void
+
     private var startTitle: String {
         session.phase == .scheduled ? "Start Match" : "Start \(session.nextPeriodLabel)"
     }
 
-    @ViewBuilder
-    private var controls: some View {
-        HStack(spacing: 8) {
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
             switch session.phase {
             case .scheduled, .periodBreak:
-                Button {
-                    onStartPeriod()
-                } label: {
-                    if isCompact {
-                        Image(systemName: "play.fill")
-                    } else {
-                        Label(startTitle, systemImage: "play.fill")
-                    }
-                }
-                .programmePrimaryAction(in: .control)
-                .disabled(!session.canStartNextPeriod || !session.hasStartingLineup)
-                .accessibilityIdentifier("live.startPeriod")
-                .accessibilityLabel(startTitle)
+                Button(startTitle, systemImage: "play.fill") { onStartPeriod() }
+                    .programmePrimaryAction(in: .control)
+                    .disabled(!session.canStartNextPeriod || !session.hasStartingLineup)
+                    .accessibilityIdentifier("live.startPeriod")
+                    .accessibilityLabel(startTitle)
 
             case .inPeriod:
-                Button {
+                // Icon-only, because the clock beside it already says whether it
+                // is running and a word here would only repeat it.
+                Button(
+                    session.clock.isRunning ? "Stop the clock" : "Start the clock",
+                    systemImage: session.clock.isRunning ? "pause.fill" : "play.fill"
+                ) {
                     onToggleClock()
-                } label: {
-                    Image(systemName: session.clock.isRunning ? "pause.fill" : "play.fill")
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .labelStyle(.iconOnly)
                 .accessibilityIdentifier("live.toggleClock")
-                .accessibilityLabel(session.clock.isRunning ? "Stop the clock" : "Start the clock")
 
-                Button("End \(session.clock.periodShortLabel)") {
-                    onEndPeriod()
-                }
-                .buttonStyle(.glass)
-                .accessibilityIdentifier("live.endPeriod")
+                Button("End \(session.clock.periodShortLabel)") { onEndPeriod() }
+                    .accessibilityIdentifier("live.endPeriod")
 
             case .awaitingFinalization, .finalized:
                 EmptyView()
             }
 
-            Button {
-                onMenu()
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .accessibilityIdentifier("live.options")
-            .accessibilityLabel("Match options")
+            Button("Match options", systemImage: "ellipsis") { onMenu() }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("live.options")
         }
-        // One place decides how big a live control is, instead of every button
-        // carrying its own frame. `.extraLarge` keeps every target comfortably
-        // past 44pt and scales with Dynamic Type.
-        .controlSize(.extraLarge)
-        .font(.headline)
     }
 }

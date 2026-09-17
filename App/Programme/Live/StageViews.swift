@@ -13,6 +13,9 @@ struct PlayerPickerStage: View {
     var unknownTitle: String = "Player Unknown"
     var unknownSubtitle: String = "Record now, attribute later"
     var extraOption: (title: String, subtitle: String)?
+    /// Educational UI only appears when the scorer is not executing. See
+    /// `LiveMatchSession.showsContextualTips`.
+    var showsTips: Bool = false
     var onPick: (PlayerRef) -> Void
     var onExtra: (() -> Void)?
     var onCancel: () -> Void
@@ -59,7 +62,8 @@ struct PlayerPickerStage: View {
                             }
                         }
                         .accessibilityIdentifier(
-                            "pick.\(player.jerseyNumber.map(String.init) ?? player.displaySurname)")
+                            "pick.\(player.jerseyNumber.map(String.init) ?? player.displaySurname)"
+                        )
                         .accessibilityLabel(player.accessibilityLabel)
                     }
                 }
@@ -67,7 +71,9 @@ struct PlayerPickerStage: View {
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            if allowsUnknown {
+            // No tip while the clock is running: the button below says what it
+            // does, and a live scorer is executing rather than learning.
+            if allowsUnknown && showsTips {
                 TipView(unknownTip)
             }
 
@@ -118,8 +124,13 @@ struct PlayerPickerStage: View {
     }
 }
 
-/// Assist attribution. "Unassisted" is first and full width, because it is the
-/// single most common answer and needs to be the easiest thing to hit.
+/// Assist attribution.
+///
+/// Most goals are unassisted, so "Unassisted" is not one option among several: it
+/// is a single full-width target across the top, and the Return key triggers it.
+/// The players who could actually have assisted come next, visible without
+/// scrolling for a normal squad. "Assist Unknown" is real and stays available,
+/// but it is the quiet row at the bottom rather than an equal partner.
 struct AssistPickerStage: View {
     let scorerName: String
     let players: [PlayerSnapshot]
@@ -127,9 +138,10 @@ struct AssistPickerStage: View {
     var onCancel: () -> Void
 
     @ScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 82
+    @ScaledMetric(relativeTo: .title3) private var unassistedHeight: CGFloat = 72
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Who assisted?")
@@ -144,27 +156,17 @@ struct AssistPickerStage: View {
                     .keyboardShortcut(.escape, modifiers: [])
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    onPick(nil)
-                } label: {
-                    Label("Unassisted", systemImage: "circle.slash")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 58)
-                }
-                .programmeTile()
-                .accessibilityIdentifier("assist.unassisted")
-                .keyboardShortcut(.return, modifiers: [])
-
-                Button {
-                    onPick(.unidentified)
-                } label: {
-                    Label("Assist Unknown", systemImage: "questionmark.circle")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 58)
-                }
-                .programmeTile()
+            Button {
+                onPick(nil)
+            } label: {
+                Label("Unassisted", systemImage: "circle.slash")
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: unassistedHeight)
             }
+            .programmePrimaryAction()
+            .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
+            .accessibilityIdentifier("assist.unassisted")
+            .keyboardShortcut(.return, modifiers: [])
 
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 10)], spacing: 10) {
@@ -184,11 +186,27 @@ struct AssistPickerStage: View {
                             .frame(maxWidth: .infinity, minHeight: tileHeight)
                         }
                         .programmeTile()
+                        .accessibilityIdentifier(
+                            "assist.\(player.jerseyNumber.map(String.init) ?? player.displaySurname)"
+                        )
                         .accessibilityLabel("Assist by \(player.accessibilityLabel)")
                     }
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
+
+            Button {
+                onPick(.unidentified)
+            } label: {
+                Label("Assist Unknown", systemImage: "questionmark.circle")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, minHeight: 46)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
+            .tint(.secondary)
+            .accessibilityIdentifier("assist.unknown")
+            .accessibilityHint("Records the assist now and collects it under Review.")
         }
         .padding(16)
     }
@@ -228,10 +246,10 @@ struct ShotLocationStage: View {
                 isPlacementActive: true,
                 onPlace: { point in
                     location = point
-                    Haptics.selectionChanged()
                 }
             )
         }
         .padding(16)
+        .sensoryFeedback(.selection, trigger: location)
     }
 }

@@ -21,6 +21,9 @@ enum LiveStage: Equatable {
 enum PendingAction: Equatable {
     case goal(PlayPhase)
     case shot(ShotOutcome)
+    /// A penalty *attempt*. The outcome is not known until the scorer says so,
+    /// so this never implies a goal.
+    case penaltyAttempt
     case corner
     case steal
     case foul
@@ -31,7 +34,7 @@ enum PendingAction: Equatable {
 
     var title: String {
         switch self {
-        case .goal(.penaltyKick): "Who scored the penalty?"
+        case .penaltyAttempt: "Who took the penalty?"
         case .goal: "Who scored?"
         case .shot(.saved): "Who took the shot?"
         case .shot: "Who took the shot?"
@@ -54,12 +57,19 @@ enum PendingAction: Equatable {
         }
     }
 
-    /// Cards and substitutions can involve a player who is no longer on the
-    /// field, so those pick from the full roster.
-    var picksFromFullRoster: Bool {
+    /// The domain question "who could this belong to?". ProgrammeCore answers it;
+    /// the interface only asks.
+    var attributionCategory: AttributionCategory {
         switch self {
-        case .card: true
-        default: false
+        case .goal, .shot: .shot
+        case .penaltyAttempt: .penaltyKick
+        case .ownGoal: .ownGoal
+        case .corner: .corner
+        case .steal: .steal
+        case .foul: .foul
+        case .offside: .offside
+        case .card: .card
+        case .goalkeeper: .goalkeeperChange
         }
     }
 }

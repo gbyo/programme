@@ -28,8 +28,8 @@ struct ScoringToolbar: ToolbarContent {
             }
             .programmePrimaryAction(in: .control)
             .accessibilityIdentifier("scoring.substitution")
-            .keyboardShortcut("b", modifiers: [])
         }
+        .liveVisibilityPriority(.high)
 
         ToolbarSpacer(.fixed, placement: .bottomBar)
 
@@ -39,47 +39,87 @@ struct ScoringToolbar: ToolbarContent {
             LastEventSummary(session: session)
         }
         .sharedBackgroundVisibility(.hidden)
+        .liveVisibilityPriority(.low)
 
         ToolbarSpacer(.flexible, placement: .bottomBar)
 
         // Correcting what was just recorded: one group, because undo, redo and
         // edit are the same job.
+        //
+        // Every one of these is always present. A control that appears only when
+        // it is usable moves the controls beside it, and a scorer who has just
+        // pressed Undo should find Redo under the same finger — disabled, not
+        // gone.
         ToolbarItemGroup(placement: .bottomBar) {
             Button("Undo", systemImage: "arrow.uturn.backward") {
                 session.undo()
             }
             .disabled(!session.canUndo)
-            .keyboardShortcut("z", modifiers: .command)
             .accessibilityIdentifier("scoring.undo")
 
-            if session.canRedo {
-                Button("Redo", systemImage: "arrow.uturn.forward") {
-                    session.redo()
-                }
-                .labelStyle(.iconOnly)
+            Button("Redo", systemImage: "arrow.uturn.forward") {
+                session.redo()
             }
+            .labelStyle(.iconOnly)
+            .disabled(!session.canRedo)
+            .accessibilityIdentifier("scoring.redo")
 
             Button("Edit", systemImage: "pencil") { onEdit() }
                 .accessibilityLabel("Edit last event")
+                .accessibilityIdentifier("scoring.edit")
                 .disabled(session.lastEventDescription == nil)
         }
+        .liveVisibilityPriority(.high)
 
         ToolbarSpacer(.fixed, placement: .bottomBar)
 
         // Looking at the record as a whole: a different job, so its own glass.
-        ToolbarItemGroup(placement: .bottomBar) {
+        ToolbarItem(placement: .bottomBar) {
             Button("Event Log", systemImage: "list.bullet") { onLog() }
                 .labelStyle(.iconOnly)
                 .accessibilityIdentifier("scoring.eventLog")
+        }
+        .liveVisibilityPriority(.low)
 
+        ToolbarItem(placement: .bottomBar) {
             ReviewIndicator(
                 count: session.needsReviewCount, issues: session.issues, action: onReview)
+        }
+        .liveVisibilityPriority(session.needsReviewCount > 0 ? .high : .low)
+    }
+}
+
+/// How much a live control deserves to survive a narrow window.
+enum LiveToolbarPriorityLevel {
+    case high
+    case low
+}
+
+extension ToolbarContent {
+    /// Toolbar visibility priority, where the platform has it.
+    ///
+    /// On iPadOS 27 a narrow window collapses the lowest-priority items into the
+    /// system overflow first, so Substitution and the correction group survive a
+    /// Stage Manager sliver while the event log and a clean Review indicator step
+    /// aside. On iPadOS 26 the system's own adaptation applies unchanged —
+    /// Programme itself never conditionally reorders these.
+    @ToolbarContentBuilder
+    func liveVisibilityPriority(_ level: LiveToolbarPriorityLevel) -> some ToolbarContent {
+        if #available(iOS 27.0, *) {
+            visibilityPriority(level == .high ? .high : .low)
+        } else {
+            self
         }
     }
 }
 
 /// What was recorded a moment ago, so the scorer can confirm it landed without
 /// opening the log.
+///
+/// This is status, and status must never push a control off the bar. It offers
+/// the system progressively shorter renderings of the same fact and takes the
+/// longest that fits — while the accessibility label stays complete regardless of
+/// which one is on screen, so VoiceOver never inherits an abbreviation.
 struct LastEventSummary: View {
     let session: LiveMatchSession
 
@@ -96,45 +136,10 @@ struct LastEventSummary: View {
     @ViewBuilder
     private var content: some View {
         if let description = session.lastEventDescription {
-            HStack(spacing: 10) {
-                Image(systemName: description.symbolName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(
-                        description.category == .goal && !differentiateWithoutColor
-                            ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary)
-                    )
-                    .accessibilityHidden(true)
-
-                Text(description.timeText)
-                    .font(.subheadline.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-
-                Text(description.title)
-                    .font(.subheadline.weight(.semibold))
-
-                if !description.detail.isEmpty {
-                    Text(description.detail)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                }
-                if let secondary = description.secondaryDetail {
-                    Text(secondary)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if let score = description.scoreText {
-                    Text(score)
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                }
-                if description.needsAttribution {
-                    Label("Needs player", systemImage: "questionmark.circle.fill")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Programme.Palette.caution)
-                        .labelStyle(.titleAndIcon)
-                }
+            ViewThatFits(in: .horizontal) {
+                row(description, detail: .full)
+                row(description, detail: .medium)
+                row(description, detail: .minimal)
             }
             .lineLimit(1)
             .accessibilityElement(children: .ignore)
@@ -145,6 +150,62 @@ struct LastEventSummary: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private enum Detail {
+        case full
+        case medium
+        case minimal
+    }
+
+    private func row(_ description: EventDescription, detail: Detail) -> some View {
+        HStack(spacing: detail == .minimal ? 6 : 10) {
+            Image(systemName: description.symbolName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(
+                    description.category == .goal && !differentiateWithoutColor
+                        ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary)
+                )
+                .accessibilityHidden(true)
+
+            Text(description.timeText)
+                .font(.subheadline.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+
+            if detail != .minimal {
+                Text(description.title)
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            if detail == .full, !description.detail.isEmpty {
+                Text(description.detail)
+                    .font(.subheadline)
+            }
+            if let secondary = description.secondaryDetail, detail != .minimal {
+                Text(secondary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if let score = description.scoreText {
+                Text(score)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+            }
+            if description.needsAttribution {
+                if detail == .full {
+                    Label("Needs player", systemImage: "questionmark.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Programme.Palette.caution)
+                } else {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Programme.Palette.caution)
+                }
+            }
+        }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
