@@ -48,20 +48,14 @@ struct PlayerPickerStage: View {
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: tileHeight)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .background(
-                            Color(.secondarySystemFill),
-                            in: RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius))
+                        .programmeTile(shape: .roundedRectangle(radius: Programme.Metrics.cornerRadius))
                         .overlay(alignment: .topTrailing) {
                             if player.id == goalkeeperID {
                                 Text("GK")
                                     .font(.caption2.weight(.bold))
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 2)
-                                    .background(Color(.tertiarySystemFill), in: Capsule())
-                                    .padding(6)
+                                    .foregroundStyle(.secondary)
+                                    .padding(8)
                             }
                         }
                         .accessibilityIdentifier(
@@ -116,12 +110,9 @@ struct PlayerPickerStage: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
             .frame(maxWidth: .infinity, minHeight: 60)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius))
+        .programmeTile(tint: tint, shape: .roundedRectangle(radius: Programme.Metrics.cornerRadius))
         .accessibilityIdentifier("pick.wide.\(title)")
         .accessibilityLabel("\(title). \(subtitle)")
     }
@@ -160,10 +151,8 @@ struct AssistPickerStage: View {
                     Label("Unassisted", systemImage: "circle.slash")
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 58)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                .programmeTile()
                 .accessibilityIdentifier("assist.unassisted")
                 .keyboardShortcut(.return, modifiers: [])
 
@@ -173,10 +162,8 @@ struct AssistPickerStage: View {
                     Label("Assist Unknown", systemImage: "questionmark.circle")
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 58)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                .programmeTile()
             }
 
             ScrollView {
@@ -195,11 +182,8 @@ struct AssistPickerStage: View {
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: tileHeight)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .background(
-                            Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                        .programmeTile()
                         .accessibilityLabel("Assist by \(player.accessibilityLabel)")
                     }
                 }
@@ -234,7 +218,7 @@ struct ShotLocationStage: View {
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.escape, modifiers: [])
                 Button("Record") { onCommit(location) }
-                    .buttonStyle(.borderedProminent)
+                    .programmePrimaryAction()
                     .disabled(location == nil)
                     .keyboardShortcut(.return, modifiers: [])
             }

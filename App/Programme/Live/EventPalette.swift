@@ -134,13 +134,20 @@ struct EventPalette: View {
     }
 }
 
+/// One palette action.
+///
+/// The geometry is Programme's — a fixed two-column grid with a tall, left-aligned
+/// target that never moves during a match — but the control is the system's
+/// bordered button. Nothing here paints a fill, a border or a pressed state by
+/// hand, so the palette picks up the platform's current control appearance,
+/// pointer hover, keyboard focus, Reduce Transparency and increased contrast
+/// without Programme knowing what any of those look like.
 struct PaletteButton: View {
     let action: PaletteAction
     let isArmed: Bool
     let differentiateWithoutColor: Bool
     let perform: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .headline) private var minimumHeight: CGFloat = Programme.Metrics
         .paletteButtonHeight
 
@@ -158,6 +165,9 @@ struct PaletteButton: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
+                // The fill and the border are the system's; the title stays at
+                // full contrast because this is read from several feet away.
+                .foregroundStyle(titleStyle)
                 if let subtitle = action.subtitle {
                     Text(subtitle)
                         .font(.caption)
@@ -168,57 +178,33 @@ struct PaletteButton: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(background, in: RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius)
-                .strokeBorder(borderColor, lineWidth: borderWidth)
-        )
-        .foregroundStyle(foreground)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
+        .tint(tint)
         .accessibilityIdentifier("palette.\(action.id)")
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .modifier(OptionalKeyboardShortcut(key: action.shortcut))
     }
 
-    private var background: some ShapeStyle {
+    /// Semantic colour, and only semantic colour. Everything ordinary is quiet:
+    /// a scorer aiming from memory needs the exceptions to stand out, not ten
+    /// tiles competing.
+    private var tint: Color {
+        guard !differentiateWithoutColor else { return .secondary }
         switch action.kind {
-        case .emphasis: AnyShapeStyle(Color.accentColor.opacity(0.14))
-        case .critical: AnyShapeStyle(Color.red.opacity(differentiateWithoutColor ? 0.08 : 0.12))
-        case .caution: AnyShapeStyle(Color.orange.opacity(differentiateWithoutColor ? 0.08 : 0.12))
-        case .more: AnyShapeStyle(Color(.tertiarySystemFill))
-        default: AnyShapeStyle(Color(.secondarySystemFill))
+        case .emphasis: return .accentColor
+        case .critical: return Programme.Palette.critical
+        case .caution: return Programme.Palette.caution
+        case .standard, .substitution, .more: return .secondary
         }
     }
 
-    private var borderColor: Color {
-        switch action.kind {
-        case .emphasis: Color.accentColor.opacity(0.5)
-        case .critical: Color.red.opacity(0.5)
-        case .caution: Color.orange.opacity(0.5)
-        default: .clear
-        }
-    }
-
-    private var borderWidth: CGFloat {
-        switch action.kind {
-        case .emphasis, .critical, .caution: 1
-        default: 0
-        }
-    }
-
-    private var foreground: some ShapeStyle {
-        if differentiateWithoutColor { return AnyShapeStyle(.primary) }
-        switch action.kind {
-        case .emphasis: return AnyShapeStyle(Color.accentColor)
-        case .critical: return AnyShapeStyle(Color.red)
-        case .caution: return AnyShapeStyle(Color.orange)
-        default: return AnyShapeStyle(.primary)
-        }
+    /// A tinted action keeps the tint on its title; a quiet one does not inherit
+    /// grey text along with its grey fill.
+    private var titleStyle: AnyShapeStyle {
+        tint == .secondary ? AnyShapeStyle(.primary) : AnyShapeStyle(tint)
     }
 
     private var accessibilityLabel: String {
@@ -296,12 +282,8 @@ struct OpponentStrip: View {
                                 .minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .background(
-                        Color(.secondarySystemFill),
-                        in: RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius))
+                    .programmeTile(shape: .roundedRectangle(radius: Programme.Metrics.cornerRadius))
                     .accessibilityIdentifier("palette.opponent.\(quick.rawValue)")
                     .accessibilityLabel("\(opponentName) \(quick.title)")
                 }

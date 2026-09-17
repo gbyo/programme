@@ -152,6 +152,7 @@ struct ClockAdjustmentView: View {
                         reason: reason.isEmpty ? nil : reason)
                     dismiss()
                 }
+                .programmeConfirmationTint()
             }
         }
         .onAppear {

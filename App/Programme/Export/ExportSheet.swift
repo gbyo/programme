@@ -88,7 +88,7 @@ struct ExportSheet: View {
                             Label("Share All \(generated.count) Files", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity, minHeight: 40)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .programmePrimaryAction()
                     }
                 }
             }

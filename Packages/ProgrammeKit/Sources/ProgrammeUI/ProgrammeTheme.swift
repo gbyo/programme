@@ -22,6 +22,21 @@ public enum Programme {
     }
 
     public enum Palette {
+        /// Programme's brand lime, taken from the app icon.
+        ///
+        /// It means one thing: *this is the primary Programme action*. It is a
+        /// fill colour and never a text colour — at roughly 1.2:1 against white
+        /// it cannot carry a label, a link, a focus ring or a tinted selection,
+        /// which is why the app's accent stays a legible colour and the lime is
+        /// reserved for prominent filled controls.
+        public static let brand = Color(
+            .displayP3, red: 0.759_19, green: 0.967_83, blue: 0.181_74, opacity: 1)
+
+        /// The label colour on top of `brand`. Near-black in both appearances,
+        /// because the lime fill does not change between them. 17:1 against the
+        /// lime; white would be 1.2:1.
+        public static let onBrand = Color(.sRGB, white: 0.06, opacity: 1)
+
         /// Confirmed, reconciled, complete.
         public static let confirmed = Color.green
         /// Needs a look, but play continues.

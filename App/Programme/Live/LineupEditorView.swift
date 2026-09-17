@@ -25,10 +25,7 @@ struct LineupEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            statusBar
-            Divider()
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     column(
                         title: "Starting Lineup",
@@ -42,8 +39,8 @@ struct LineupEditorView: View {
                         isField: false)
                 }
                 .padding(18)
-            }
         }
+        .safeAreaBar(edge: .top) { statusBar }
         .navigationTitle("Starting Lineup")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -65,6 +62,7 @@ struct LineupEditorView: View {
                 Button("Confirm") { confirm() }
                     .disabled(!isValid)
                     .fontWeight(.semibold)
+                    .programmeConfirmationTint()
             }
         }
         .onAppear(perform: load)
@@ -101,8 +99,6 @@ struct LineupEditorView: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(.bar)
     }
 
     private func column(title: String, subtitle: String, players: [PlayerSnapshot], isField: Bool)
@@ -151,6 +147,7 @@ struct LineupEditorView: View {
                     .strokeBorder(
                         isField && dropTargetIsField ? Color.accentColor : .clear, lineWidth: 2)
             )
+            .animation(.snappy(duration: 0.15), value: dropTargetIsField)
             .dropDestination(for: String.self) { items, _ in
                 move(identifiers: items, toField: isField)
                 return true
