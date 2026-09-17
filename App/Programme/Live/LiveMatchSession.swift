@@ -33,6 +33,12 @@ final class LiveMatchSession {
     /// an action then a player, both work; this is the first half of the former.
     var armedPlayer: PlayerID?
 
+    /// An action requested from outside the scoring workspace — the keyboard
+    /// menu in `ProgrammeCommands`. The workspace observes it and runs it through
+    /// exactly the same path as a tap, so there is one implementation of what a
+    /// goal means.
+    var requestedAction: LiveActionRequest?
+
     /// A short, non-modal message shown in the scoring bar. Live play is never
     /// interrupted by an alert.
     private(set) var notice: LiveNotice?
@@ -92,6 +98,36 @@ final class LiveMatchSession {
 
     var goalkeeper: PlayerSnapshot? {
         snapshot.activeGoalkeeper.flatMap { roster[$0] }
+    }
+
+    /// The armed player, resolved. `nil` whenever nothing is armed.
+    var armedPlayerSnapshot: PlayerSnapshot? {
+        armedPlayer.flatMap { roster[$0] }
+    }
+
+    /// Who this category of event may be attributed to. ProgrammeCore owns the
+    /// rule; the interface only asks.
+    func candidates(for category: AttributionCategory, side: TeamSide = .us) -> [PlayerSnapshot] {
+        AttributionEngine.candidates(
+            for: category, side: side, context: context, snapshot: snapshot)
+    }
+
+    func allowsAttribution(of player: PlayerID, to category: AttributionCategory) -> Bool {
+        AttributionEngine.allows(player, category: category, context: context, snapshot: snapshot)
+    }
+
+    /// Whether tapping this player in the lineup should arm them for the next
+    /// action. Only players on the field can be armed: the generic player-first
+    /// path is for live play, and a substitute did not take that shot. Cards and
+    /// substitutions reach the bench through their own routes.
+    func canArm(_ player: PlayerSnapshot) -> Bool {
+        allowsAttribution(of: player.id, to: .shot)
+    }
+
+    /// Educational UI is for a scorer who is not currently executing. While the
+    /// clock is running, nothing teaches.
+    var showsContextualTips: Bool {
+        !(phase == .inPeriod && clock.isRunning)
     }
 
     var needsReviewCount: Int { snapshot.needsReviewCount }
@@ -464,6 +500,25 @@ final class LiveMatchSession {
         let activity: Activity<Attributes>
     }
 #endif
+
+/// A live action asked for from the menu bar rather than from the palette.
+/// Carrying an identity means asking for the same action twice in a row still
+/// registers as two requests.
+struct LiveActionRequest: Equatable, Identifiable {
+    enum Kind: Equatable {
+        case goal
+        case shotOnGoal
+        case shot
+        case save
+        case corner
+        case substitution
+    }
+
+    let id = UUID()
+    var kind: Kind
+
+    static func == (lhs: LiveActionRequest, rhs: LiveActionRequest) -> Bool { lhs.id == rhs.id }
+}
 
 struct LiveNotice: Equatable, Identifiable {
     enum Kind: Equatable {

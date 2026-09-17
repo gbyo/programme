@@ -15,6 +15,8 @@ struct SettingsView: View {
 
     @AppStorage("defaultStatProfile") private var defaultProfileID = StatProfile.maxPreps.id
     @AppStorage("defaultRulesPreset") private var defaultRulesName = MatchRules.highSchool.name
+    @AppStorage("defaultOpponentTracking") private var defaultTrackingID = OpponentTrackingMode
+        .ourTeam.rawValue
     @AppStorage("confirmBeforeFinalizing") private var confirmBeforeFinalizing = true
     @AppStorage("keepScreenAwakeWhileScoring") private var keepScreenAwake = true
     @AppStorage("hapticFeedbackEnabled") private var hapticsEnabled = true
@@ -47,10 +49,17 @@ struct SettingsView: View {
                             Text(preset.name).tag(preset.name)
                         }
                     }
+                    Picker("Opponent tracking", selection: $defaultTrackingID) {
+                        ForEach(OpponentTrackingMode.allCases) { mode in
+                            Text(mode.label).tag(mode.rawValue)
+                        }
+                    }
                 } header: {
                     Text("Defaults for New Matches")
                 } footer: {
-                    Text("Any match can override these when you create it.")
+                    Text(
+                        "New Match starts from these, and remembers whatever you used last. Any match can override them when you create it."
+                    )
                 }
 
                 Section("Scoring") {
@@ -90,7 +99,9 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Version", value: appVersion)
                 } footer: {
-                    Text("Programme keeps a write-ahead recovery log alongside its library so an interrupted match is never lost.")
+                    Text(
+                        "Programme keeps a write-ahead recovery log alongside its library so an interrupted match is never lost."
+                    )
                 }
             }
             .formStyle(.grouped)

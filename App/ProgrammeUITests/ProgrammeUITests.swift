@@ -30,6 +30,21 @@ final class ProgrammeUITests: XCTestCase {
             "The scoring workspace did not appear")
     }
 
+    /// Scrolls the lineup column until a row is reachable. The swipe is anchored
+    /// on a row rather than on the window, so it scrolls the lineup and not
+    /// whichever panel happens to be in the middle of the workspace.
+    private func revealInLineup(
+        _ app: XCUIApplication, _ identifier: String, anchor: String = "player.9"
+    ) -> XCUIElement {
+        let target = element(app, identifier)
+        var attempts = 0
+        while !(target.exists && target.isHittable) && attempts < 6 {
+            element(app, anchor).swipeUp()
+            attempts += 1
+        }
+        return target
+    }
+
     private func lastEventLabel(_ app: XCUIApplication) -> String {
         let strip = element(app, "scoring.lastEvent")
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
@@ -58,6 +73,17 @@ final class ProgrammeUITests: XCTestCase {
 
         // Direction one: player, then action.
         element(app, "player.9").tap()
+
+        // The palette itself has to say who the next action lands on: by the
+        // time the scorer's eyes are on Record, the lineup highlight is out of
+        // view.
+        let armed = element(app, "palette.armedPlayer")
+        XCTAssertTrue(armed.waitForExistence(timeout: 5), "The armed player is not shown in Record")
+        XCTAssertTrue(
+            armed.label.contains("Carter"),
+            "The armed player state does not name the player: \(armed.label)")
+        attachScreenshot(named: "Player armed")
+
         element(app, "palette.goal").tap()
 
         // The assist step takes over the centre panel rather than covering the score.
@@ -67,7 +93,132 @@ final class ProgrammeUITests: XCTestCase {
         attachScreenshot(named: "Assist attribution")
         unassisted.tap()
 
-        XCTAssertTrue(lastEventLabel(app).contains("GOAL"))
+        let summary = lastEventLabel(app)
+        XCTAssertTrue(summary.contains("GOAL"))
+        XCTAssertTrue(summary.contains("Carter"), "The goal was not credited to the armed player")
+    }
+
+    func testClearingTheArmedPlayerIsOneTap() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "player.9").tap()
+        XCTAssertTrue(element(app, "palette.armedPlayer").waitForExistence(timeout: 5))
+
+        element(app, "palette.clearArmedPlayer").tap()
+        XCTAssertFalse(
+            element(app, "palette.armedPlayer").waitForExistence(timeout: 2),
+            "Clearing the armed player did not take effect")
+    }
+
+    func testABenchPlayerCannotBeArmedForOrdinaryLivePlay() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "player.9").tap()
+        XCTAssertTrue(element(app, "palette.armedPlayer").waitForExistence(timeout: 5))
+
+        // #8 came off in the sample match, so he is on the bench and cannot be
+        // credited with a shot. Tapping him must not arm him — and must not
+        // silently leave the previous player armed either.
+        let benchRow = revealInLineup(app, "player.8")
+        XCTAssertTrue(benchRow.exists, "The bench row was not reachable")
+        benchRow.tap()
+
+        XCTAssertFalse(
+            element(app, "palette.armedPlayer").waitForExistence(timeout: 2),
+            "A player on the bench was armed for an ordinary live-play action")
+    }
+
+    func testOpponentQuickActionsStayVisibleWithoutScrollingThePalette() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        // An opponent shot is how our goalkeeper's shots-faced is recorded, so it
+        // must never sit below the fold of the our-team palette.
+        let opponentShot = element(app, "palette.opponent.shot")
+        XCTAssertTrue(opponentShot.exists, "The opponent quick actions are not pinned")
+        XCTAssertTrue(opponentShot.isHittable, "The opponent quick actions require scrolling")
+        XCTAssertTrue(element(app, "palette.opponent.goal").isHittable)
+
+        opponentShot.tap()
+        XCTAssertTrue(lastEventLabel(app).contains("Shot"))
+    }
+
+    func testRedoKeepsItsPlaceInTheToolbarAfterAnUndo() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        // Redo exists before there is anything to redo, so pressing Undo never
+        // moves the controls beside it.
+        let redo = element(app, "scoring.redo")
+        XCTAssertTrue(redo.exists, "Redo is missing when it is unavailable")
+        XCTAssertFalse(redo.isEnabled)
+        let restingFrame = redo.frame
+
+        element(app, "palette.corner").tap()
+        element(app, "pick.7").tap()
+        XCTAssertTrue(lastEventLabel(app).contains("Corner"))
+
+        element(app, "scoring.undo").tap()
+
+        let enabled = expectation(
+            for: NSPredicate(format: "isEnabled == true"), evaluatedWith: redo)
+        wait(for: [enabled], timeout: 5)
+        XCTAssertEqual(
+            redo.frame, restingFrame, "Undo moved the toolbar controls out from under the scorer")
+    }
+
+    func testAPenaltyAsksForTheOutcomeAndDoesNotImplyAGoal() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "palette.pk").tap()
+
+        // The taker, not "who scored".
+        XCTAssertTrue(app.staticTexts["Who took the penalty?"].waitForExistence(timeout: 5))
+        element(app, "pick.9").tap()
+
+        XCTAssertTrue(app.staticTexts["What happened?"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "Penalty outcome")
+
+        let saved = element(app, "penalty.saved")
+        XCTAssertTrue(saved.exists, "A saved penalty was not offered")
+        saved.tap()
+
+        let summary = lastEventLabel(app)
+        XCTAssertFalse(
+            summary.contains("GOAL"), "A saved penalty was recorded as a goal: \(summary)")
+        XCTAssertTrue(element(app, "live.score").label.contains("Ninety Six, 1"), "The score changed")
+    }
+
+    func testMoreIsAMenuThatReturnsStraightToAttribution() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "palette.more").tap()
+        let blocked = app.buttons["Blocked"].firstMatch
+        XCTAssertTrue(blocked.waitForExistence(timeout: 5), "More did not offer a blocked shot")
+        blocked.tap()
+
+        // Straight into the centre stage, with the match still on screen.
+        XCTAssertTrue(app.staticTexts["Who took the shot?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "live.score").exists, "The score was hidden by the More flow")
+        element(app, "pick.9").tap()
+        XCTAssertTrue(lastEventLabel(app).contains("Blocked"))
+    }
+
+    func testNoTipInterruptsTheScorerWhileTheClockIsRunning() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        // The sample live match opens with the clock running.
+        element(app, "palette.sog").tap()
+        XCTAssertTrue(element(app, "pick.wide.Player Unknown").waitForExistence(timeout: 5))
+
+        XCTAssertFalse(
+            app.staticTexts["Don't know the number?"].exists,
+            "A tip appeared in the scoring workspace while the clock was running")
     }
 
     func testRecordingAnEventByTappingTheActionThenThePlayer() {
@@ -192,7 +343,8 @@ final class ProgrammeUITests: XCTestCase {
         attachScreenshot(named: "Event log")
 
         let goalRow = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS 'GOAL'")).firstMatch
+            NSPredicate(format: "label CONTAINS 'GOAL'")
+        ).firstMatch
         XCTAssertTrue(goalRow.waitForExistence(timeout: 5))
         goalRow.tap()
         XCTAssertTrue(app.navigationBars["Edit Event"].waitForExistence(timeout: 5))
@@ -238,11 +390,44 @@ final class ProgrammeUITests: XCTestCase {
         opponent.typeText("Newberry")
         attachScreenshot(named: "New match")
 
-        app.buttons["Create"].tap()
+        // The primary action creates the match and goes straight to the lineup,
+        // which is what the scorer does next every single time.
+        element(app, "newMatch.create").tap()
+
         XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Newberry'")).firstMatch
-                .waitForExistence(timeout: 15),
-            "The new match did not open after being created")
+            app.navigationBars["Starting Lineup"].waitForExistence(timeout: 15),
+            "Create & Set Lineup did not open the lineup editor")
+        attachScreenshot(named: "Lineup editor")
+
+        let confirm = element(app, "lineup.confirm")
+        XCTAssertTrue(confirm.isEnabled, "The prefilled lineup was not valid")
+        confirm.tap()
+
+        waitForScorer(app)
+        XCTAssertTrue(
+            element(app, "live.score").label.contains("Newberry"),
+            "The new match did not open in the scorer")
+        // Creating a match never starts the clock.
+        XCTAssertTrue(
+            element(app, "live.startPeriod").exists,
+            "The match clock was started automatically")
+    }
+
+    func testNewMatchRemembersTheScoringConfiguration() {
+        let app = launch()
+        XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
+
+        app.buttons["New Match"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["New Match"].waitForExistence(timeout: 5))
+
+        // One row, stating exactly what this match will record, instead of three
+        // pickers to re-confirm before every kickoff.
+        let scoring = element(app, "newMatch.scoring")
+        XCTAssertTrue(scoring.waitForExistence(timeout: 5), "The scoring summary row is missing")
+        XCTAssertTrue(
+            scoring.label.contains("High School") && scoring.label.contains("MaxPreps")
+                && scoring.label.contains("Our Team"),
+            "The scoring summary does not state the configuration: \(scoring.label)")
     }
 
     func testMatchDetailDistinguishesNotTrackedFromZero() {

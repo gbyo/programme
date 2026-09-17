@@ -141,6 +141,19 @@ struct ProgrammeCommands: Commands {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(appModel.liveSession?.canRedo != true)
         }
+        // The live shortcuts are single unmodified keys, which is right for
+        // someone scoring with a keyboard and wrong for discoverability. Listing
+        // them here means the system's own shortcut overlay and the menu teach
+        // them, without the touch interface depending on any of it.
+        CommandMenu("Record") {
+            liveAction("Goal", key: "g", kind: .goal)
+            liveAction("Shot on Goal", key: "s", kind: .shotOnGoal, requires: .shots)
+            liveAction("Shot", key: "h", kind: .shot, requires: .shots)
+            liveAction("Save", key: "v", kind: .save, requires: .goalkeeping)
+            liveAction("Corner", key: "c", kind: .corner, requires: .corners)
+            Divider()
+            liveAction("Substitution", key: "b", kind: .substitution)
+        }
         CommandMenu("Match") {
             Button("Start or Stop Clock") { appModel.liveSession?.toggleClock() }
                 .keyboardShortcut(.space, modifiers: [])
@@ -158,6 +171,26 @@ struct ProgrammeCommands: Commands {
             .keyboardShortcut("w", modifiers: .command)
             .disabled(appModel.liveSession == nil)
         }
+    }
+
+    /// Menu entries route through the same request the palette uses, so a goal
+    /// recorded from the keyboard asks for the scorer and the assist exactly as a
+    /// tapped one does. There is one implementation of what a goal means.
+    private func liveAction(
+        _ title: String, key: KeyEquivalent, kind: LiveActionRequest.Kind,
+        requires stat: TrackedStat? = nil
+    ) -> some View {
+        Button(title) {
+            appModel.liveSession?.requestedAction = LiveActionRequest(kind: kind)
+        }
+        .keyboardShortcut(key, modifiers: [])
+        .disabled(!isAvailable(stat))
+    }
+
+    private func isAvailable(_ stat: TrackedStat?) -> Bool {
+        guard let session = appModel.liveSession, session.phase.isLive else { return false }
+        guard let stat else { return true }
+        return session.profile.tracks(stat)
     }
 }
 

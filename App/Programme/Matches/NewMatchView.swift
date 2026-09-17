@@ -6,9 +6,22 @@ import SwiftUI
 
 /// Creating a match should take under a minute, and produce something that is
 /// ready to score.
+///
+/// Almost everything here except the opponent is the same every Tuesday, so the
+/// scoring configuration is remembered between matches and collapsed into one
+/// summary row. It is not hidden — the row states exactly what this match will
+/// record, and opens the full configuration — but it is not five pickers the
+/// scorer re-confirms before every kickoff either.
 struct NewMatchView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
+
+    /// Shared with Settings. The last configuration used becomes the default for
+    /// the next match, which is what "season defaults" means in practice.
+    @AppStorage("defaultStatProfile") private var defaultProfileID = StatProfile.maxPreps.id
+    @AppStorage("defaultRulesPreset") private var defaultRulesName = MatchRules.highSchool.name
+    @AppStorage("defaultOpponentTracking") private var defaultTrackingID = OpponentTrackingMode
+        .ourTeam.rawValue
 
     @State private var opponent = ""
     @State private var opponentShort = ""
@@ -27,6 +40,10 @@ struct NewMatchView: View {
 
     private var profile: StatProfile {
         StatProfile.preset(id: profileID) ?? .maxPreps
+    }
+
+    private var canCreate: Bool {
+        !opponent.trimmingCharacters(in: .whitespaces).isEmpty && !isSaving
     }
 
     var body: some View {
@@ -51,51 +68,24 @@ struct NewMatchView: View {
                 }
 
                 Section {
-                    Picker("Match format", selection: $rulesPresetName) {
-                        ForEach(MatchRules.presets, id: \.name) { preset in
-                            Text(preset.name).tag(preset.name)
+                    NavigationLink {
+                        MatchScoringSettings(
+                            rulesPresetName: $rulesPresetName,
+                            profileID: $profileID,
+                            tracking: $tracking)
+                    } label: {
+                        LabeledContent("Scoring") {
+                            Text(scoringSummary)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
                         }
                     }
-                    LabeledContent("Periods") {
-                        Text(
-                            "\(rules.regulationPeriods) × \(rules.regulationPeriodDuration / 60) min"
-                                + (rules.overtimePeriods > 0
-                                    ? ", \(rules.overtimePeriods) × \(rules.overtimePeriodDuration / 60) min OT" : "")
-                        )
-                        .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Format")
+                    .accessibilityIdentifier("newMatch.scoring")
+                    .accessibilityLabel("Scoring. \(scoringSummary)")
                 } footer: {
-                    Text("Programme stores the format with the match, so rate statistics like goals-against average stay correct even if you change formats later.")
-                }
-
-                Section {
-                    Picker("Stat profile", selection: $profileID) {
-                        ForEach(StatProfile.presets) { preset in
-                            Text(preset.name).tag(preset.id)
-                        }
-                    }
-                    Text(profile.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    trackedSummary
-                } header: {
-                    Text("What to Track")
-                } footer: {
-                    Text("Categories you don't track are reported as unknown rather than zero — in this match, in season totals, and in every export.")
-                }
-
-                Section {
-                    Picker("Opponent tracking", selection: $tracking) {
-                        ForEach(OpponentTrackingMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                    Text(tracking.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(
+                        "Programme remembers this for your next match. Categories you don't track are reported as unknown rather than zero — in this match, in season totals, and in every export."
+                    )
                 }
 
                 if let errorMessage {
@@ -113,32 +103,36 @@ struct NewMatchView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { Task { await create() } }
-                        .disabled(opponent.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    // The next thing a scorer does after creating a match is
+                    // always the lineup, so that is what the primary action does.
+                    // It never starts the clock.
+                    Button("Create & Set Lineup") { Task { await create(openingScorer: true) } }
+                        .disabled(!canCreate)
                         .fontWeight(.semibold)
+                        .accessibilityIdentifier("newMatch.create")
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Create Only", systemImage: "calendar.badge.plus") {
+                        Task { await create(openingScorer: false) }
+                    }
+                    .disabled(!canCreate)
                 }
             }
+            .onAppear(perform: loadDefaults)
         }
     }
 
-    private var trackedSummary: some View {
-        let tracked = TrackedStat.allCases.filter { profile.tracks($0) }
-        let untracked = TrackedStat.allCases.filter { !profile.tracks($0) }
-        return VStack(alignment: .leading, spacing: 6) {
-            if !tracked.isEmpty {
-                Label(tracked.map(\.label).joined(separator: ", "), systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(Programme.Palette.confirmed)
-            }
-            if !untracked.isEmpty {
-                Label("Not tracked: " + untracked.map(\.label).joined(separator: ", "), systemImage: "minus.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
+    private var scoringSummary: String {
+        [rules.name, profile.name, tracking.label].joined(separator: " · ")
     }
 
-    private func create() async {
+    private func loadDefaults() {
+        rulesPresetName = defaultRulesName
+        profileID = defaultProfileID
+        tracking = OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam
+    }
+
+    private func create(openingScorer: Bool) async {
         guard let store = appModel.store, let teamID = appModel.teamID else {
             errorMessage = "Create a team first."
             return
@@ -164,11 +158,117 @@ struct NewMatchView: View {
                 tracking: tracking,
                 competition: competition.isEmpty ? nil : competition,
                 roster: roster)
+
+            // What was just used becomes the default for the next match.
+            defaultRulesName = rulesPresetName
+            defaultProfileID = profileID
+            defaultTrackingID = tracking.rawValue
+
             await appModel.refreshWidgetSnapshot()
             dismiss()
-            appModel.navigation.open(.match(matchID))
+            if openingScorer {
+                // The scorer opens on the lineup editor when a match has no
+                // starting lineup, so this lands exactly where the work is.
+                await appModel.openLiveSession(matchID: matchID)
+            } else {
+                appModel.navigation.open(.match(matchID))
+            }
         } catch {
             errorMessage = "Programme couldn't create that match. Nothing was changed. Try again."
+        }
+    }
+}
+
+/// The full scoring configuration, one push away from New Match.
+///
+/// Nothing is removed here. The point of the summary row is that a scorer who
+/// uses the same setup every week never has to come in.
+struct MatchScoringSettings: View {
+    @Binding var rulesPresetName: String
+    @Binding var profileID: String
+    @Binding var tracking: OpponentTrackingMode
+
+    private var rules: MatchRules {
+        MatchRules.presets.first { $0.name == rulesPresetName } ?? .highSchool
+    }
+
+    private var profile: StatProfile {
+        StatProfile.preset(id: profileID) ?? .maxPreps
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Match format", selection: $rulesPresetName) {
+                    ForEach(MatchRules.presets, id: \.name) { preset in
+                        Text(preset.name).tag(preset.name)
+                    }
+                }
+                LabeledContent("Periods") {
+                    Text(
+                        "\(rules.regulationPeriods) × \(rules.regulationPeriodDuration / 60) min"
+                            + (rules.overtimePeriods > 0
+                                ? ", \(rules.overtimePeriods) × \(rules.overtimePeriodDuration / 60) min OT" : "")
+                    )
+                    .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Format")
+            } footer: {
+                Text(
+                    "Programme stores the format with the match, so rate statistics like goals-against average stay correct even if you change formats later."
+                )
+            }
+
+            Section {
+                Picker("Stat profile", selection: $profileID) {
+                    ForEach(StatProfile.presets) { preset in
+                        Text(preset.name).tag(preset.id)
+                    }
+                }
+                Text(profile.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                trackedSummary
+            } header: {
+                Text("What to Track")
+            } footer: {
+                Text(
+                    "Categories you don't track are reported as unknown rather than zero — in this match, in season totals, and in every export."
+                )
+            }
+
+            Section {
+                Picker("Opponent tracking", selection: $tracking) {
+                    ForEach(OpponentTrackingMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.inline)
+                Text(tracking.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Scoring")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var trackedSummary: some View {
+        let tracked = TrackedStat.allCases.filter { profile.tracks($0) }
+        let untracked = TrackedStat.allCases.filter { !profile.tracks($0) }
+        return VStack(alignment: .leading, spacing: 6) {
+            if !tracked.isEmpty {
+                Label(tracked.map(\.label).joined(separator: ", "), systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(Programme.Palette.confirmed)
+            }
+            if !untracked.isEmpty {
+                Label("Not tracked: " + untracked.map(\.label).joined(separator: ", "), systemImage: "minus.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -262,7 +362,8 @@ struct RecoveryReviewView: View {
                             LabeledContent("Events", value: "\(context.events.count)")
                             LabeledContent(
                                 "Score",
-                                value: "\(StatEngine.snapshot(context: context).score.us)–\(StatEngine.snapshot(context: context).score.opponent)"
+                                value:
+                                    "\(StatEngine.snapshot(context: context).score.us)–\(StatEngine.snapshot(context: context).score.opponent)"
                             )
                             LabeledContent(
                                 "Period",
