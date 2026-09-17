@@ -29,36 +29,35 @@ case "${1:-}" in
         ;;
 esac
 
-lint_files() {
-    local -a files=("$@")
-    if (( ${#files[@]} == 0 )); then
+lint_nul_list() {
+    local list="$1"
+    if [[ ! -s "$list" ]]; then
         echo "No Swift files need a formatting check."
         return 0
     fi
 
-    printf 'Checking Swift formatting (%d file%s)…\n' \
-        "${#files[@]}" "$([[ ${#files[@]} -eq 1 ]] && echo '' || echo 's')"
-    xcrun swift-format lint --configuration "$ROOT/.swift-format" --strict "${files[@]}"
+    echo "Checking Swift formatting…"
+    xargs -0 xcrun swift-format lint --configuration "$ROOT/.swift-format" --strict < "$list"
 }
 
 if [[ "$mode" == "format" ]]; then
     echo "Formatting all tracked Swift sources…"
-    mapfile -d '' files < <(git ls-files -z '*.swift')
-    if (( ${#files[@]} > 0 )); then
-        xcrun swift-format format --configuration "$ROOT/.swift-format" --in-place "${files[@]}"
-    fi
+    git ls-files -z '*.swift' \
+        | xargs -0 xcrun swift-format format --configuration "$ROOT/.swift-format" --in-place
     exit 0
 fi
 
 if [[ "$mode" == "check-all" ]]; then
-    mapfile -d '' files < <(git ls-files -z '*.swift')
-    lint_files "${files[@]}"
+    list="$(mktemp "${TMPDIR:-/tmp}/programme-format.XXXXXX")"
+    trap 'rm -f "$list"' EXIT
+    git ls-files -z '*.swift' > "$list"
+    lint_nul_list "$list"
     exit 0
 fi
 
-# The repository adopted swift-format after its initial implementation. CI therefore
-# ratchets formatting forward: every Swift file touched by a change must conform,
-# without hiding functional work inside a one-time whole-tree formatting rewrite.
+# Programme adopted swift-format after its initial implementation. CI ratchets
+# formatting forward: every Swift file touched by a change must conform, without
+# hiding functional work inside a one-time whole-tree formatting rewrite.
 if [[ -z "$base" ]]; then
     if git rev-parse --verify --quiet origin/main >/dev/null; then
         base="$(git merge-base origin/main HEAD)"
@@ -75,14 +74,15 @@ if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
     exit 2
 fi
 
+list="$(mktemp "${TMPDIR:-/tmp}/programme-format.XXXXXX")"
+trap 'rm -f "$list"' EXIT
+
 {
     git diff --name-only --diff-filter=ACMR "$base"...HEAD -- '*.swift'
     git diff --name-only --diff-filter=ACMR -- '*.swift'
     git diff --cached --name-only --diff-filter=ACMR -- '*.swift'
 } | sort -u | while IFS= read -r path; do
     [[ -n "$path" && -f "$path" ]] && printf '%s\0' "$path"
-done > "${TMPDIR:-/tmp}/programme-format-files-$$"
+done > "$list"
 
-mapfile -d '' files < "${TMPDIR:-/tmp}/programme-format-files-$$"
-rm -f "${TMPDIR:-/tmp}/programme-format-files-$$"
-lint_files "${files[@]}"
+lint_nul_list "$list"
