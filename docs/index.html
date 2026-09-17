@@ -7,7 +7,6 @@
 <title>Programme — Soccer scorekeeping for iPad</title>
 <meta name="description" content="Programme is an iPad scorebook for recording soccer matches and producing match and season statistics.">
 <link rel="canonical" href="https://gbyo.github.io/programme/">
-
 <meta property="og:type" content="website">
 <meta property="og:title" content="Programme — Soccer scorekeeping for iPad">
 <meta property="og:description" content="Programme is an iPad scorebook for recording soccer matches and producing match and season statistics.">
@@ -17,12 +16,9 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="The Programme mark: an open match programme with a pitch centre circle across the fold.">
 <meta name="twitter:card" content="summary_large_image">
-
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/programme-icon.svg">
-<meta name="theme-color" content="#b3f900" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#b3f900" media="(prefers-color-scheme: dark)">
-
+<meta name="theme-color" content="#b3f900">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400..900&amp;display=swap" rel="stylesheet">
@@ -33,518 +29,85 @@
 
 <header class="nav" id="nav">
   <div class="wrap nav-inner">
-    <a class="nav-brand" href="#top">
-      <img class="mark-light" src="assets/programme-mark.svg" width="26" height="26" alt="">
-      <img class="mark-dark" src="assets/programme-mark-dark.svg" width="26" height="26" alt="">
-      <span>Programme</span>
-    </a>
+    <a class="nav-brand" href="#top"><img src="assets/programme-mark.svg" width="26" height="26" alt=""><span>Programme</span></a>
     <nav class="nav-links" aria-label="Sections">
-      <a href="#live">Live</a>
-      <a href="#statistics">Statistics</a>
-      <a href="#season">Season</a>
-      <a href="#export">Exports</a>
+      <a href="#live">Live</a><a href="#lineups">Lineups</a><a href="#statistics">Statistics</a><a href="#exports">Exports</a>
     </nav>
-    <a class="nav-github" href="https://github.com/gbyo/programme">View on GitHub&nbsp;↗</a>
+    <a class="nav-github" href="https://github.com/gbyo/programme">GitHub&nbsp;↗</a>
   </div>
 </header>
 
 <main id="top">
-
-<!-- ======================================================================
-     Hero — the cover, opened
-     ====================================================================== -->
-<section class="band band--lime hero">
-  <div class="hero-grid">
-    <div class="hero-copy">
-      <p class="label">Programme</p>
-      <h1>Soccer scorekeeping for iPad.</h1>
-      <p class="hero-body">Programme is a scorebook for recording soccer matches live from the sideline. Track the match as it happens, review the record, and export game and season statistics.</p>
-      <p class="hero-actions">
-        <a class="btn btn-ink" href="https://github.com/gbyo/programme">View on GitHub</a>
-        <a class="text-link" href="#live">Explore Programme&nbsp;↓</a>
-      </p>
-    </div>
-
-    <div class="hero-sheet" id="hero-sheet">
-      <div class="hero-shot">
-        <img src="assets/live-scoring.png"
-             srcset="assets/live-scoring.png 1320w, assets/live-scoring@2x.png 2640w"
-             sizes="(max-width: 1020px) 100vw, 60vw"
-             width="1320" height="940"
-             alt="Programme running on an iPad. The match screen shows Ninety Six 1, Dixie 0, with 16:13 left in the first half. The on-field lineup runs down the left with jersey numbers and minutes, the pitch and shot map sit in the centre, and the action palette is on the right: Goal, Shot on Goal, Shot, Save, Corner, Steal, Substitution, Penalty Kick, Yellow Card and Red Card.">
+  <section class="hero">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="label">Programme</p>
+        <h1>Soccer scorekeeping for iPad.</h1>
+        <p class="hero-body">Programme records the match from the sideline, turns every event into reliable statistics, and keeps the whole season in view.</p>
+        <p class="hero-actions"><a class="button" href="https://github.com/gbyo/programme">View on GitHub</a><a class="text-link" href="#live">See Programme&nbsp;↓</a></p>
       </div>
+      <figure class="hero-shot reveal">
+        <img src="assets/live-scoring.png" srcset="assets/live-scoring.png 1320w, assets/live-scoring@2x.png 2640w" sizes="(max-width: 900px) 100vw, 60vw" width="1320" height="940" alt="Programme's live scoring workspace on iPad, with score, clock, lineup, pitch and match actions visible together.">
+      </figure>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ======================================================================
-     Live scoring
-     ====================================================================== -->
-<section class="band band--paper" id="live">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Live scoring</p>
-      <div class="head-copy">
-        <h2>Record matches live.</h2>
-        <p class="body">Goals, shots, saves, cards, fouls, offsides, corners, and substitutions are recorded from the same match screen.</p>
-      </div>
+  <section class="chapter chapter-live" id="live">
+    <div class="wrap chapter-head">
+      <p class="kicker">01 / Live match</p>
+      <div><h2>Live scoring</h2><p>Score, clock, lineup, pitch, and match actions stay visible in the same workspace.</p></div>
     </div>
-  </div>
-
-  <div class="live-comp">
-    <div class="wrap live-comp-inner app-ui">
-      <div class="live-clock">
-        <p class="col-label">Match <span>Ninety Six vs Dixie</span></p>
-        <p class="scoreblock">
-          <span class="side-name">Ninety Six</span>
-          <span class="score num">1</span>
-          <span class="score-dash num">–</span>
-          <span class="score num">0</span>
-          <span class="side-name side-name--away">Dixie</span>
-        </p>
-        <div class="period-rule" aria-hidden="true"><i style="width:59%"></i></div>
-        <p class="clock-huge num" id="live-clock">16:13</p>
-        <p class="clock-huge-meta"><span>1st half</span><span>Running</span></p>
-        <dl class="tally">
-          <div><dt>Shots</dt><dd class="num">6</dd></div>
-          <div><dt>Shots on goal</dt><dd class="num">3</dd></div>
-          <div><dt>Corners</dt><dd class="num">2</dd></div>
-          <div><dt>Saves</dt><dd class="num">2</dd></div>
-        </dl>
+    <figure class="live-frame reveal">
+      <div class="screenshot-placeholder" role="img" aria-label="Placeholder for a landscape screenshot of Programme's live scorer.">
+        <span class="placeholder-index">Screenshot 01</span><span class="placeholder-title">Live scorer</span><span class="placeholder-note">Landscape iPad · score, clock, lineup, pitch, and full event palette visible</span>
       </div>
+      <figcaption>Live match · Ninety Six v Dixie</figcaption>
+    </figure>
+  </section>
 
-      <div class="live-palette" role="img" aria-label="Programme's action palette in its fixed order: Goal, Shot on Goal, Shot, Save, Corner, Steal, Substitution, Penalty Kick, Yellow Card, Red Card and More.">
-        <p class="col-label">Record <span>Two taps, in either direction</span></p>
-        <div class="palette palette--large">
-          <span class="pal pal--goal"><b>Goal</b><i>Scorer, then assist</i></span>
-          <span class="pal"><b>Shot on Goal</b><i>Saved by their keeper</i></span>
-          <span class="pal"><b>Shot</b><i>Off target</i></span>
-          <span class="pal"><b>Save</b><i>Their shot on goal</i></span>
-          <span class="pal"><b>Corner</b><i>&nbsp;</i></span>
-          <span class="pal"><b>Steal</b><i>&nbsp;</i></span>
-          <span class="pal"><b>Substitution</b><i>Out, then in</i></span>
-          <span class="pal"><b>Penalty Kick</b><i>&nbsp;</i></span>
-          <span class="pal pal--caution"><b>Yellow Card</b><i>&nbsp;</i></span>
-          <span class="pal pal--critical"><b>Red Card</b><i>&nbsp;</i></span>
-          <span class="pal pal--more"><b>More</b><i>&nbsp;</i></span>
-        </div>
-      </div>
+  <section class="chapter chapter-lineups" id="lineups">
+    <div class="wrap chapter-head">
+      <p class="kicker">02 / Team + pitch</p>
+      <div><h2>Lineups and shot locations</h2><p>Manage who is on the field and record where shots happened without leaving the match.</p></div>
     </div>
-  </div>
-
-  <div class="wrap">
-    <div class="scoring-bar app-ui" role="img" aria-label="The scoring bar: the last event recorded was a steal by number 10 Sanders at 18:10. Undo, Edit, Event Log and Review controls sit beside it, with one item waiting for review.">
-      <span class="bar-time num">18:10</span>
-      <span class="bar-title">Steal</span>
-      <span class="bar-detail">#10 Sanders</span>
-      <span class="bar-actions">
-        <span class="ctl">Undo</span>
-        <span class="ctl">Edit</span>
-        <span class="ctl">Event Log</span>
-        <span class="ctl ctl--review">Review · 1</span>
-      </span>
+    <div class="lineup-composition reveal">
+      <figure class="screen screen-lineup"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for a Programme lineup and substitution screenshot."><span class="placeholder-index">Screenshot 02</span><span class="placeholder-title">Lineup + substitutions</span><span class="placeholder-note">Landscape iPad · on-field players, bench, and a pending substitution</span></div><figcaption>Lineup and substitutions</figcaption></figure>
+      <figure class="screen screen-shotmap"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for a Programme shot location screenshot."><span class="placeholder-index">Screenshot 03</span><span class="placeholder-title">Shot locations</span><span class="placeholder-note">Landscape iPad · pitch and several authentic markers visible</span></div><figcaption>Shot locations</figcaption></figure>
     </div>
-    <p class="caption">Undo is a single tap and never asks for confirmation. The order of the palette does not change during a match.</p>
-  </div>
-</section>
+  </section>
 
-<!-- ======================================================================
-     Lineups — a two-page spread
-     ====================================================================== -->
-<section class="band band--paper band--top-rule" id="lineups">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Lineups</p>
-      <div class="head-copy">
-        <h2>Lineups and substitutions</h2>
-        <p class="body">See who is on the field and who is available from the bench. Record substitutions at the match time they happened, including goalkeeper changes.</p>
-      </div>
+  <section class="chapter chapter-statistics" id="statistics">
+    <div class="wrap chapter-head">
+      <p class="kicker">03 / Record</p>
+      <div><h2>Match and season statistics</h2><p>Recorded events feed match statistics, player totals, goalkeeper numbers, and season results.</p></div>
     </div>
-  </div>
-
-  <div class="wrap">
-    <div class="spread app-ui" id="spread">
-      <div class="spread-page spread-page--left">
-        <p class="col-label">On the field <span>11/11</span></p>
-        <ul class="roster">
-          <li><span class="jersey num">1</span><span class="who">Whitfield</span><span class="gk">GK</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">2</span><span class="who">Odom</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">3</span><span class="who">Boyd</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">4</span><span class="who">Pruitt</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">5</span><span class="who">Alvarez</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">6</span><span class="who">Kinard</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">7</span><span class="who">Williams</span><span class="cred">1A</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">9</span><span class="who">Carter</span><span class="cred">1G</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">10</span><span class="who">Sanders</span><span class="mins num">63'</span></li>
-          <li><span class="jersey num">12</span><span class="who">Ridgeway</span><span class="mins num">28'</span></li>
-          <li class="is-leaving"><span class="jersey num">11</span><span class="who">Trotter</span><span class="off">Coming off</span><span class="mins num">63'</span></li>
-        </ul>
-      </div>
-
-      <div class="spread-page spread-page--right">
-        <p class="col-label">Bench <span>9</span></p>
-        <ul class="roster roster--bench">
-          <li class="is-entering"><span class="jersey num">8</span><span class="who">Mabry</span><span class="on">Coming on</span></li>
-          <li><span class="jersey num">13</span><span class="who">Ferrer</span></li>
-          <li><span class="jersey num">14</span><span class="who">Hollis</span></li>
-          <li><span class="jersey num">15</span><span class="who">Nance</span></li>
-          <li><span class="jersey num">16</span><span class="who">Ellison</span></li>
-          <li><span class="jersey num">17</span><span class="who">Fowler</span></li>
-          <li><span class="jersey num">18</span><span class="who">Vaughn</span></li>
-          <li><span class="jersey num">22</span><span class="who">Brannon</span><span class="gk">GK</span></li>
-          <li><span class="jersey num">24</span><span class="who">Lanier</span></li>
-        </ul>
-        <div class="sub-commit">
-          <p class="sub-when"><span class="label label--tight">Substitution</span> At 16:22 · 2nd</p>
-          <p class="sub-hint">Tap players on the left to come off, and on the right to come on.</p>
-          <span class="btn btn-accent btn-block" role="img" aria-label="Make Substitution button">Make Substitution</span>
-        </div>
-      </div>
+    <div class="stats-composition reveal">
+      <figure class="screen screen-season"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for a Programme season statistics screenshot."><span class="placeholder-index">Screenshot 04</span><span class="placeholder-title">Season statistics</span><span class="placeholder-note">Landscape iPad · record, leaders, and player totals</span></div><figcaption>Season statistics</figcaption></figure>
+      <figure class="screen screen-event-log"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for a Programme event log screenshot."><span class="placeholder-index">Screenshot 05</span><span class="placeholder-title">Event log</span><span class="placeholder-note">Landscape iPad · real match events and timestamps</span></div><figcaption>Event log</figcaption></figure>
+      <figure class="screen screen-review"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for a Programme review screenshot."><span class="placeholder-index">Screenshot 06</span><span class="placeholder-title">Review</span><span class="placeholder-note">Landscape iPad · a real item needing attention</span></div><figcaption>Review</figcaption></figure>
     </div>
-    <p class="caption">Several players can be swapped at one timestamp. If the goalkeeper is coming off, Programme asks who takes the gloves before it commits.</p>
-  </div>
-</section>
+  </section>
 
-<!-- ======================================================================
-     Statistics — ink
-     ====================================================================== -->
-<section class="band band--ink" id="statistics">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Statistics</p>
-      <div class="head-copy">
-        <h2>Statistics from the match record</h2>
-        <p class="body">Programme calculates team, player, and goalkeeper statistics from the events recorded during the match. Edit or remove an event and the affected statistics are recalculated automatically.</p>
-      </div>
+  <section class="chapter chapter-exports" id="exports">
+    <div class="wrap chapter-head">
+      <p class="kicker">04 / Output</p>
+      <div><h2>Export your data</h2><p>Create match reports, CSV files, season totals, Programme archives, and a MaxPreps entry summary.</p></div>
     </div>
-
-    <div class="derive" id="derive">
-      <div class="derive-event">
-        <p class="col-label">Event <span class="note-label">Events are the source of truth</span></p>
-        <p class="event-time num">31:22</p>
-        <p class="event-kind">Goal</p>
-        <p class="event-who num">#9</p>
-        <p class="event-sub">Carter · assist #7 Williams · 1st half</p>
-        <button type="button" class="text-link js-only" id="derive-toggle" data-remove="Remove this event" data-restore="Restore this event">Remove this event</button>
-      </div>
-
-      <div class="derive-values">
-        <p class="col-label">Derived <span id="derive-state">Including this event</span></p>
-        <dl class="ledger">
-          <div><dt>Score</dt><dd><span class="v-from num">1–0</span><span class="v-to num">0–0</span></dd></div>
-          <div><dt>Goals · #9</dt><dd><span class="v-from num">1</span><span class="v-to num">0</span></dd></div>
-          <div><dt>Shots · #9</dt><dd><span class="v-from num">3</span><span class="v-to num">2</span></dd></div>
-          <div><dt>Shots on goal · #9</dt><dd><span class="v-from num">2</span><span class="v-to num">1</span></dd></div>
-          <div><dt>Points · #9</dt><dd><span class="v-from num">2</span><span class="v-to num">0</span></dd></div>
-        </dl>
-      </div>
+    <div class="exports-composition reveal">
+      <figure class="screen screen-exports"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for Programme's export screen."><span class="placeholder-index">Screenshot 07</span><span class="placeholder-title">Exports</span><span class="placeholder-note">Landscape iPad · formats selected and at least one generated file ready to share</span></div><figcaption>Exports · generated from the match record</figcaption></figure>
+      <figure class="screen screen-match-detail"><div class="screenshot-placeholder" role="img" aria-label="Placeholder for a real Programme export output preview."><span class="placeholder-index">Output 08</span><span class="placeholder-title">Generated report</span><span class="placeholder-note">Real Programme PDF/stat sheet preview · not a web recreation</span></div><figcaption>Generated match report</figcaption></figure>
     </div>
-    <p class="caption caption--ink">A goal is a shot outcome, so removing it removes the shot and the shot on goal with it. Points are goals × 2 + assists. These are this match’s values for #9 Carter.</p>
-  </div>
-</section>
-
-<!-- ======================================================================
-     Shot locations — lime, full-bleed pitch
-     ====================================================================== -->
-<section class="band band--lime shots" id="shots">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Shot locations</p>
-      <div class="head-copy">
-        <h2>Record shots on the pitch.</h2>
-        <p class="body">Add a shot location with touch or Apple Pencil. Programme uses different marker shapes for goals, shots on target, shots off target, blocks, and woodwork.</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="pitch-bleed" role="img" aria-label="A soccer pitch in true proportions carrying a shot map. Markers are shaped by outcome: rings for goals, filled circles for shots on target, hollow circles for off target, squares for blocked shots and diamonds for woodwork.">
-    <svg class="pitch-big" viewBox="0 0 105 68" preserveAspectRatio="xMaxYMid slice">
-      <g class="pl">
-        <rect x="0" y="0" width="105" height="68"/>
-        <path d="M52.5 0 V68"/>
-        <circle cx="52.5" cy="34" r="9.15"/>
-        <rect x="0" y="13.84" width="16.5" height="40.32"/>
-        <rect x="88.5" y="13.84" width="16.5" height="40.32"/>
-        <rect x="0" y="24.84" width="5.5" height="18.32"/>
-        <rect x="99.5" y="24.84" width="5.5" height="18.32"/>
-        <rect x="-1.5" y="30.34" width="1.5" height="7.32"/>
-        <rect x="105" y="30.34" width="1.5" height="7.32"/>
-        <path d="M16.5 26.688 A9.15 9.15 0 0 1 16.5 41.312"/>
-        <path d="M88.5 26.688 A9.15 9.15 0 0 0 88.5 41.312"/>
-      </g>
-      <g class="ps">
-        <circle cx="11" cy="34" r="0.4"/>
-        <circle cx="94" cy="34" r="0.4"/>
-        <circle cx="52.5" cy="34" r="0.4"/>
-      </g>
-      <g class="marks" id="shot-marks">
-        <g class="mk mk--goal"><circle cx="88" cy="30" r="1.9"/><circle class="core" cx="88" cy="30" r="0.95"/></g>
-        <g class="mk mk--goal"><circle cx="93.6" cy="37.6" r="1.9"/><circle class="core" cx="93.6" cy="37.6" r="0.95"/></g>
-        <g class="mk mk--saved"><circle class="core" cx="84" cy="41.4" r="1.5"/></g>
-        <g class="mk mk--saved"><circle class="core" cx="90.2" cy="26.2" r="1.5"/></g>
-        <g class="mk mk--off"><circle cx="77.4" cy="24.8" r="1.6"/></g>
-        <g class="mk mk--off"><circle cx="74.6" cy="44.8" r="1.6"/></g>
-        <g class="mk mk--blocked"><rect x="79.1" y="34.6" width="2.9" height="2.9"/></g>
-        <g class="mk mk--wood"><rect x="86.2" y="45.1" width="2.7" height="2.7" transform="rotate(45 87.55 46.45)"/></g>
-      </g>
-    </svg>
-  </div>
-
-  <div class="wrap">
-    <ul class="legend">
-      <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="12" cy="12" r="4.5" fill="currentColor"/></svg>Goal</li>
-      <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg>On target</li>
-      <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>Off target</li>
-      <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>Blocked</li>
-      <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" transform="rotate(45 12 12)"/></svg>Woodwork</li>
-    </ul>
-    <p class="caption caption--lime">Attacking left to right. The pitch is drawn to real proportions, and the map stays readable with Differentiate Without Colour turned on because shape carries the outcome.</p>
-  </div>
-</section>
-
-<!-- ======================================================================
-     Match review
-     ====================================================================== -->
-<section class="band band--paper" id="review">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Match review</p>
-      <div class="head-copy">
-        <h2>Review the match before finalizing it.</h2>
-        <p class="body">Programme collects unresolved players, lineup problems, incomplete periods, and other items that still need attention in one place.</p>
-        <p class="body body--soft">Items that need review do not interrupt live scoring.</p>
-      </div>
-    </div>
-
-    <div class="ledger-head">
-      <p class="col-label">Needs review <span>2 open</span></p>
-    </div>
-    <ul class="issues app-ui">
-      <li>
-        <span class="sev sev--review" aria-hidden="true"></span>
-        <span class="issue-title">Unidentified player</span>
-        <span class="issue-detail num">Shot · 41:08</span>
-        <span class="issue-state issue-state--review">Review</span>
-      </li>
-      <li>
-        <span class="sev sev--review" aria-hidden="true"></span>
-        <span class="issue-title">Lineup</span>
-        <span class="issue-detail num">10 of 11 players</span>
-        <span class="issue-state issue-state--review">Review</span>
-      </li>
-      <li>
-        <span class="sev sev--ok" aria-hidden="true"></span>
-        <span class="issue-title">Score reconciled</span>
-        <span class="issue-detail">Goals allowed match the score</span>
-        <span class="issue-state issue-state--ok">Complete</span>
-      </li>
-    </ul>
-    <p class="caption">A shot recorded without a jersey number counts toward team totals immediately and waits here for a player. Assigning one revises the original event rather than adding a second.</p>
-  </div>
-</section>
-
-<!-- ======================================================================
-     Season
-     ====================================================================== -->
-<section class="band band--paper band--top-rule" id="season">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Season</p>
-      <div class="head-copy">
-        <h2>Season statistics</h2>
-        <p class="body">Finalized matches contribute to player totals, goalkeeper statistics, team results, and tracking coverage for the season.</p>
-      </div>
-    </div>
-
-    <dl class="season-head">
-      <div><dt>Record</dt><dd class="num">12-4-2</dd></div>
-      <div><dt>Goals For</dt><dd class="num">41</dd></div>
-      <div><dt>Goals Against</dt><dd class="num">18</dd></div>
-      <div><dt>Shutouts</dt><dd class="num">6</dd></div>
-      <div><dt>Matches</dt><dd class="num">18</dd></div>
-    </dl>
-
-    <div class="tables">
-      <div class="table-block">
-        <p class="col-label">Players</p>
-        <div class="table-scroll">
-        <table class="stat-table">
-          <thead>
-            <tr><th scope="col">Player</th><th scope="col">GP</th><th scope="col">GS</th><th scope="col">MIN</th><th scope="col">G</th><th scope="col">A</th><th scope="col">PTS</th><th scope="col">SH</th><th scope="col">SOG</th></tr>
-          </thead>
-          <tbody>
-            <tr><th scope="row"><span class="jersey num">9</span> Carter</th><td class="num">18</td><td class="num">18</td><td class="num">1284</td><td class="num">14</td><td class="num">6</td><td class="num">34</td><td class="num">61</td><td class="num">33</td></tr>
-            <tr><th scope="row"><span class="jersey num">11</span> Trotter</th><td class="num">18</td><td class="num">16</td><td class="num">1147</td><td class="num">11</td><td class="num">5</td><td class="num">27</td><td class="num">48</td><td class="num">26</td></tr>
-            <tr><th scope="row"><span class="jersey num">7</span> Williams</th><td class="num">17</td><td class="num">17</td><td class="num">1246</td><td class="num">5</td><td class="num">12</td><td class="num">22</td><td class="num">31</td><td class="num">14</td></tr>
-            <tr><th scope="row"><span class="jersey num">10</span> Sanders</th><td class="num">18</td><td class="num">14</td><td class="num">1020</td><td class="num">6</td><td class="num">4</td><td class="num">16</td><td class="num">29</td><td class="num">15</td></tr>
-            <tr><th scope="row"><span class="jersey num">8</span> Mabry</th><td class="num">18</td><td class="num">18</td><td class="num">1311</td><td class="num">3</td><td class="num">7</td><td class="num">13</td><td class="num">22</td><td class="num">9</td></tr>
-            <tr><th scope="row"><span class="jersey num">6</span> Kinard</th><td class="num">16</td><td class="num">12</td><td class="num">902</td><td class="num">1</td><td class="num">5</td><td class="num">7</td><td class="num">14</td><td class="num">6</td></tr>
-          </tbody>
-        </table>
-        </div>
-      </div>
-
-      <div class="table-block">
-        <p class="col-label">Goalkeeping</p>
-        <div class="table-scroll">
-        <table class="stat-table stat-table--keepers">
-          <thead>
-            <tr><th scope="col">Goalkeeper</th><th scope="col">GP</th><th scope="col">MIN</th><th scope="col">SV</th><th scope="col">GA</th><th scope="col">SV%</th><th scope="col">GAA</th><th scope="col">SHO</th></tr>
-          </thead>
-          <tbody>
-            <tr><th scope="row"><span class="jersey num">1</span> Whitfield</th><td class="num">15</td><td class="num">1136</td><td class="num">71</td><td class="num">14</td><td class="num">.835</td><td class="num">0.99</td><td class="num">5</td></tr>
-            <tr><th scope="row"><span class="jersey num">22</span> Brannon</th><td class="num">5</td><td class="num">304</td><td class="num">17</td><td class="num">4</td><td class="num">.810</td><td class="num">1.05</td><td class="num">1.5</td></tr>
-          </tbody>
-        </table>
-        </div>
-        <p class="caption caption--tight">A clean sheet split between two goalkeepers is recorded as a shared shutout, so season totals never overstate either one.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ======================================================================
-     Tracking coverage — ink
-     ====================================================================== -->
-<section class="band band--ink" id="tracking">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Tracking</p>
-      <div class="head-copy">
-        <h2>Tracking coverage</h2>
-        <p class="body">Programme distinguishes between a statistic recorded as zero and a category that was not tracked for that match. Season totals and exports keep the same distinction.</p>
-      </div>
-    </div>
-
-    <div class="coverage">
-      <div class="coverage-season">
-        <p class="col-label">This season</p>
-        <ul class="bars">
-          <li><span class="bar-name">Goals</span><span class="bar-track" aria-hidden="true"><i style="width:100%"></i></span><span class="bar-count num">18 / 18</span></li>
-          <li><span class="bar-name">Assists</span><span class="bar-track" aria-hidden="true"><i style="width:100%"></i></span><span class="bar-count num">18 / 18</span></li>
-          <li><span class="bar-name">Shots</span><span class="bar-track" aria-hidden="true"><i style="width:100%"></i></span><span class="bar-count num">18 / 18</span></li>
-          <li><span class="bar-name">Goalkeeping</span><span class="bar-track" aria-hidden="true"><i style="width:100%"></i></span><span class="bar-count num">18 / 18</span></li>
-          <li><span class="bar-name">Corner Kicks</span><span class="bar-track" aria-hidden="true"><i style="width:78%"></i></span><span class="bar-count num">14 / 18</span></li>
-          <li><span class="bar-name">Shot Locations</span><span class="bar-track" aria-hidden="true"><i style="width:50%"></i></span><span class="bar-count num">9 / 18</span></li>
-          <li><span class="bar-name">Steals</span><span class="bar-track" aria-hidden="true"><i style="width:33%"></i></span><span class="bar-count num">6 / 18</span></li>
-        </ul>
-      </div>
-
-      <div class="coverage-match">
-        <p class="col-label">One match</p>
-        <dl class="ledger ledger--values">
-          <div><dt>Goals</dt><dd class="num">0</dd></div>
-          <div><dt>Shots</dt><dd class="num">7</dd></div>
-          <div><dt>Corner Kicks</dt><dd class="num">3</dd></div>
-          <div class="is-untracked"><dt>Steals</dt><dd class="num">—</dd></div>
-        </dl>
-        <p class="untracked-key"><span class="num">—</span> Not tracked in this match</p>
-      </div>
-    </div>
-    <p class="caption caption--ink">A season total only counts the matches that were tracking the category, and an untracked cell in a CSV export is left blank rather than written as zero.</p>
-  </div>
-</section>
-
-<!-- ======================================================================
-     Export
-     ====================================================================== -->
-<section class="band band--paper" id="export">
-  <div class="wrap">
-    <div class="head head--split">
-      <p class="label">Export</p>
-      <div class="head-copy">
-        <h2>Export match and season statistics</h2>
-        <p class="body">Create a PDF stat sheet, box score CSV, season totals CSV, Programme archive, or MaxPreps entry summary from the same match record.</p>
-      </div>
-    </div>
-  </div>
-
-  <div class="docs-bleed">
-    <div class="docs" id="docs">
-      <article class="doc">
-        <p class="doc-name">Stat Sheet</p>
-        <p class="doc-kind num">PDF</p>
-        <span class="doc-rules" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <p class="doc-note">A printable scorebook page with the box score and timeline.</p>
-      </article>
-      <article class="doc">
-        <p class="doc-name">Box Score</p>
-        <p class="doc-kind num">CSV</p>
-        <span class="doc-rules" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <p class="doc-note">One row per player per match.</p>
-      </article>
-      <article class="doc">
-        <p class="doc-name">Season Totals</p>
-        <p class="doc-kind num">CSV</p>
-        <span class="doc-rules" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <p class="doc-note">Totals per player, with the matches that tracked each category.</p>
-      </article>
-      <article class="doc">
-        <p class="doc-name">Programme Archive</p>
-        <p class="doc-kind num">.programme</p>
-        <span class="doc-rules" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <p class="doc-note">Events, roster, configuration and revision history.</p>
-      </article>
-      <article class="doc">
-        <p class="doc-name">MaxPreps</p>
-        <p class="doc-kind num">Entry Summary</p>
-        <span class="doc-rules" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-        <p class="doc-note">Players in jersey order, using MaxPreps' stat names and column order.</p>
-      </article>
-    </div>
-  </div>
-
-  <div class="wrap">
-    <p class="caption">Programme creates the MaxPreps entry summary for manual entry in Team Admin. It does not connect to MaxPreps or upload to it.</p>
-  </div>
-</section>
-
-<!-- ======================================================================
-     Recovery
-     ====================================================================== -->
-<section class="band band--paper band--top-rule band--short" id="recovery">
-  <div class="wrap recovery">
-    <div class="head head--split">
-      <p class="label">Recovery</p>
-      <div class="head-copy">
-        <h2>Match recovery</h2>
-        <p class="body">Programme keeps a recovery journal while a match is being scored so recent changes can be recovered separately from the normal saved match data.</p>
-        <p class="body body--soft">Scoring needs no account, no network and no server.</p>
-      </div>
-    </div>
-
-    <div class="resume app-ui" role="img" aria-label="Programme's resume prompt at launch: Resume Ninety Six vs Dixie, last event 8:17 PM, 184 events safely stored, with Review and Resume buttons.">
-      <p class="resume-title">Resume Ninety Six vs Dixie</p>
-      <p class="resume-meta num">Last event 8:17 PM · 184 events safely stored</p>
-      <p class="resume-actions"><span class="ctl">Review</span><span class="ctl ctl--accent">Resume</span></p>
-    </div>
-  </div>
-</section>
-
+  </section>
 </main>
 
-<!-- ======================================================================
-     Final
-     ====================================================================== -->
-<section class="band band--lime closing">
+<section class="closing">
   <div class="wrap closing-inner">
-    <img class="closing-mark" src="assets/programme-mark.svg" width="132" height="132" alt="">
-    <p class="closing-name">Programme</p>
-    <p class="closing-line">Soccer scorekeeping for iPad.</p>
-    <p class="closing-action"><a class="btn btn-ink" href="https://github.com/gbyo/programme">View on GitHub&nbsp;↗</a></p>
+    <img src="assets/programme-mark.svg" width="120" height="120" alt="">
+    <p class="closing-name">Programme</p><p class="closing-line">Soccer scorekeeping for iPad.</p>
+    <a class="button" href="https://github.com/gbyo/programme">View on GitHub&nbsp;↗</a>
   </div>
-
-  <footer class="footer">
-    <div class="wrap footer-inner">
-      <p>Programme is an independent project.</p>
-      <nav class="footer-links" aria-label="Project links">
-        <a href="https://github.com/gbyo/programme">GitHub</a>
-        <a href="https://github.com/gbyo/programme#readme">README</a>
-      </nav>
-    </div>
-  </footer>
 </section>
-
-<script src="site.js" defer></script>
+<footer><div class="wrap footer-inner"><p>Programme · Open-source soccer scorekeeping for iPad</p><p><a href="https://github.com/gbyo/programme">Source</a> · <a href="#top">Back to top ↑</a></p></div></footer>
+<script src="site.js"></script>
 </body>
 </html>
