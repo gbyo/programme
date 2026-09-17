@@ -8,6 +8,7 @@ import SwiftUI
 /// inspector never replaces the workspace, it sits beside it.
 struct MatchStatsInspector: View {
     let session: LiveMatchSession
+    var onClose: () -> Void
 
     var body: some View {
         List {
@@ -62,6 +63,12 @@ struct MatchStatsInspector: View {
         }
         .listStyle(.inset)
         .navigationTitle("Match Stats")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done", action: onClose)
+                    .accessibilityIdentifier("stats.close")
+            }
+        }
     }
 
     private var contributingPlayers: [PlayerSnapshot] {

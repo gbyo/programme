@@ -8,6 +8,8 @@ import SwiftUI
 /// recorded two seconds ago is a correction, not a destructive act.
 struct ScoringBar: View {
     let session: LiveMatchSession
+    let isCompact: Bool
+    var onSubstitute: () -> Void
     var onEdit: () -> Void
     var onLog: () -> Void
     var onReview: () -> Void
@@ -16,23 +18,62 @@ struct ScoringBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // This bar floats above the workspace, so it is built the way the
-        // platform builds floating bars: Liquid Glass elements in a shared
-        // container, over content that scrolls underneath. Nothing here paints a
-        // material, a stroke or a rounded rectangle of its own.
+        // One shared control layer keeps match management, live feedback and
+        // correction tools reading as a single dock. Only the controls use
+        // glass; the recent event is a quiet status chip within that dock.
         GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                lastEvent
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .glassEffect(.regular, in: .capsule)
-                Spacer(minLength: 8)
-                actions
+            if isCompact {
+                compactDock
+            } else {
+                regularDock
             }
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 6)
         .animation(
             reduceMotion ? nil : .snappy(duration: 0.22), value: session.lastEventDescription?.id)
+    }
+
+    private var regularDock: some View {
+        HStack(spacing: 12) {
+            substitutionButton
+            lastEventChip
+                .frame(maxWidth: .infinity, alignment: .leading)
+            actions(showLabels: true)
+        }
+    }
+
+    private var compactDock: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                substitutionButton
+                    .fixedSize(horizontal: true, vertical: false)
+                lastEventChip
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            actions(showLabels: false)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private var substitutionButton: some View {
+        Button(action: onSubstitute) {
+            Label("Substitution", systemImage: "arrow.left.arrow.right")
+                .font(.subheadline.weight(.semibold))
+        }
+        .programmePrimaryAction(in: .control)
+        .controlSize(.extraLarge)
+        .accessibilityIdentifier("scoring.substitution")
+        .keyboardShortcut("b", modifiers: [])
+    }
+
+    private var lastEventChip: some View {
+        lastEvent
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.secondary.opacity(0.08), in: .capsule)
     }
 
     @ViewBuilder
@@ -56,12 +97,12 @@ struct ScoringBar: View {
                 Text(description.title)
                     .font(.subheadline.weight(.semibold))
 
-                if !description.detail.isEmpty {
+                if !isCompact, !description.detail.isEmpty {
                     Text(description.detail)
                         .font(.subheadline)
                         .lineLimit(1)
                 }
-                if let secondary = description.secondaryDetail {
+                if !isCompact, let secondary = description.secondaryDetail {
                     Text(secondary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -89,13 +130,21 @@ struct ScoringBar: View {
         }
     }
 
-    private var actions: some View {
-        HStack(spacing: 8) {
-            Button("Undo", systemImage: "arrow.uturn.backward") {
+    private func actions(showLabels: Bool) -> some View {
+        HStack(spacing: showLabels ? 8 : 6) {
+            Button {
                 session.undo()
+            } label: {
+                Label {
+                    if showLabels { Text("Undo") }
+                } icon: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
             }
             .buttonStyle(.glass)
+            .buttonBorderShape(showLabels ? .capsule : .circle)
             .accessibilityIdentifier("scoring.undo")
+            .accessibilityLabel("Undo")
             .disabled(!session.canUndo)
             .keyboardShortcut("z", modifiers: .command)
 
@@ -108,8 +157,16 @@ struct ScoringBar: View {
                 .buttonBorderShape(.circle)
             }
 
-            Button("Edit") { onEdit() }
+            Button(action: onEdit) {
+                Label {
+                    if showLabels { Text("Edit") }
+                } icon: {
+                    Image(systemName: "pencil")
+                }
+            }
                 .buttonStyle(.glass)
+                .buttonBorderShape(showLabels ? .capsule : .circle)
+                .accessibilityLabel("Edit last event")
                 .disabled(session.lastEventDescription == nil)
 
             Button("Event Log", systemImage: "list.bullet") { onLog() }
@@ -120,7 +177,7 @@ struct ScoringBar: View {
 
             ReviewIndicator(count: session.needsReviewCount, issues: session.issues, action: onReview)
         }
-        .controlSize(.extraLarge)
+        .controlSize(showLabels ? .extraLarge : .regular)
         .font(.subheadline.weight(.semibold))
     }
 }

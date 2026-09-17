@@ -19,7 +19,6 @@ struct PaletteAction: Identifiable, Equatable {
         case emphasis
         case caution
         case critical
-        case substitution
         case more
     }
 }
@@ -41,11 +40,9 @@ struct EventPalette: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !isCompact {
-                Text("Record")
-                    .programmeSectionHeader()
-                    .padding(.horizontal, 4)
-            }
+            Text(session.descriptor.teamShortName)
+                .programmeSectionHeader()
+                .padding(.horizontal, 4)
 
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(actions) { action in
@@ -67,7 +64,14 @@ struct EventPalette: View {
     }
 
     private var columns: [GridItem] {
-        [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+        if isCompact {
+            [GridItem(.adaptive(minimum: 220), spacing: 10)]
+        } else {
+            [
+                GridItem(.flexible(minimum: 120), spacing: 10),
+                GridItem(.flexible(minimum: 120), spacing: 10),
+            ]
+        }
     }
 
     /// Built from the match's stat profile, which is fixed before kickoff.
@@ -106,10 +110,6 @@ struct EventPalette: View {
                     id: "steal", title: "Steal", subtitle: nil, symbolName: "shoe.2.fill",
                     pending: .steal, kind: .standard, shortcut: "t"))
         }
-        result.append(
-            PaletteAction(
-                id: "sub", title: "Substitution", subtitle: "Out, then in",
-                symbolName: "arrow.left.arrow.right", pending: nil, kind: .substitution, shortcut: "b"))
         if profile.tracks(.penaltyKicks) {
             result.append(
                 PaletteAction(
@@ -138,10 +138,9 @@ struct EventPalette: View {
 ///
 /// The geometry is Programme's — a fixed two-column grid with a tall, left-aligned
 /// target that never moves during a match — but the control is the system's
-/// bordered button. Nothing here paints a fill, a border or a pressed state by
-/// hand, so the palette picks up the platform's current control appearance,
-/// pointer hover, keyboard focus, Reduce Transparency and increased contrast
-/// without Programme knowing what any of those look like.
+/// stable target that never moves during a match. Primary and semantic actions
+/// carry colour; ordinary actions use the system background with a hairline
+/// boundary instead of becoming a wall of grey fills.
 struct PaletteButton: View {
     let action: PaletteAction
     let isArmed: Bool
@@ -153,39 +152,54 @@ struct PaletteButton: View {
 
     var body: some View {
         Button(action: perform) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: action.symbolName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .imageScale(.medium)
-                    // One line, scaled to fit: a wrapped or hyphenated label is
-                    // harder to recognise at a glance than a slightly smaller one.
-                    Text(action.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                }
-                // The fill and the border are the system's; the title stays at
-                // full contrast because this is read from several feet away.
-                .foregroundStyle(titleStyle)
-                if let subtitle = action.subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
+            buttonLabel
+                .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .leading)
+                .padding(.horizontal, 14)
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
-        .tint(tint)
+        .modifier(
+            PaletteButtonAppearance(
+                kind: action.kind,
+                tint: tint
+            ))
         .accessibilityIdentifier("palette.\(action.id)")
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .modifier(OptionalKeyboardShortcut(key: action.shortcut))
+    }
+
+    @ViewBuilder
+    private var buttonLabel: some View {
+        let label = VStack(alignment: .leading, spacing: 3) {
+            title
+            if let subtitle = action.subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        if action.kind == .emphasis {
+            label
+        } else {
+            label.foregroundStyle(titleStyle)
+        }
+    }
+
+    private var title: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: action.symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .imageScale(.medium)
+            // One line, scaled to fit: a wrapped or hyphenated label is
+            // harder to recognise at a glance than a slightly smaller one.
+            Text(action.title)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
     }
 
     /// Semantic colour, and only semantic colour. Everything ordinary is quiet:
@@ -197,7 +211,7 @@ struct PaletteButton: View {
         case .emphasis: return .accentColor
         case .critical: return Programme.Palette.critical
         case .caution: return Programme.Palette.caution
-        case .standard, .substitution, .more: return .secondary
+        case .standard, .more: return .secondary
         }
     }
 
@@ -216,6 +230,43 @@ struct PaletteButton: View {
         return isArmed
             ? "Records this for the selected player."
             : "Asks which player this was."
+    }
+}
+
+private struct PaletteButtonAppearance: ViewModifier {
+    let kind: PaletteAction.Kind
+    let tint: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if kind == .emphasis {
+            content
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
+                .tint(tint)
+        } else {
+            content
+                .buttonStyle(.plain)
+                .background(background, in: RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius)
+                        .strokeBorder(stroke, lineWidth: 1)
+                }
+        }
+    }
+
+    private var background: Color {
+        switch kind {
+        case .caution, .critical: tint.opacity(0.09)
+        case .standard, .more, .emphasis: Color(.systemBackground)
+        }
+    }
+
+    private var stroke: Color {
+        switch kind {
+        case .caution, .critical: tint.opacity(0.22)
+        case .standard, .more, .emphasis: Color.primary.opacity(0.11)
+        }
     }
 }
 
@@ -283,7 +334,15 @@ struct OpponentStrip: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: 52)
                     }
-                    .programmeTile(shape: .roundedRectangle(radius: Programme.Metrics.cornerRadius))
+                    .buttonStyle(.plain)
+                    .background(
+                        Color(.systemBackground),
+                        in: RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Programme.Metrics.cornerRadius)
+                            .strokeBorder(Color.primary.opacity(0.11), lineWidth: 1)
+                    }
                     .accessibilityIdentifier("palette.opponent.\(quick.rawValue)")
                     .accessibilityLabel("\(opponentName) \(quick.title)")
                 }

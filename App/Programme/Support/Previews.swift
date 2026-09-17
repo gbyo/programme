@@ -115,7 +115,7 @@
 
     #Preview("Match stats inspector") {
         if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
-            MatchStatsInspector(session: session)
+            NavigationStack { MatchStatsInspector(session: session, onClose: {}) }
         }
     }
 
