@@ -127,7 +127,7 @@ final class ProgrammeUITests: XCTestCase {
         let app = launch(["-programme-open-live"])
         waitForScorer(app)
 
-        element(app, "lineup.substitution").tap()
+        element(app, "scoring.substitution").tap()
         XCTAssertTrue(element(app, "sub.out.11").waitForExistence(timeout: 5))
 
         element(app, "sub.out.11").tap()
@@ -142,6 +142,31 @@ final class ProgrammeUITests: XCTestCase {
         commit.tap()
 
         XCTAssertTrue(lastEventLabel(app).contains("Substitution"))
+    }
+
+    func testMatchStatsCanBeClosed() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "live.matchStats").tap()
+        let close = element(app, "stats.close")
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+
+        XCTAssertTrue(element(app, "palette.goal").waitForExistence(timeout: 5))
+        XCTAssertFalse(close.exists)
+    }
+
+    func testScoringWorkspaceAdaptsToPortrait() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        XCUIDevice.shared.orientation = .portrait
+
+        XCTAssertTrue(element(app, "live.score").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "palette.goal").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "scoring.substitution").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "scoring.undo").exists)
     }
 
     func testReviewCollectsDeferredAttribution() {

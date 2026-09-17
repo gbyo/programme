@@ -83,6 +83,8 @@ struct LiveMatchView: View {
                 .safeAreaBar(edge: .bottom) {
                     ScoringBar(
                         session: session,
+                        isCompact: mode == .compact,
+                        onSubstitute: beginSubstitution,
                         onEdit: { editLastEvent() },
                         onLog: { activeSheet = .eventLog },
                         onReview: { activeSheet = .review }
@@ -102,8 +104,12 @@ struct LiveMatchView: View {
         }
         .background(Color(.systemBackground))
         .inspector(isPresented: $isShowingInspector) {
-            MatchStatsInspector(session: session)
-                .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
+            NavigationStack {
+                MatchStatsInspector(session: session) {
+                    isShowingInspector = false
+                }
+            }
+            .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
         }
         .sheet(item: $activeSheet) { sheet in
             sheetContent(sheet)
@@ -211,27 +217,27 @@ struct LiveMatchView: View {
         switch mode {
         case .wide:
             HStack(spacing: 0) {
-                LineupColumn(session: session, onSelect: select(player:), onSubstitute: beginSubstitution)
+                LineupColumn(session: session, onSelect: select(player:))
                     .frame(width: 250)
                 Divider()
                 stageView
                     .frame(maxWidth: .infinity)
                 Divider()
-                paletteScroll
+                paletteScroll(isCompact: false)
                     .frame(width: 330)
             }
 
         case .medium:
             HStack(spacing: 0) {
                 if stage.isPitch {
-                    LineupColumn(session: session, onSelect: select(player:), onSubstitute: beginSubstitution)
+                    LineupColumn(session: session, onSelect: select(player:))
                         .frame(maxWidth: .infinity)
                 } else {
                     stageView
                         .frame(maxWidth: .infinity)
                 }
                 Divider()
-                paletteScroll
+                paletteScroll(isCompact: false)
                     .frame(width: 340)
             }
 
@@ -248,10 +254,10 @@ struct LiveMatchView: View {
                     .padding(.vertical, 8)
 
                     switch compactPane {
-                    case .palette: paletteScroll
+                    case .palette: paletteScroll(isCompact: true)
                     case .lineup:
                         LineupColumn(
-                            session: session, onSelect: select(player:), onSubstitute: beginSubstitution)
+                            session: session, onSelect: select(player:))
                     }
                 } else {
                     stageView
@@ -260,11 +266,11 @@ struct LiveMatchView: View {
         }
     }
 
-    private var paletteScroll: some View {
+    private func paletteScroll(isCompact: Bool) -> some View {
         ScrollView {
             EventPalette(
                 session: session,
-                isCompact: false,
+                isCompact: isCompact,
                 onAction: handle(action:),
                 onOpponentAction: handleOpponent(_:),
                 onMore: { activeSheet = .more }
@@ -272,7 +278,9 @@ struct LiveMatchView: View {
             .padding(14)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .scrollEdgeEffectStyle(.hard, for: .all)
+        // The palette now meets the shared dock with a soft fade instead of a
+        // firm horizontal cut.
+        .scrollEdgeEffectStyle(.soft, for: .all)
     }
 
     @ViewBuilder
@@ -367,8 +375,6 @@ struct LiveMatchView: View {
         case "save":
             session.recordSave()
             session.armedPlayer = nil
-        case "sub":
-            beginSubstitution()
         default:
             guard let pending = action.pending else { return }
             begin(pending)
@@ -536,6 +542,7 @@ struct PitchPanel: View {
                 Button("Match Stats", systemImage: "chart.bar") { onOpenStats() }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
+                    .accessibilityIdentifier("live.matchStats")
                     .accessibilityLabel("Show match statistics")
             }
             .padding(.horizontal, 16)

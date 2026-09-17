@@ -91,7 +91,6 @@ struct PlayerTile: View {
 struct LineupColumn: View {
     let session: LiveMatchSession
     var onSelect: (PlayerSnapshot) -> Void
-    var onSubstitute: () -> Void
 
     var body: some View {
         // A plain List rather than a hand-built scrolling stack: pinned section
@@ -155,22 +154,10 @@ struct LineupColumn: View {
         }
         .listStyle(.plain)
         .scrollBounceBehavior(.basedOnSize)
-        // A firm edge rather than a soft fade: the score, the clock and the last
-        // event have to stay readable while the column scrolls behind them.
-        .scrollEdgeEffectStyle(.hard, for: .all)
-        .safeAreaBar(edge: .bottom) {
-            Button {
-                onSubstitute()
-            } label: {
-                Label("Substitution", systemImage: "arrow.left.arrow.right")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .programmePrimaryAction(in: .control)
-            .controlSize(.extraLarge)
-            .accessibilityIdentifier("lineup.substitution")
-            .padding(.horizontal, 12)
-        }
+        // The shared scoring dock now owns the lower control layer. A soft edge
+        // lets this content recede into it without drawing a hard rule across
+        // the workspace.
+        .scrollEdgeEffectStyle(.soft, for: .all)
     }
 
     private func minutesIfPlayed(_ player: PlayerSnapshot) -> Int? {

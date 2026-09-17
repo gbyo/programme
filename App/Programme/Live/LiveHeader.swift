@@ -17,37 +17,69 @@ struct LiveHeader: View {
     var body: some View {
         // The header is structural chrome, so it stays flat. Only the buttons
         // use the system's Liquid Glass control styles.
-        HStack(alignment: .center, spacing: isCompact ? 8 : 14) {
-            HStack(alignment: .center, spacing: isCompact ? 12 : 22) {
-                scoreBlock
-                Spacer(minLength: 8)
-                clockBlock
+        Group {
+            if isCompact {
+                compactHeader
+            } else {
+                regularHeader
             }
-            .padding(.horizontal, isCompact ? 14 : 20)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-            .overlay(alignment: .bottomLeading) {
-                // A quiet progress rule through the period. No numbers or
-                // additional chrome.
-                GeometryReader { proxy in
-                    Capsule()
-                        .fill(Color.accentColor)
-                        .frame(width: proxy.size.width * session.clock.periodProgress, height: 3)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                }
-                .padding(.horizontal, isCompact ? 14 : 20)
-                .padding(.bottom, 6)
-                .allowsHitTesting(false)
-            }
-
-            controls
         }
-        .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
         .background(.bar)
         .overlay(alignment: .bottom) {
             Divider()
         }
+    }
+
+    private var regularHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
+            scoreAndClock
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .overlay(alignment: .bottomLeading) { progressRule(horizontalPadding: 20) }
+            controls
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private var compactHeader: some View {
+        VStack(spacing: 4) {
+            scoreAndClock
+            HStack {
+                Spacer(minLength: 0)
+                controls
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .overlay(alignment: .bottomLeading) { progressRule(horizontalPadding: 14) }
+    }
+
+    private var scoreAndClock: some View {
+        HStack(alignment: .center, spacing: isCompact ? 8 : 22) {
+            scoreBlock
+                .layoutPriority(1)
+            Spacer(minLength: 6)
+            clockBlock
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private func progressRule(horizontalPadding: CGFloat) -> some View {
+        GeometryReader { proxy in
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(
+                    width: proxy.size.width * session.clock.periodProgress,
+                    height: 3
+                )
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        .padding(.horizontal, horizontalPadding)
+        .padding(.bottom, 6)
+        .allowsHitTesting(false)
     }
 
     private var scoreBlock: some View {
