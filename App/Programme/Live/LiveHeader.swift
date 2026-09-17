@@ -15,40 +15,39 @@ struct LiveHeader: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // The scoreboard is Programme's, the layer it sits in is Apple's: a
-        // floating glass bar above content that scrolls underneath. The score,
-        // the clock and the period rule keep their own typography; the surface
-        // they sit on is the system's Liquid Glass, not a hand-made imitation.
-        GlassEffectContainer(spacing: isCompact ? 8 : 14) {
-            HStack(alignment: .center, spacing: isCompact ? 8 : 14) {
-                HStack(alignment: .center, spacing: isCompact ? 12 : 22) {
-                    scoreBlock
-                    Spacer(minLength: 8)
-                    clockBlock
+        // The header is structural chrome, so it stays flat. Only the buttons
+        // use the system's Liquid Glass control styles.
+        HStack(alignment: .center, spacing: isCompact ? 8 : 14) {
+            HStack(alignment: .center, spacing: isCompact ? 12 : 22) {
+                scoreBlock
+                Spacer(minLength: 8)
+                clockBlock
+            }
+            .padding(.horizontal, isCompact ? 14 : 20)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+            .overlay(alignment: .bottomLeading) {
+                // A quiet progress rule through the period. No numbers or
+                // additional chrome.
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: proxy.size.width * session.clock.periodProgress, height: 3)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
                 }
                 .padding(.horizontal, isCompact ? 14 : 20)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .glassEffect(.regular, in: .capsule)
-                .overlay(alignment: .bottomLeading) {
-                    // A quiet progress rule through the period. No numbers, no
-                    // chrome — it rides the bottom of the scoreboard, inset so it
-                    // stays inside the capsule rather than cutting across it.
-                    GeometryReader { proxy in
-                        Capsule()
-                            .fill(Color.accentColor)
-                            .frame(width: proxy.size.width * session.clock.periodProgress, height: 3)
-                            .frame(maxHeight: .infinity, alignment: .bottom)
-                    }
-                    .padding(.horizontal, isCompact ? 14 : 20)
-                    .padding(.bottom, 6)
-                    .allowsHitTesting(false)
-                }
-
-                controls
+                .padding(.bottom, 6)
+                .allowsHitTesting(false)
             }
+
+            controls
         }
         .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
     }
 
     private var scoreBlock: some View {
