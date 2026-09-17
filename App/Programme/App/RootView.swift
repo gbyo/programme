@@ -1,6 +1,4 @@
 import ProgrammeCore
-import ProgrammePersistence
-import SwiftData
 import SwiftUI
 
 /// Programme's shell.
@@ -24,15 +22,6 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: navigation.isShowingLiveMatch)
-        // A system bar rather than a hand-drawn card: an unfinished match is
-        // important enough to move the interface down rather than cover it, and
-        // the bar's own background is the one the platform wants here.
-        .safeAreaBar(edge: .top) {
-            if !appModel.recoveryCandidates.isEmpty && !navigation.isShowingLiveMatch {
-                RecoveryBanner()
-                    .padding(.horizontal)
-            }
-        }
         .alert(
             navigation.errorToShow?.title ?? "",
             isPresented: Binding(
@@ -158,54 +147,5 @@ struct ProgrammeCommands: Commands {
             .keyboardShortcut("w", modifiers: .command)
             .disabled(appModel.liveSession == nil)
         }
-    }
-}
-
-/// Shown when Programme finds a match that was being scored when it last closed.
-struct RecoveryBanner: View {
-    @Environment(AppModel.self) private var appModel
-    @State private var selected: RecoverableMatch?
-
-    var body: some View {
-        VStack(spacing: 10) {
-            ForEach(appModel.recoveryCandidates) { candidate in
-                HStack(alignment: .firstTextBaseline, spacing: 14) {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.tint)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Resume \(candidate.title)")
-                            .font(.headline)
-                        Text(recoveryDetail(candidate))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 12)
-                    Button("Review") { selected = candidate }
-                        .buttonStyle(.bordered)
-                    Button("Resume") {
-                        Task { await appModel.openLiveSession(matchID: candidate.matchID) }
-                    }
-                    .programmePrimaryAction(in: .control)
-                }
-                .padding(.vertical, 4)
-            }
-        }
-        .sheet(item: $selected) { candidate in
-            RecoveryReviewView(candidate: candidate)
-        }
-    }
-
-    private func recoveryDetail(_ candidate: RecoverableMatch) -> String {
-        var parts: [String] = []
-        if let date = candidate.lastEventAt {
-            parts.append("Last event \(date.matchTimeText)")
-        }
-        parts.append("\(candidate.eventCount) events safely stored")
-        if !candidate.isInDatabase {
-            parts.append("Recovered from Programme's backup log")
-        }
-        return parts.joined(separator: " · ")
     }
 }
