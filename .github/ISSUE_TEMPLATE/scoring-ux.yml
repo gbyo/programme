@@ -1,0 +1,39 @@
+name: Scoring UX improvement
+description: A live-match workflow is too slow, unclear, hard to hit, or easy to mis-record.
+title: "Scoring UX: "
+body:
+  - type: textarea
+    id: moment
+    attributes:
+      label: What is happening on the field?
+      description: Describe the real match moment the scorer is trying to capture.
+      placeholder: "Three substitutes come on at once while play is about to restart."
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current Programme workflow
+      description: What does the scorer have to tap/read/do now?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Why is it difficult?
+      description: Focus on glance time, tap count, ambiguity, target size, interruption, or correction cost.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Suggested direction
+      description: Optional. Describe a better interaction without requiring a particular implementation.
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Scoring principles
+      options:
+        - label: The common path should remain fast and usable with touch alone.
+        - label: Corrections should remain cheap and recoverable.
+        - label: The change should not require network access during a match.
