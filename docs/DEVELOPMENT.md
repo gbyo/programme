@@ -79,6 +79,12 @@ If your Xcode app has another name/path, use its `Contents/Developer` directory 
 
 `Programme.xcodeproj` is ignored by Git and should never be hand-maintained.
 
+The generated project leaves code signing enabled for interactive Xcode builds. Simulator
+runs use an ad-hoc signature automatically; running on a physical device requires selecting
+your development team for both the Programme app and ProgrammeWidgets extension in Xcode.
+The command-line build and CI scripts pass `CODE_SIGNING_ALLOWED=NO` explicitly so their
+simulator-only verification remains independent of developer accounts and signing assets.
+
 After adding/moving targets or changing project settings:
 
 ```bash
