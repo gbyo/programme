@@ -9,7 +9,6 @@ import SwiftUI
 /// settled at a break rather than in the middle of an attack.
 struct ReviewView: View {
     let session: LiveMatchSession
-    @Binding var stage: LiveStage
 
     @Environment(\.dismiss) private var dismiss
     @State private var resolving: MatchEvent?
@@ -47,7 +46,9 @@ struct ReviewView: View {
                 } header: {
                     Text("Needs Attribution")
                 } footer: {
-                    Text("These were recorded during play without a jersey number. Assigning one revises the original event — no duplicate statistics.")
+                    Text(
+                        "These were recorded during play without a jersey number. Assigning one revises the original event — no duplicate statistics."
+                    )
                 }
             }
 

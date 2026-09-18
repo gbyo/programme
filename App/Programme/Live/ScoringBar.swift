@@ -19,6 +19,7 @@ struct ScoringToolbar: ToolbarContent {
     var onEdit: () -> Void
     var onLog: () -> Void
     var onReview: () -> Void
+    var onStats: () -> Void
 
     var body: some ToolbarContent {
         // The one primary action down here, so it gets its own glass.
@@ -74,7 +75,16 @@ struct ScoringToolbar: ToolbarContent {
         ToolbarSpacer(.fixed, placement: .bottomBar)
 
         // Looking at the record as a whole: a different job, so its own glass.
-        ToolbarItem(placement: .bottomBar) {
+        ToolbarItemGroup(placement: .bottomBar) {
+            // Statistics have exactly one home, and it is here rather than in the
+            // middle of the workspace. The middle is for completing an event; a
+            // layout that has no room for it must not lose the way into the
+            // numbers, so the way in belongs to a bar that every layout has.
+            Button("Match Stats", systemImage: "chart.bar") { onStats() }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("live.matchStats")
+                .accessibilityLabel("Show match statistics")
+
             Button("Event Log", systemImage: "list.bullet") { onLog() }
                 .labelStyle(.iconOnly)
                 .accessibilityIdentifier("scoring.eventLog")

@@ -1,20 +1,77 @@
 import Foundation
 import ProgrammeCore
 
-/// What the centre of the scoring workspace is showing.
+/// The Event Composer.
 ///
-/// Event entry happens here rather than in a sheet. A modal over a live match
-/// hides the score and the clock at exactly the moment the scorer needs them,
-/// and it puts a dismiss gesture between them and the next play.
-enum LiveStage: Equatable {
-    case pitch
+/// Programme's middle area is not a dashboard. It exists for one job: to ask the
+/// scorer for information that is genuinely missing from an event, and to stop
+/// asking the moment nothing is missing. Everything passive — team totals, player
+/// lines, goalkeeping — lives in the inspector.
+///
+/// The composer is deliberately built around a fact that is already recorded
+/// wherever that is safe. A goal is a goal the instant the scorer says so: the
+/// event is written, the score moves and the journal is flushed *before* the
+/// composer asks who assisted. The enrichment answer then revises that same
+/// event. A scorer who looks up at the pitch and never answers has still
+/// recorded the goal; the unanswered part shows up in Review.
+enum ComposerStep: Equatable {
+    /// Who does this event belong to? Nothing is recorded yet — without a player
+    /// there is no event to record.
     case choosePlayer(PlayerPrompt)
-    case chooseAssist(ShotEvent)
-    case penaltyOutcome(PlayerRef)
-    case placeShotLocation(ShotEvent)
+
+    /// A penalty has a taker but no outcome yet. The outcome is a primary fact,
+    /// not enrichment: a penalty attempt with an unknown outcome would be a
+    /// score that might or might not have happened, so nothing is recorded until
+    /// the scorer answers.
+    case penaltyOutcome(taker: PlayerRef)
+
+    /// The goal is **already recorded** with an unresolved assist. This step
+    /// revises it.
+    case assist(goal: EventID, scorerName: String, side: TeamSide)
+
+    /// The shot is **already recorded** without a location. This step revises it,
+    /// and skipping costs nothing.
+    case shotLocation(shot: EventID, shooterName: String, outcome: ShotOutcome)
+
+    /// Its own focused task rather than an event to complete, but it belongs to
+    /// the same workspace and the same presentation rules.
     case substitution
 
-    var isPitch: Bool { self == .pitch }
+    /// Whether abandoning this step would lose a fact. Steps that revise an
+    /// already-recorded event are safe to walk away from.
+    var isSafeToAbandon: Bool {
+        switch self {
+        case .assist, .shotLocation, .substitution: true
+        case .choosePlayer, .penaltyOutcome: false
+        }
+    }
+
+    /// What the compact sheet calls itself at this step.
+    var title: String {
+        switch self {
+        case .choosePlayer(let prompt): prompt.title
+        case .penaltyOutcome: "What happened?"
+        case .assist: "Who assisted?"
+        case .shotLocation: "Where was it struck?"
+        case .substitution: "Substitution"
+        }
+    }
+}
+
+/// The composer's whole state: one optional step.
+///
+/// `nil` means the workspace has nothing to ask, which on a constrained layout
+/// means it gives its space back to the lineup and on a compact one means the
+/// sheet is not presented at all.
+struct EventComposer: Equatable {
+    var step: ComposerStep?
+
+    var isComposing: Bool { step != nil }
+
+    static let idle = EventComposer(step: nil)
+
+    mutating func ask(_ step: ComposerStep) { self.step = step }
+    mutating func finish() { step = nil }
 }
 
 /// An action waiting for the player it belongs to.
