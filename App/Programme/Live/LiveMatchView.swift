@@ -4,17 +4,25 @@ import SwiftUI
 
 /// Programme's scoring workspace.
 ///
-/// Everything a scorer needs during play is reachable without leaving this view:
-/// the score, the clock, the active lineup, the action palette, the last event
-/// and undo. Event entry happens in the centre panel rather than in a sheet, so
-/// the score and clock never disappear behind a modal.
+/// Four parts, each with one job:
+///
+/// - **Record** starts an event.
+/// - **Lineup** preselects the player an event will belong to.
+/// - **Event Composer** asks only for information that is actually missing.
+/// - **Inspector** holds the statistics. **Review** holds the deferred details.
+///
+/// The composer is the part that used to be muddled. It is not a dashboard and
+/// it does not show passive statistics; it appears when an event needs
+/// completing and it gets out of the way when nothing does.
 struct LiveMatchView: View {
     let session: LiveMatchSession
 
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The platform's own answer to "is there room for more than one pane?".
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @State private var stage: LiveStage = .pitch
+    @State private var composer = EventComposer.idle
     @State private var isShowingInspector = false
     /// One sheet at a time. Programme never stacks them, and routing every
     /// presentation through a single item makes a transition between two of them
@@ -48,7 +56,7 @@ struct LiveMatchView: View {
         }
     }
 
-    /// In a narrow window Record and Lineup are two halves of one workspace that
+    /// In a compact window Record and Lineup are two halves of one workspace that
     /// the scorer switches between. That is a navigation choice, not a value, so
     /// on iPadOS 27 it is presented — and announced — as tabs.
     enum CompactPane: String, CaseIterable, Identifiable {
@@ -57,38 +65,53 @@ struct LiveMatchView: View {
         var id: String { rawValue }
     }
 
-    /// Design intent for the three columns, expressed as ranges rather than as
-    /// device breakpoints. `ViewThatFits` picks a layout by asking whether its
-    /// ideal width fits, so the ideal here *is* the minimum comfortable width and
-    /// the range above it is where the layout is free to grow.
+    /// What each column needs to do its job, as ranges rather than device widths.
+    ///
+    /// `ViewThatFits` picks a layout by asking whether its ideal width fits, so
+    /// the ideal here *is* the minimum comfortable width and the range above it
+    /// is where the layout may grow.
+    ///
+    /// The three-column figure is the sum of its parts, not a device lookup: a
+    /// lineup wide enough for a name and a jersey number, a workspace wide enough
+    /// for the substitution grid's two columns without scrolling, and the Record
+    /// palette's two-across grid. Anything narrower is better served by giving
+    /// the workspace the lineup's space only when it has something to ask, which
+    /// is what the two-column layout does.
     private enum Column {
-        static let lineupMinimum: CGFloat = 220
-        static let lineupMaximum: CGFloat = 300
-        static let recordMinimum: CGFloat = 290
+        static let lineupMinimum: CGFloat = 280
+        static let lineupMaximum: CGFloat = 320
+        static let recordMinimum: CGFloat = 340
         static let recordMaximum: CGFloat = 380
-        static let stageMinimum: CGFloat = 340
-        static let workspaceMinimum: CGFloat = 320
-        /// What the three-column layout needs, independent of what the centre
-        /// happens to be showing.
-        static let wideMinimum: CGFloat = lineupMinimum + stageMinimum + recordMinimum
+        /// What the workspace needs to hold the substitution grid's two columns
+        /// side by side without scrolling — the roomiest thing it ever shows.
+        static let workspaceComfortable: CGFloat = 560
+        /// What it needs to ask a single question: a player grid four tiles
+        /// across, or an assist picker.
+        static let workspaceUsable: CGFloat = 400
+        /// The narrowest window in which lineup, workspace and Record can all be
+        /// permanently on screen and all be usable.
+        static let threeColumnMinimum: CGFloat =
+            lineupMinimum + workspaceComfortable + recordMinimum
+        /// The two-column layout only has to fit the workspace when it takes the
+        /// lineup's place, so it asks for less. This has to stay at or below the
+        /// narrowest regular-width iPad window — an iPad mini in portrait, 744pt
+        /// — because below that the system hands us a compact environment and
+        /// the compact layout takes over instead.
+        static let twoColumnMinimum: CGFloat = workspaceUsable + recordMinimum
     }
 
+    /// Whether the composer takes over the screen in a sheet rather than living
+    /// in a column. This is the platform's compact environment — iPhone, and an
+    /// iPad window narrow enough that the system itself says one pane at a time.
+    private var composerUsesSheet: Bool { horizontalSizeClass == .compact }
+
     var body: some View {
-        // A navigation container so both strips can be real system toolbars: the
-        // match controls at the top trailing edge, the scoring controls at the
-        // bottom. The scoreboard is not one of them — it is genuinely custom bar
-        // content, far taller than a navigation bar and not squeezable into a
-        // title — so it uses the system's custom-bar API instead, which still
-        // gives it the scroll-edge treatment and the right safe area in every
-        // iPad window size.
         NavigationStack {
             adaptiveContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .safeAreaBar(edge: .top) {
                     LiveHeader(session: session)
                 }
-                // A notice is transient, floating control-layer UI, so it
-                // sits above the content rather than inside either bar.
                 .overlay(alignment: .bottom) {
                     if let notice = session.notice {
                         NoticeBanner(notice: notice) { session.dismissNotice() }
@@ -98,21 +121,10 @@ struct LiveMatchView: View {
                     }
                 }
                 .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
-                // Arming a player is a view-state change, so its feedback is
-                // declarative. Recording an event stays imperative in the
-                // session, where the domain meaning of "goal" lives.
                 .sensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
-                // The navigation bar carries the match controls and nothing
-                // else: no title, and no back button, because this is the root
-                // of its own stack. It stays a single row directly above the
-                // scoreboard rather than becoming a second strip of chrome.
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar(removing: .title)
-                // The bar has no background of its own, so the controls read as
-                // part of the scoreboard region rather than as a second slab of
-                // material stacked on top of it. The controls keep their own
-                // system backgrounds; only the strip behind them goes away.
                 .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
                 .toolbar {
                     MatchControlsToolbar(
@@ -128,10 +140,14 @@ struct LiveMatchView: View {
                         onSubstitute: beginSubstitution,
                         onEdit: { editLastEvent() },
                         onLog: { activeSheet = .eventLog },
-                        onReview: { activeSheet = .review }
+                        onReview: { activeSheet = .review },
+                        onStats: { isShowingInspector.toggle() }
                     )
                 }
         }
+        // Statistics are the inspector's job, here and nowhere else. In a compact
+        // environment SwiftUI presents an inspector as a sheet by itself, which
+        // is the right shape there and needs no second implementation.
         .inspector(isPresented: $isShowingInspector) {
             NavigationStack {
                 MatchStatsInspector(session: session) {
@@ -139,6 +155,16 @@ struct LiveMatchView: View {
                 }
             }
             .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
+        }
+        // One composer sheet, not one sheet per question. The step changes inside
+        // it, so "Who scored? → Who assisted? → Where?" is a transition rather
+        // than a dismiss and a re-present.
+        .sheet(isPresented: composerSheetBinding) {
+            ComposerSheet(title: composer.step?.title ?? "") {
+                composerContent
+            } onDismiss: {
+                abandonComposer()
+            }
         }
         .sheet(item: $activeSheet) { sheet in
             sheetContent(sheet)
@@ -158,8 +184,6 @@ struct LiveMatchView: View {
             case .periodBreak, .awaitingFinalization:
                 activeSheet = .periodBreak
             case .inPeriod:
-                // Undoing the end of a period puts the scorer straight back into
-                // the match rather than leaving the break sheet stranded.
                 if activeSheet == .periodBreak { activeSheet = nil }
             default:
                 break
@@ -175,6 +199,16 @@ struct LiveMatchView: View {
         }
     }
 
+    /// Presented only where the composer uses a sheet, and closed by finishing
+    /// the step. Dismissing by gesture runs the same path.
+    private var composerSheetBinding: Binding<Bool> {
+        Binding(
+            get: { composerUsesSheet && composer.isComposing },
+            set: { isPresented in
+                if !isPresented { abandonComposer() }
+            })
+    }
+
     @ViewBuilder
     private func sheetContent(_ sheet: LiveSheet) -> some View {
         switch sheet {
@@ -186,7 +220,7 @@ struct LiveMatchView: View {
             }
 
         case .review:
-            NavigationStack { ReviewView(session: session, stage: $stage) }
+            NavigationStack { ReviewView(session: session) }
 
         case .options:
             NavigationStack {
@@ -242,21 +276,23 @@ struct LiveMatchView: View {
 
     // MARK: - Layout
 
-    /// Three layouts, chosen by what actually fits rather than by device width.
-    ///
-    /// Each candidate states the narrowest width at which it is still usable; the
-    /// system takes the first one that does. A window dragged continuously
-    /// narrower therefore moves through them at the point where the content
-    /// genuinely stops fitting, on any iPad, in any Stage Manager arrangement.
+    /// Compact is the platform's own decision, not a width Programme invents. In
+    /// a regular environment the choice between three columns and two is made by
+    /// what actually fits.
+    @ViewBuilder
     private var adaptiveContent: some View {
-        ViewThatFits(in: .horizontal) {
-            wideLayout
-            mediumLayout
+        if composerUsesSheet {
             compactLayout
+        } else {
+            ViewThatFits(in: .horizontal) {
+                threeColumnLayout
+                twoColumnLayout
+            }
         }
     }
 
-    private var wideLayout: some View {
+    /// Wide iPad: Lineup | Event Workspace | Record, all permanent.
+    private var threeColumnLayout: some View {
         // No `layoutPriority` in here, deliberately. Giving the centre priority
         // makes the stack satisfy it first and squeeze the side columns below
         // their `minWidth` — which does not shrink them, it makes the whole row
@@ -264,78 +300,69 @@ struct LiveMatchView: View {
         // edges. The side columns' maximums are what hand the centre the
         // remainder, and a maximum cannot overflow.
         HStack(spacing: 0) {
-            // While an event flow is running, the lineup yields its column to the
-            // stage. The stage is already asking the question the lineup would
-            // answer — who was this? who is coming off? — so the column is dead
-            // space, and a substitution grid squeezed into the remainder starts
-            // to scroll. The Record palette never moves, which is the position
-            // muscle memory actually depends on.
-            if stage.isPitch {
-                LineupColumn(session: session, onSelect: select(player:))
-                    .frame(
-                        minWidth: Column.lineupMinimum, idealWidth: Column.lineupMinimum,
-                        maxWidth: Column.lineupMaximum)
-                Divider()
-            }
-            stageView
+            LineupColumn(session: session, onSelect: select(player:))
                 .frame(
-                    minWidth: Column.stageMinimum, idealWidth: Column.stageMinimum,
-                    maxWidth: .infinity
-                )
+                    minWidth: Column.lineupMinimum, idealWidth: Column.lineupMinimum,
+                    maxWidth: Column.lineupMaximum)
+            Divider()
+            workspace
+                .frame(
+                    minWidth: Column.workspaceComfortable, idealWidth: Column.workspaceComfortable,
+                    maxWidth: .infinity)
             Divider()
             paletteColumn
                 .frame(
                     minWidth: Column.recordMinimum, idealWidth: Column.recordMinimum,
                     maxWidth: Column.recordMaximum)
         }
-        // The width this layout needs must not depend on what the centre is
-        // showing, or `ViewThatFits` would pick a different layout the moment an
-        // event flow starts and pick it back when the flow ends. Whether the
-        // lineup is on screen is a decision inside this layout, not a reason to
-        // change layout.
-        .frame(minWidth: Column.wideMinimum, idealWidth: Column.wideMinimum, maxWidth: .infinity)
+        .frame(
+            minWidth: Column.threeColumnMinimum, idealWidth: Column.threeColumnMinimum,
+            maxWidth: .infinity)
     }
 
-    private var mediumLayout: some View {
+    /// iPad mini and constrained landscape windows: Lineup | Record while idle.
+    /// The workspace is not permanently on screen here — it takes the lineup's
+    /// place only when it has something to ask, and gives it straight back.
+    private var twoColumnLayout: some View {
         HStack(spacing: 0) {
             Group {
-                if stage.isPitch {
-                    LineupColumn(session: session, onSelect: select(player:))
+                if composer.isComposing {
+                    workspace
                 } else {
-                    stageView
+                    LineupColumn(session: session, onSelect: select(player:))
                 }
             }
             .frame(
-                minWidth: Column.workspaceMinimum, idealWidth: Column.workspaceMinimum,
-                maxWidth: .infinity
-            )
+                minWidth: Column.workspaceUsable, idealWidth: Column.workspaceUsable,
+                maxWidth: .infinity)
             Divider()
             paletteColumn
                 .frame(
                     minWidth: Column.recordMinimum, idealWidth: Column.recordMinimum,
                     maxWidth: Column.recordMaximum)
         }
+        .frame(
+            minWidth: Column.twoColumnMinimum, idealWidth: Column.twoColumnMinimum,
+            maxWidth: .infinity)
     }
 
+    /// Compact: one pane at a time, and the composer arrives as a sheet over the
+    /// top of it rather than displacing the scorer.
     private var compactLayout: some View {
         VStack(spacing: 0) {
-            if stage.isPitch {
-                CompactPanePicker(selection: $compactPane)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+            CompactPanePicker(selection: $compactPane)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
 
-                switch compactPane {
-                case .palette: paletteColumn
-                case .lineup: LineupColumn(session: session, onSelect: select(player:))
-                }
-            } else {
-                stageView
+            switch compactPane {
+            case .palette: paletteColumn
+            case .lineup: LineupColumn(session: session, onSelect: select(player:))
             }
         }
     }
 
-    /// The Record column owns its own scrolling now: the our-team actions scroll,
-    /// the opponent's quick actions are pinned underneath them.
+    /// The Record column owns its own scrolling: the our-team actions scroll, the
+    /// opponent's quick actions are pinned underneath them.
     private var paletteColumn: some View {
         EventPalette(
             session: session,
@@ -346,79 +373,102 @@ struct LiveMatchView: View {
         )
     }
 
+    // MARK: - The Event Composer
+
+    /// The middle column in a regular environment: the composer when it has a
+    /// question, and the shot map when it does not.
     @ViewBuilder
-    private var stageView: some View {
+    private var workspace: some View {
         ZStack {
-            switch stage {
-            case .pitch:
-                PitchPanel(session: session, onOpenStats: { isShowingInspector.toggle() })
-
-            case .choosePlayer(let prompt):
-                PlayerPickerStage(
-                    title: prompt.title,
-                    players: session.candidates(
-                        for: prompt.action.attributionCategory, side: prompt.side),
-                    goalkeeperID: prompt.side == .us ? session.snapshot.activeGoalkeeper : nil,
-                    allowsUnknown: prompt.action.allowsUnknown,
-                    unknownTitle: prompt.side == .us
-                        ? "Player Unknown" : "\(session.descriptor.opponentShortName) — No Player",
-                    unknownSubtitle: prompt.side == .us
-                        ? "Record now, attribute later" : "Count it for the team only",
-                    showsTips: session.showsContextualTips,
-                    onPick: { complete(prompt.action, side: prompt.side, with: $0) },
-                    onCancel: { stage = .pitch }
-                )
-
-            case .chooseAssist(let shot):
-                AssistPickerStage(
-                    scorerName: session.context.roster(for: shot.side).label(for: shot.shooter),
-                    players: session.candidates(for: .assist, side: shot.side)
-                        .filter { $0.id != shot.shooter.playerID },
-                    onPick: { assist in
-                        var shot = shot
-                        shot.assist = assist
-                        finish(shot: shot)
-                    },
-                    onCancel: { stage = .pitch }
-                )
-
-            case .penaltyOutcome(let taker):
-                PenaltyOutcomeStage(
-                    takerName: session.context.roster.label(for: taker),
-                    onPick: { outcome in
-                        // A penalty is never assisted, so this goes straight to
-                        // the shot regardless of the outcome.
-                        finish(
-                            shot: ShotEvent(
-                                side: .us, shooter: taker, outcome: outcome, phase: .penaltyKick))
-                    },
-                    onCancel: { stage = .pitch }
-                )
-
-            case .placeShotLocation(let shot):
-                ShotLocationStage(
-                    shot: shot,
-                    shooterName: session.context.roster.label(for: shot.shooter),
-                    markers: session.shotMarkers,
-                    onCommit: { location in
-                        var shot = shot
-                        shot.location = location
-                        record(shot: shot)
-                    }
-                )
-
-            case .substitution:
-                SubstitutionStage(
-                    session: session,
-                    onCommit: { out, incoming, keeper in
-                        session.substitute(out: out, in: incoming, goalkeeperAfter: keeper)
-                        stage = .pitch
-                    },
-                    onCancel: { stage = .pitch }
-                )
+            if composer.isComposing {
+                composerContent
+            } else {
+                IdleWorkspace(session: session)
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: stage)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: composer)
+    }
+
+    /// The composer itself, shared by the column and the sheet. One definition of
+    /// each question, presented two ways.
+    @ViewBuilder
+    private var composerContent: some View {
+        switch composer.step {
+        case .choosePlayer(let prompt):
+            PlayerPickerStage(
+                title: prompt.title,
+                players: session.candidates(
+                    for: prompt.action.attributionCategory, side: prompt.side),
+                goalkeeperID: prompt.side == .us ? session.snapshot.activeGoalkeeper : nil,
+                allowsUnknown: prompt.action.allowsUnknown,
+                unknownTitle: prompt.side == .us
+                    ? "Player Unknown" : "\(session.descriptor.opponentShortName) — No Player",
+                unknownSubtitle: prompt.side == .us
+                    ? "Record now, attribute later" : "Count it for the team only",
+                showsTips: session.showsContextualTips,
+                onPick: { complete(prompt.action, side: prompt.side, with: $0) },
+                onCancel: { composer.finish() }
+            )
+
+        case .penaltyOutcome(let taker):
+            PenaltyOutcomeStage(
+                takerName: session.context.roster.label(for: taker),
+                onPick: { outcome in recordPenalty(taker: taker, outcome: outcome) },
+                onCancel: { composer.finish() }
+            )
+
+        case .assist(let goalID, let scorerName, let side):
+            AssistPickerStage(
+                scorerName: scorerName,
+                players: session.candidates(for: .assist, side: side)
+                    .filter { $0.id != scorerID(of: goalID) },
+                onPick: { assist in
+                    // `nil` is "unassisted" and settles the goal; `.unidentified`
+                    // deliberately leaves it in Review.
+                    session.resolveAssist(assist, on: goalID)
+                    composer.finish()
+                },
+                onSkip: { composer.finish() }
+            )
+
+        case .shotLocation(let shotID, let shooterName, let outcome):
+            ShotLocationStage(
+                shooterName: shooterName,
+                outcome: outcome,
+                markers: session.shotMarkers,
+                onCommit: { location in
+                    session.resolveShotLocation(location, on: shotID)
+                    composer.finish()
+                }
+            )
+
+        case .substitution:
+            SubstitutionStage(
+                session: session,
+                onCommit: { out, incoming, keeper in
+                    session.substitute(out: out, in: incoming, goalkeeperAfter: keeper)
+                    composer.finish()
+                },
+                onCancel: { composer.finish() }
+            )
+
+        case nil:
+            EmptyView()
+        }
+    }
+
+    /// Leaving the composer never costs a recorded fact. The steps that could
+    /// lose one are the ones where nothing has been recorded yet, and those
+    /// simply drop the half-formed intent.
+    private func abandonComposer() {
+        composer.finish()
+    }
+
+    private func scorerID(of goalID: EventID) -> PlayerID? {
+        guard let event = session.context.events.first(where: { $0.id == goalID }),
+            case .shot(let shot) = event.payload
+        else { return nil }
+        return shot.shooter.playerID
     }
 
     // MARK: - Interaction
@@ -437,7 +487,14 @@ struct LiveMatchView: View {
                     kind: .warning))
             return
         }
-        session.armedPlayer = session.armedPlayer == player.id ? nil : player.id
+        let wasArmed = session.armedPlayer == player.id
+        session.armedPlayer = wasArmed ? nil : player.id
+
+        // Player-first, in one pane: having chosen who, the scorer's next tap is
+        // always an action, so Record comes forward without being asked for.
+        if !wasArmed, composerUsesSheet {
+            compactPane = .palette
+        }
     }
 
     private func handle(action: PaletteAction) {
@@ -482,13 +539,10 @@ struct LiveMatchView: View {
             return
         }
 
-        // In `Both Teams` mode the opponent's players are attributed too, using
-        // the same engine and the same picker. In `Our Team` mode these stay
-        // single taps, which is the whole point of that mode.
         if session.descriptor.tracking == .bothTeams,
             !session.context.opponentRoster.players.isEmpty
         {
-            stage = .choosePlayer(PlayerPrompt(action: action, side: .opponent))
+            composer.ask(.choosePlayer(PlayerPrompt(action: action, side: .opponent)))
         } else {
             complete(action, side: .opponent, with: .untracked)
         }
@@ -501,11 +555,11 @@ struct LiveMatchView: View {
                 notice: LiveNotice(text: "Substitutions start once the match kicks off.", kind: .warning))
             return
         }
-        stage = .substitution
+        composer.ask(.substitution)
     }
 
     /// Both interaction directions land here: a player was already armed, or the
-    /// action asks who it belongs to.
+    /// composer asks who it belongs to.
     private func begin(_ action: PendingAction) {
         guard session.context.hasStarted else {
             session.show(
@@ -523,7 +577,7 @@ struct LiveMatchView: View {
             complete(action, with: .player(armed))
         } else {
             session.armedPlayer = nil
-            stage = .choosePlayer(PlayerPrompt(action: action))
+            composer.ask(.choosePlayer(PlayerPrompt(action: action)))
         }
     }
 
@@ -540,70 +594,114 @@ struct LiveMatchView: View {
         }
     }
 
+    /// The player is known, so the primary fact is recorded *now*. Anything still
+    /// missing becomes the composer's next question, asked against an event that
+    /// already exists.
     private func complete(_ action: PendingAction, side: TeamSide = .us, with ref: PlayerRef) {
         switch action {
         case .penaltyAttempt where side == .us:
-            // The outcome is still unknown. Nothing about this implies a goal.
-            stage = .penaltyOutcome(ref)
+            // The outcome is a primary fact, not enrichment: a penalty whose
+            // outcome is unknown is a score that may or may not have happened.
+            composer.ask(.penaltyOutcome(taker: ref))
 
         case .penaltyAttempt:
-            finish(shot: ShotEvent(side: side, shooter: ref, outcome: .goal, phase: .penaltyKick))
+            recordShot(
+                ShotEvent(side: side, shooter: ref, outcome: .goal, phase: .penaltyKick), side: side)
 
         case .goal(let phase):
-            let shot = ShotEvent(side: side, shooter: ref, outcome: .goal, phase: phase)
-            // An opponent goal in `Our Team` mode has nobody to credit an assist to.
-            if session.profile.prompts.assistOnGoal,
-                side == .us || !session.candidates(for: .assist, side: side).isEmpty
-            {
-                stage = .chooseAssist(shot)
-            } else {
-                finish(shot: shot)
-            }
+            recordGoal(shooter: ref, phase: phase, side: side)
 
         case .ownGoal:
-            record(shot: ShotEvent(side: side, shooter: ref, outcome: .goal, isOwnGoal: true))
+            _ = session.recordReturningID(
+                .recordShot(ShotEvent(side: side, shooter: ref, outcome: .goal, isOwnGoal: true)),
+                feedback: .goal)
+            composer.finish()
 
         case .shot(let outcome):
-            finish(shot: ShotEvent(side: side, shooter: ref, outcome: outcome))
+            recordShot(ShotEvent(side: side, shooter: ref, outcome: outcome), side: side)
 
         case .corner:
             session.run(.recordCorner(side: side, player: ref))
-            stage = .pitch
+            composer.finish()
 
         case .steal:
             session.run(.recordSteal(side: side, player: ref))
-            stage = .pitch
+            composer.finish()
 
         case .foul:
             session.run(.recordFoul(side: side, player: ref))
-            stage = .pitch
+            composer.finish()
 
         case .offside:
             session.run(.recordOffside(side: side, player: ref))
-            stage = .pitch
+            composer.finish()
 
         case .card(let type):
             session.run(.recordCard(CardEvent(side: side, player: ref, card: type)))
-            stage = .pitch
+            composer.finish()
 
         case .goalkeeper:
             session.run(.changeGoalkeeper(side: side, goalkeeper: ref))
-            stage = .pitch
+            composer.finish()
         }
     }
 
-    /// Offer the optional shot map only when the match's profile asks for it.
-    private func finish(shot: ShotEvent) {
-        if session.profile.prompts.shotLocation && shot.location == nil {
-            stage = .placeShotLocation(shot)
-        } else {
-            record(shot: shot)
+    /// A goal is a goal the moment the scorer says so.
+    ///
+    /// The event is written, the score moves, the journal is flushed and the goal
+    /// feedback fires *before* the assist question is asked. The assist is
+    /// recorded as unresolved so that walking away leaves a correct goal and one
+    /// Review item, rather than no goal at all.
+    private func recordGoal(shooter: PlayerRef, phase: PlayPhase, side: TeamSide) {
+        let asksAssist =
+            session.profile.prompts.assistOnGoal
+            && (side == .us || !session.candidates(for: .assist, side: side).isEmpty)
+
+        let shot = ShotEvent(
+            side: side,
+            shooter: shooter,
+            outcome: .goal,
+            assist: asksAssist ? .unidentified : nil,
+            phase: phase)
+
+        guard let goalID = session.recordReturningID(.recordShot(shot), feedback: .goal) else {
+            composer.finish()
+            return
         }
+
+        guard asksAssist else {
+            composer.finish()
+            return
+        }
+        composer.ask(
+            .assist(
+                goal: goalID,
+                scorerName: session.context.roster(for: side).label(for: shooter),
+                side: side))
     }
 
-    private func record(shot: ShotEvent) {
-        session.run(.recordShot(shot), feedback: shot.outcome.isGoal ? .goal : .standard)
-        stage = .pitch
+    /// The shot is recorded before the optional map is offered, so skipping the
+    /// map — or never answering it — cannot cost the shot.
+    private func recordShot(_ shot: ShotEvent, side: TeamSide) {
+        guard let shotID = session.recordReturningID(.recordShot(shot), feedback: .standard) else {
+            composer.finish()
+            return
+        }
+        guard session.profile.prompts.shotLocation, side == .us else {
+            composer.finish()
+            return
+        }
+        composer.ask(
+            .shotLocation(
+                shot: shotID,
+                shooterName: session.context.roster(for: side).label(for: shot.shooter),
+                outcome: shot.outcome))
+    }
+
+    private func recordPenalty(taker: PlayerRef, outcome: ShotOutcome) {
+        // A penalty goal is never assisted, so there is no assist question here.
+        recordShot(
+            ShotEvent(side: .us, shooter: taker, outcome: outcome, phase: .penaltyKick), side: .us)
     }
 
     private func startPeriod() {
@@ -624,7 +722,39 @@ struct LiveMatchView: View {
     }
 }
 
-/// Record / Lineup in a narrow window.
+/// The compact presentation of the composer: one sheet, whose content changes as
+/// the composer moves between questions.
+///
+/// Deliberately not a popover and deliberately not one sheet per step. A scorer
+/// answering "who scored, who assisted, where" should see one surface that
+/// changes, not three that stack.
+struct ComposerSheet<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+    var onDismiss: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { onDismiss() }
+                            .accessibilityIdentifier("composer.done")
+                    }
+                }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .accessibilityIdentifier("composer.sheet")
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: title)
+    }
+}
+
+/// Record / Lineup in a compact window.
 ///
 /// These are two pieces of content, not two values, so on iPadOS 27 they use the
 /// tabs picker style and are announced as tabs. The segmented style remains the
@@ -655,13 +785,20 @@ private struct PaneSelectionStyle: ViewModifier {
     }
 }
 
-/// The default centre panel: the shot map, plus the small amount of context that
-/// earns the space when no shots have locations yet.
-struct PitchPanel: View {
+/// What the workspace shows when the composer has nothing to ask.
+///
+/// The shot map, where the match is recording one, and otherwise a plain
+/// statement of what this area is for. Explicitly *not* a second statistics
+/// panel: the numbers live in the inspector, and duplicating them here is how
+/// the middle of the screen stopped having a purpose in the first place.
+struct IdleWorkspace: View {
     let session: LiveMatchSession
-    var onOpenStats: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showsPitch: Bool {
+        session.profile.tracks(.shotLocations) || !session.shotMarkers.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -675,79 +812,32 @@ struct PitchPanel: View {
                         .foregroundStyle(Color.accentColor)
                         .transition(.opacity)
                 }
-                Button("Match Stats", systemImage: "chart.bar") { onOpenStats() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .accessibilityIdentifier("live.matchStats")
-                    .accessibilityLabel("Show match statistics")
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
 
-            if session.profile.tracks(.shotLocations) || !session.shotMarkers.isEmpty {
+            if showsPitch {
                 PitchView(markers: session.shotMarkers)
                     .padding(.horizontal, 14)
             } else {
-                LiveSummaryPanel(session: session)
+                idlePrompt
             }
 
             Spacer(minLength: 0)
         }
+        .accessibilityIdentifier("live.workspace")
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.armedPlayer)
     }
-}
 
-/// When the match is not tracking shot locations the centre is not left as
-/// decoration: it carries the live team comparison instead.
-struct LiveSummaryPanel: View {
-    let session: LiveMatchSession
-
-    var body: some View {
-        VStack(spacing: 0) {
-            comparisonRow(
-                "Shots", session.profile.value(.shots, session.snapshot.team.us.shots),
-                session.profile.value(.shots, session.snapshot.team.opponent.shots))
-            Divider()
-            comparisonRow(
-                "Shots on Goal", session.profile.value(.shots, session.snapshot.team.us.shotsOnGoal),
-                session.profile.value(.shots, session.snapshot.team.opponent.shotsOnGoal))
-            Divider()
-            comparisonRow(
-                "Corners", session.profile.value(.corners, session.snapshot.team.us.corners),
-                session.profile.value(.corners, session.snapshot.team.opponent.corners))
-            Divider()
-            comparisonRow(
-                "Saves", session.profile.value(.goalkeeping, session.snapshot.team.us.saves),
-                session.profile.value(.goalkeeping, session.snapshot.team.opponent.saves))
-            Divider()
-            comparisonRow(
-                "Steals", session.profile.value(.steals, session.snapshot.team.us.steals),
-                session.profile.value(.steals, session.snapshot.team.opponent.steals))
+    private var idlePrompt: some View {
+        ContentUnavailableView {
+            Label("Nothing to complete", systemImage: "checkmark.circle")
+        } description: {
+            Text(
+                "Start an event from Record, or tap a player first. This space asks for whatever the event is missing."
+            )
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 4)
-        .frame(maxWidth: 560)
-    }
-
-    private func comparisonRow(_ label: String, _ us: StatValue, _ them: StatValue) -> some View {
-        HStack {
-            StatValueText(us)
-                .font(.title3.weight(.semibold))
-                .frame(width: 54, alignment: .leading)
-            Spacer()
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            StatValueText(them)
-                .font(.title3.weight(.semibold))
-                .frame(width: 54, alignment: .trailing)
-        }
-        .padding(.vertical, 11)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(label). \(session.descriptor.teamShortName) \(us.accessibilityText), \(session.descriptor.opponentShortName) \(them.accessibilityText)"
-        )
+        .frame(maxWidth: 420)
     }
 }
 
@@ -755,7 +845,8 @@ struct LiveSummaryPanel: View {
 ///
 /// Programme asks *what happened* rather than assuming a goal: a penalty is an
 /// attempt, and a saved one is not a goal that failed to appear. The wording and
-/// the state stay neutral until the scorer answers.
+/// the state stay neutral until the scorer answers, and nothing is recorded until
+/// then either — an outcome is a primary fact, not enrichment.
 struct PenaltyOutcomeStage: View {
     let takerName: String
     var onPick: (ShotOutcome) -> Void

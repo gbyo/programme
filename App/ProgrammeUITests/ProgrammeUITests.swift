@@ -86,16 +86,114 @@ final class ProgrammeUITests: XCTestCase {
 
         element(app, "palette.goal").tap()
 
-        // The assist step takes over the centre panel rather than covering the score.
+        // The goal is already recorded by the time the composer asks about the
+        // assist: the score has moved and the event is in the log.
         let unassisted = element(app, "assist.unassisted")
         XCTAssertTrue(unassisted.waitForExistence(timeout: 5), "The assist step did not appear")
+        XCTAssertTrue(
+            element(app, "assist.recordedConfirmation").exists,
+            "The composer did not say the goal was already recorded")
         XCTAssertTrue(element(app, "live.score").exists, "The score was hidden during event entry")
+        XCTAssertTrue(
+            lastEventLabel(app).contains("GOAL"),
+            "The goal was not recorded before the assist was asked for")
         attachScreenshot(named: "Assist attribution")
         unassisted.tap()
 
         let summary = lastEventLabel(app)
         XCTAssertTrue(summary.contains("GOAL"))
         XCTAssertTrue(summary.contains("Carter"), "The goal was not credited to the armed player")
+    }
+
+    func testAGoalIsRecordedBeforeTheAssistIsAnswered() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        let scoreBefore = element(app, "live.score").label
+
+        element(app, "player.9").tap()
+        element(app, "palette.goal").tap()
+        XCTAssertTrue(element(app, "assist.unassisted").waitForExistence(timeout: 5))
+
+        // The primary fact landed first: the scoreboard already reads one more.
+        XCTAssertNotEqual(
+            element(app, "live.score").label, scoreBefore,
+            "The score did not move until the assist was answered")
+        XCTAssertTrue(lastEventLabel(app).contains("GOAL"))
+    }
+
+    func testLeavingTheAssistUnansweredKeepsTheGoalAndFlagsItForReview() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "player.9").tap()
+        element(app, "palette.goal").tap()
+        XCTAssertTrue(element(app, "assist.unassisted").waitForExistence(timeout: 5))
+        let scoreWithGoal = element(app, "live.score").label
+
+        // Walk away from the question the way a scorer watching play would.
+        element(app, "assist.notNow").tap()
+
+        XCTAssertFalse(
+            element(app, "assist.unassisted").waitForExistence(timeout: 2),
+            "The composer stayed open after being dismissed")
+        XCTAssertEqual(
+            element(app, "live.score").label, scoreWithGoal, "The goal was lost on dismissal")
+        XCTAssertTrue(lastEventLabel(app).contains("GOAL"), "The goal was not kept")
+        XCTAssertTrue(
+            element(app, "scoring.review").label.contains("need attention"),
+            "The unanswered assist was not collected for Review")
+    }
+
+    func testTheWorkspaceExistsToCompleteAnEventNotToShowStats() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        // Whatever the layout, the middle is never a statistics panel: the
+        // numbers have exactly one home, and it is the inspector.
+        XCTAssertTrue(
+            element(app, "live.matchStats").exists,
+            "There is no way into the statistics inspector")
+
+        // Starting an event fills the workspace with the question.
+        element(app, "palette.corner").tap()
+        XCTAssertTrue(app.staticTexts["Who took the corner?"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "Event composer")
+        element(app, "pick.7").tap()
+
+        // And it hands the space straight back once nothing is outstanding.
+        XCTAssertTrue(lastEventLabel(app).contains("Corner"))
+        XCTAssertFalse(
+            app.staticTexts["Who took the corner?"].waitForExistence(timeout: 2),
+            "The composer stayed on screen with nothing left to ask")
+    }
+
+    func testConstrainedLandscapeKeepsLineupAndRecordUntilAnEventNeedsCompleting() {
+        // An iPad mini in landscape is too narrow for three permanent columns, so
+        // the lineup and Record share the screen and the composer borrows the
+        // lineup's side only while it has a question.
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        let lineupRow = element(app, "player.9")
+        XCTAssertTrue(lineupRow.exists, "The lineup is not visible while idle")
+        XCTAssertTrue(element(app, "palette.goal").exists, "Record is not visible while idle")
+        attachScreenshot(named: "Constrained landscape, idle")
+
+        element(app, "palette.corner").tap()
+        XCTAssertTrue(app.staticTexts["Who took the corner?"].waitForExistence(timeout: 5))
+
+        // Record never moves. Only the lineup's side is borrowed.
+        XCTAssertTrue(
+            element(app, "palette.goal").exists, "Record moved when the composer opened")
+        attachScreenshot(named: "Constrained landscape, composing")
+
+        element(app, "pick.7").tap()
+
+        // And the lineup comes straight back.
+        XCTAssertTrue(
+            element(app, "player.9").waitForExistence(timeout: 5),
+            "The lineup did not return after the event was completed")
     }
 
     func testClearingTheArmedPlayerIsOneTap() {

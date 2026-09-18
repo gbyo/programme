@@ -94,7 +94,7 @@
     #Preview("Needs review") {
         if let session = PreviewSupport.session(ProgrammeSample.halftimeContext()) {
             NavigationStack {
-                ReviewView(session: session, stage: .constant(.pitch))
+                ReviewView(session: session)
             }
         }
     }
