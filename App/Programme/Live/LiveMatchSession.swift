@@ -186,6 +186,65 @@ final class LiveMatchSession {
         }
     }
 
+    /// Record a command and hand back the identity of the event it appended.
+    ///
+    /// This is what lets the composer record the primary fact the moment it is
+    /// known — the goal, the shot — and then *revise that same event* with the
+    /// enrichment answers. The scorer's next question is never standing between
+    /// the match and a recorded fact.
+    @discardableResult
+    func recordReturningID(_ command: MatchCommand, feedback: Feedback = .standard) -> EventID? {
+        do {
+            let effects = try MatchEngine.perform(command, on: context, at: Date())
+            let appended = effects.compactMap { effect -> EventID? in
+                if case .appendEvent(let event) = effect { return event.id }
+                return nil
+            }.last
+            commit(effects)
+            switch feedback {
+            case .standard: Haptics.recorded()
+            case .goal: Haptics.goal()
+            case .silent: break
+            }
+            return appended
+        } catch {
+            present(error: error)
+            return nil
+        }
+    }
+
+    /// Credit, or explicitly clear, the assist on a goal that is already
+    /// recorded. `nil` means unassisted, which is a different fact from
+    /// `.unidentified` — the latter stays in Review until someone settles it.
+    func resolveAssist(_ ref: PlayerRef?, on eventID: EventID) {
+        if let ref {
+            edit(.attribute(eventID, .assist, ref))
+        } else {
+            guard var shot = shotPayload(of: eventID) else { return }
+            shot.assist = nil
+            edit(.replacePayload(eventID, .shot(shot), summary: "Recorded as unassisted"))
+        }
+    }
+
+    /// Place, or skip, the optional shot location on a shot already recorded.
+    func resolveShotLocation(_ location: PitchPoint?, on eventID: EventID) {
+        guard let location, var shot = shotPayload(of: eventID) else { return }
+        shot.location = location
+        edit(.replacePayload(eventID, .shot(shot), summary: "Shot location added"))
+    }
+
+    /// Whether an already-recorded goal still has an unsettled assist.
+    func awaitsAssist(_ eventID: EventID) -> Bool {
+        shotPayload(of: eventID)?.assist == .unidentified
+    }
+
+    private func shotPayload(of eventID: EventID) -> ShotEvent? {
+        guard let event = context.events.first(where: { $0.id == eventID }),
+            case .shot(let shot) = event.payload
+        else { return nil }
+        return shot
+    }
+
     @discardableResult
     func edit(_ command: EventEditCommand, message: String? = nil) -> Bool {
         do {

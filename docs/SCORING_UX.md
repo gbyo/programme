@@ -96,6 +96,52 @@ Dismissed players are never offered. Bench rows stay visible in the lineup but d
 
 `ValidationEngine` remains the safety net for events arriving from an import, an edit or a repaired file. The difference is that the normal interface now makes an impossible attribution unreachable rather than merely flagging it afterwards.
 
+## The Event Composer
+
+The live scorer has four parts, and each has exactly one job:
+
+| Part | Job |
+| --- | --- |
+| **Record** | start an event |
+| **Lineup** | preselect the player an event will belong to |
+| **Event Composer** | ask only for information that is genuinely missing |
+| **Inspector** | statistics |
+| **Review** | deferred and unknown details |
+
+The composer is not a dashboard and never shows passive statistics. It appears when an event needs completing and gives its space back when nothing does. A mini stats panel in the middle of the scorer is how that area stopped having a purpose; the numbers have one home and it is the inspector, reached from the bottom bar in every layout.
+
+### Record the primary fact first, then enrich
+
+This is the rule that matters most. **A goal is a goal the moment the scorer says so.** The event is written, the score moves, the journal is flushed and the goal feedback fires *before* the composer asks who assisted. The assist is recorded as `.unidentified`, so:
+
+- **Unassisted** revises the same event to no assist.
+- **A player** revises the same event with that assist.
+- **Assist Unknown**, or walking away entirely, leaves it unresolved and collected under Review.
+
+A scorer who looks back at the pitch and never answers has still recorded the goal. The same applies to the optional shot location: the shot exists with its shooter and outcome before the map is offered, so skipping costs nothing.
+
+The exception is a **penalty outcome**, which is a primary fact rather than enrichment — a penalty whose outcome is unknown is a score that may or may not have happened — so nothing is recorded until the scorer answers.
+
+`LiveMatchSession.recordReturningID` hands back the identity of the event just appended; `resolveAssist` and `resolveShotLocation` revise that same event. Enrichment never appends a second event.
+
+### Presentation
+
+One composer, three presentations, chosen by what the environment can hold:
+
+| Environment | Layout | Composer |
+| --- | --- | --- |
+| Wide iPad | Lineup / Workspace / Record, all permanent | the middle column |
+| iPad mini, constrained landscape, iPad portrait | Lineup / Record | takes the lineup's side while it has a question, and gives it straight back |
+| Compact (iPhone, narrow Stage Manager) | Record / Lineup as tabs | one `.sheet`, which transitions internally between questions |
+
+Record never moves in any of them — that is the position muscle memory depends on.
+
+The compact sheet is **one** sheet. "Who scored? → Who assisted? → Where?" changes the content inside it rather than presenting three sheets in a stack. Popovers are never used for Goal/Shot/Assist. Substitution is inline where there is room and uses the same sheet in compact, because it genuinely needs focused space.
+
+In compact, tapping a player in Lineup switches back to Record automatically: having said *who*, the scorer's next tap is always *what*.
+
+Compact is the platform's own `horizontalSizeClass`, not a width Programme invents. The choice between three columns and two is made by `ViewThatFits`.
+
 ## Centre-stage event entry
 
 Frequent event entry happens in the centre stage instead of stacking modal sheets over the live match. The score and clock should remain visually anchored while the scorer is choosing an outcome or player.

@@ -124,7 +124,12 @@ struct PlayerPickerStage: View {
     }
 }
 
-/// Assist attribution.
+/// Assist attribution, for a goal that is **already recorded**.
+///
+/// The score has already moved and the event is already journalled by the time
+/// this appears, so nothing here is load-bearing: every exit leaves a correct
+/// goal behind. That is why the escape is "Not now" rather than "Cancel" — there
+/// is nothing to cancel.
 ///
 /// Most goals are unassisted, so "Unassisted" is not one option among several: it
 /// is a single full-width target across the top, and the Return key triggers it.
@@ -135,7 +140,7 @@ struct AssistPickerStage: View {
     let scorerName: String
     let players: [PlayerSnapshot]
     var onPick: (PlayerRef?) -> Void
-    var onCancel: () -> Void
+    var onSkip: () -> Void
 
     @ScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 82
     @ScaledMetric(relativeTo: .title3) private var unassistedHeight: CGFloat = 72
@@ -146,14 +151,17 @@ struct AssistPickerStage: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Who assisted?")
                         .font(.title3.weight(.semibold))
-                    Text("Goal by \(scorerName)")
+                    Label("Goal recorded · \(scorerName)", systemImage: "checkmark.circle.fill")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Programme.Palette.confirmed)
+                        .accessibilityIdentifier("assist.recordedConfirmation")
                 }
                 Spacer()
-                Button("Cancel") { onCancel() }
+                Button("Not now") { onSkip() }
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("assist.notNow")
+                    .accessibilityHint("Leaves the assist for Review. The goal stays recorded.")
             }
 
             Button {
@@ -212,11 +220,14 @@ struct AssistPickerStage: View {
     }
 }
 
-/// Optional shot placement. Always skippable: a match is fully scoreable with no
-/// shot map at all.
+/// Optional shot placement, for a shot that is **already recorded**.
+///
+/// Always skippable, and skipping now costs nothing at all: the shot exists with
+/// its outcome and its shooter before this appears. A match is fully scoreable
+/// with no shot map.
 struct ShotLocationStage: View {
-    let shot: ShotEvent
     let shooterName: String
+    let outcome: ShotOutcome
     var markers: [ShotMarker]
     @State private var location: PitchPoint?
     var onCommit: (PitchPoint?) -> Void
@@ -227,14 +238,15 @@ struct ShotLocationStage: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Where was it struck?")
                         .font(.title3.weight(.semibold))
-                    Text("\(shot.outcome.label) · \(shooterName) · optional")
+                    Label("\(outcome.label) recorded · \(shooterName)", systemImage: "checkmark.circle.fill")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Programme.Palette.confirmed)
                 }
                 Spacer()
                 Button("Skip") { onCommit(nil) }
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("shotLocation.skip")
                 Button("Record") { onCommit(location) }
                     .programmePrimaryAction()
                     .disabled(location == nil)
