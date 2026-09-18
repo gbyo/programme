@@ -43,6 +43,8 @@ Frequency is expressed *statically*, in size and position, never in ordering:
 - **Secondary block** — Corner, Steal, Penalty Kick, Yellow, Red, More. Shorter tiles, still well past a 44pt target.
 - **Pinned opponent bar** — the opponent's Goal / Shot / Corner, below the palette's scroll view and never below the fold. An opponent shot is how our goalkeeper's shots-faced and save percentage are recorded.
 
+Against a bottom bar, do **not** leave the lineup's `scrollEdgeEffectStyle` at `.automatic`. It resolves to a hard edge effect whose view sits over the last ~114pt of the list and swallows touches — the bottom rows look tappable, report as hittable, and do nothing. The lineup is half of the scorer's two-tap path, so that is fatal. `.soft` gives the same fade with no interactive overlay, and is set explicitly for that reason.
+
 Nothing in the toolbar appears or disappears with availability either. Redo is always rendered in its place and disabled when there is nothing to redo, so pressing Undo never moves the controls beside it.
 
 Palette and toolbar controls are stock system button styles (`.bordered`, `.borderedProminent`) with a semantic tint. Do not hand-draw a background, a border or a pressed state for something the system already provides: a control that looks native has to behave native.
