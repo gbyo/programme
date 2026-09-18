@@ -164,9 +164,15 @@ struct LineupColumn: View {
         }
         .listStyle(.plain)
         .scrollBounceBehavior(.basedOnSize)
-        // No scroll-edge override. `.automatic` lets the system decide how this
-        // list meets the scoreboard above and the real bottom toolbar below,
-        // which is exactly the sort of thing it should be deciding.
+        // Deliberately explicit rather than `.automatic`.
+        //
+        // Against the bottom bar, `.automatic` resolves to a hard edge effect
+        // whose view sits over the last ~114pt of the list and swallows touches:
+        // the bottom rows look tappable, report as hittable, and do nothing.
+        // That is fatal here — the lineup is half of the scorer's two-tap path,
+        // and the player they want is as likely to be #9 as #1. `.soft` renders
+        // the same fade without the interactive overlay.
+        .scrollEdgeEffectStyle(.soft, for: .all)
     }
 
     private func minutesIfPlayed(_ player: PlayerSnapshot) -> Int? {

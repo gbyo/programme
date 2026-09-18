@@ -68,6 +68,9 @@ struct LiveMatchView: View {
         static let recordMaximum: CGFloat = 380
         static let stageMinimum: CGFloat = 340
         static let workspaceMinimum: CGFloat = 320
+        /// What the three-column layout needs, independent of what the centre
+        /// happens to be showing.
+        static let wideMinimum: CGFloat = lineupMinimum + stageMinimum + recordMinimum
     }
 
     var body: some View {
@@ -261,11 +264,19 @@ struct LiveMatchView: View {
         // edges. The side columns' maximums are what hand the centre the
         // remainder, and a maximum cannot overflow.
         HStack(spacing: 0) {
-            LineupColumn(session: session, onSelect: select(player:))
-                .frame(
-                    minWidth: Column.lineupMinimum, idealWidth: Column.lineupMinimum,
-                    maxWidth: Column.lineupMaximum)
-            Divider()
+            // While an event flow is running, the lineup yields its column to the
+            // stage. The stage is already asking the question the lineup would
+            // answer — who was this? who is coming off? — so the column is dead
+            // space, and a substitution grid squeezed into the remainder starts
+            // to scroll. The Record palette never moves, which is the position
+            // muscle memory actually depends on.
+            if stage.isPitch {
+                LineupColumn(session: session, onSelect: select(player:))
+                    .frame(
+                        minWidth: Column.lineupMinimum, idealWidth: Column.lineupMinimum,
+                        maxWidth: Column.lineupMaximum)
+                Divider()
+            }
             stageView
                 .frame(
                     minWidth: Column.stageMinimum, idealWidth: Column.stageMinimum,
@@ -277,6 +288,12 @@ struct LiveMatchView: View {
                     minWidth: Column.recordMinimum, idealWidth: Column.recordMinimum,
                     maxWidth: Column.recordMaximum)
         }
+        // The width this layout needs must not depend on what the centre is
+        // showing, or `ViewThatFits` would pick a different layout the moment an
+        // event flow starts and pick it back when the flow ends. Whether the
+        // lineup is on screen is a decision inside this layout, not a reason to
+        // change layout.
+        .frame(minWidth: Column.wideMinimum, idealWidth: Column.wideMinimum, maxWidth: .infinity)
     }
 
     private var mediumLayout: some View {
