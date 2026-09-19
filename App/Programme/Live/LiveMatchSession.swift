@@ -353,12 +353,14 @@ final class LiveMatchSession {
     }
 
     func startNextPeriod() {
-        run(.startNextPeriod, feedback: .silent)
+        guard run(.startNextPeriod, feedback: .silent) else { return }
+        ProgrammeStateReporter.reportWorkflow(.liveScoring)
         startOrUpdateActivity()
     }
 
     func endCurrentPeriod() {
-        run(.endCurrentPeriod, feedback: .silent)
+        guard run(.endCurrentPeriod, feedback: .silent) else { return }
+        ProgrammeStateReporter.reportWorkflow(.periodBreak)
     }
 
     func toggleClock() {
@@ -370,7 +372,8 @@ final class LiveMatchSession {
     }
 
     func finalize() {
-        run(.finalize, feedback: .silent)
+        guard run(.finalize, feedback: .silent) else { return }
+        ProgrammeStateReporter.reportWorkflow(.finalizing)
         endActivity()
         try? journal.close(matchID: matchID)
         Task { await appModel?.refreshWidgetSnapshot() }
@@ -420,9 +423,11 @@ final class LiveMatchSession {
     }
 
     private func refreshDerivedState() {
-        snapshot = StatEngine.snapshot(context: context, at: Date())
-        issues = ValidationEngine.issues(context: context, snapshot: snapshot)
-        lastEventDescription = Self.describeLastMeaningfulEvent(in: context)
+        ProgrammeSignposts.measure("deriveSnapshot") {
+            snapshot = StatEngine.snapshot(context: context, at: Date())
+            issues = ValidationEngine.issues(context: context, snapshot: snapshot)
+            lastEventDescription = Self.describeLastMeaningfulEvent(in: context)
+        }
         clock.configure(anchor: context.clock, rules: context.rules)
         startOrUpdateActivity()
     }
@@ -436,7 +441,9 @@ final class LiveMatchSession {
                 let batch = self.drainWriteQueue()
                 if batch.isEmpty { break }
                 do {
-                    try await self.store.apply(batch, to: self.matchID)
+                    try await ProgrammeSignposts.measure("persistBatch") {
+                        try await self.store.apply(batch, to: self.matchID)
+                    }
                 } catch {
                     // The journal already holds these events, so nothing is lost.
                     // Put them back and stop, rather than spinning on a failure
@@ -462,7 +469,9 @@ final class LiveMatchSession {
         await writerTask?.value
         if !writeQueue.isEmpty {
             let batch = drainWriteQueue()
-            try? await store.apply(batch, to: matchID)
+            try? await ProgrammeSignposts.measure("persistBatch") {
+                try await store.apply(batch, to: matchID)
+            }
         }
         try? await store.updateCache(matchID: matchID, from: snapshot)
     }

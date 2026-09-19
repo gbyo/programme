@@ -414,7 +414,9 @@ final class AppModel {
         do {
             var context: MatchContext
             if try await store.matchExists(matchID) {
-                context = try await store.context(for: matchID)
+                context = try await ProgrammeSignposts.measure("loadContext") {
+                    try await store.context(for: matchID)
+                }
                 let journaled = try? journal.recover(matchID: matchID)
 
                 // A journal is only trusted when it genuinely *extends* what the
@@ -460,8 +462,11 @@ final class AppModel {
             if ownerTeams.contains(where: { $0.id == ownerID }) {
                 await ensureTeamSelected(ownerID)
             }
-            let session = LiveMatchSession(context: context, store: store, journal: journal, appModel: self)
+            let session = ProgrammeSignposts.measure("openSession") {
+                LiveMatchSession(context: context, store: store, journal: journal, appModel: self)
+            }
             liveSession = session
+            ProgrammeStateReporter.reportWorkflow(.liveScoring)
             dismissRecovery(for: matchID)
             navigation.presentLiveMatch()
         } catch {
@@ -475,6 +480,7 @@ final class AppModel {
     func closeLiveSession() async {
         await liveSession?.flush()
         liveSession = nil
+        ProgrammeStateReporter.reportWorkflow(.browsing)
         navigation.isShowingLiveMatch = false
         await refreshWidgetSnapshot()
     }
@@ -496,6 +502,12 @@ final class AppModel {
     /// MatchContext, not from browsing state.
     func refreshWidgetSnapshot() async {
         guard let store, let selectedTeamID = workspace.selectedTeamID else { return }
+        await ProgrammeSignposts.measure("widgetRefresh") {
+            await self.refreshWidgetSnapshotBody(store: store, selectedTeamID: selectedTeamID)
+        }
+    }
+
+    private func refreshWidgetSnapshotBody(store: MatchStore, selectedTeamID: TeamID) async {
         let currentSeasonID = workspace.currentSeasonID
         let details = try? await store.teamDetails(teamID: selectedTeamID)
         let teamName = details?.name ?? workspace.selectedTeam?.name ?? "Programme"

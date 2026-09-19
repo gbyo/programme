@@ -152,7 +152,11 @@ struct RosterImportView: View {
     private func loadPhoto(from item: PhotosPickerItem) async {
         isRecognizingPhoto = true
         errorMessage = nil
-        defer { isRecognizingPhoto = false }
+        ProgrammeStateReporter.reportOperation(.rosterRecognition)
+        defer {
+            isRecognizingPhoto = false
+            ProgrammeStateReporter.reportOperation(nil)
+        }
         let data: Data?
         do {
             data = try await item.loadTransferable(type: Data.self)

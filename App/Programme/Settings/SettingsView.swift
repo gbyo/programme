@@ -87,11 +87,12 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Storage", value: "On this iPad")
                     LabeledContent("Account", value: "Not required")
+                    LabeledContent("Diagnostics", value: "On this iPad")
                 } header: {
                     Text("Privacy")
                 } footer: {
                     Text(
-                        "Programme works completely offline. Rosters and match data stay on this iPad, there is no analytics, and nothing is uploaded unless you export it yourself."
+                        "Programme works completely offline. Rosters and match data stay on this iPad, and nothing is uploaded unless you export it yourself. Diagnostics (timing intervals, on-device performance reports, and coarse app states like scoring or exporting) also stay on this device to help debug issues — they never leave it and never contain names, scores, or notes."
                     )
                 }
 

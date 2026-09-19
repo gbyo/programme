@@ -28,6 +28,12 @@ enum RosterPhotoRecognizer {
     /// Recognizes roster text in image data, returning lines in
     /// top-to-bottom reading order joined by newlines.
     static func recognizeText(in imageData: Data) async throws -> String {
+        try await ProgrammeSignposts.measure("rosterRecognition") {
+            try await recognize(in: imageData)
+        }
+    }
+
+    private static func recognize(in imageData: Data) async throws -> String {
         guard
             let source = CGImageSourceCreateWithData(imageData as CFData, nil),
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
