@@ -25,12 +25,9 @@ struct RosterView: View {
             if !filtered.isEmpty {
                 Section {
                     ForEach(filtered) { player in
-                        Button {
-                            appModel.navigation.open(.player(player.playerID))
-                        } label: {
+                        NavigationLink(value: AppRoute.player(player.playerID)) {
                             PlayerRosterRow(player: player)
                         }
-                        .buttonStyle(.plain)
                     }
                 } header: {
                     Text(showsFormer ? "All Players" : "Roster")
@@ -45,7 +42,9 @@ struct RosterView: View {
                 ContentUnavailableView {
                     Label("No Players Yet", systemImage: "person.3")
                 } description: {
-                    Text("Add players to begin preparing matches. You can type them in, import a CSV, or drag a roster file here.")
+                    Text(
+                        "Add players to begin preparing matches. You can type them in, import a CSV, or drag a roster file here."
+                    )
                 } actions: {
                     Button("Add a Player") { isAddingPlayer = true }
                         .programmePrimaryAction()
@@ -78,7 +77,9 @@ struct RosterView: View {
             guard let data = items.first, let text = String(data: data, encoding: .utf8) else { return false }
             importText = text
             return true
-        } isTargeted: { isTargetedForDrop = $0 }
+        } isTargeted: {
+            isTargetedForDrop = $0
+        }
         .overlay {
             if isTargetedForDrop {
                 RoundedRectangle(cornerRadius: 16)
@@ -141,10 +142,6 @@ struct PlayerRosterRow: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
@@ -156,7 +153,9 @@ struct PlayerRosterRow: View {
 struct RosterImportTip: Tip {
     var title: Text { Text("Import a roster in one step") }
     var message: Text? {
-        Text("Drag a CSV onto this list, or paste a table copied from a spreadsheet. Programme shows you the columns before anything is saved.")
+        Text(
+            "Drag a CSV onto this list, or paste a table copied from a spreadsheet. Programme shows you the columns before anything is saved."
+        )
     }
     var image: Image? { Image(systemName: "square.and.arrow.down") }
 }
@@ -196,7 +195,9 @@ struct PlayerEditorView: View {
                 Section {
                     Toggle("On the current roster", isOn: $isOnRoster)
                 } footer: {
-                    Text("Turning this off keeps every match this player appeared in intact. Programme never deletes a player who has match history.")
+                    Text(
+                        "Turning this off keeps every match this player appeared in intact. Programme never deletes a player who has match history."
+                    )
                 }
             }
         }

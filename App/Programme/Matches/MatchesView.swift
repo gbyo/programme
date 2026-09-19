@@ -16,12 +16,9 @@ struct MatchesView: View {
             ForEach(groups, id: \.title) { group in
                 Section(group.title) {
                     ForEach(group.matches) { match in
-                        Button {
-                            appModel.navigation.open(.match(match.matchID))
-                        } label: {
+                        NavigationLink(value: AppRoute.match(match.matchID)) {
                             MatchRow(match: match)
                         }
-                        .buttonStyle(.plain)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 matchToDelete = match
