@@ -31,6 +31,13 @@ targets:
       - package: ProgrammeKit
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI]
       - target: ProgrammeWidgets
+    # CloudKit container for team collaboration. Provisioning the
+    # iCloud.org.programme.Programme container in the Developer Portal and
+    # enabling the Xcode iCloud capability is still required before any
+    # device syncs; until then the coordinator reports unavailable and all
+    # local behavior is unchanged.
+    entitlements:
+      path: App/Programme/Programme.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme

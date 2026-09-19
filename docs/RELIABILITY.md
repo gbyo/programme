@@ -17,6 +17,8 @@ The complete scoring path must work without:
 
 Network-backed features are optional replication or presentation layers, never a prerequisite for recording a match.
 
+Cloud collaboration is optional replication. Recording and recovering a live match never depends on CloudKit: the write-ahead recovery journal and local SwiftData remain the crash/offline safety mechanism, and the sync outbox keeps staged uploads discoverable across relaunch without weakening that path.
+
 ## Durable event path
 
 When the scorer records an event, Programme updates the in-memory match context immediately for responsiveness, writes the event to the recovery journal, and queues the corresponding SwiftData work.
