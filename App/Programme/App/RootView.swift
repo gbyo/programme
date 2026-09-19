@@ -145,6 +145,10 @@ struct TeamSwitcherTitle: ViewModifier {
         content
             .navigationTitle(sectionTitle)
             .navigationSubtitle(appModel.workspace.selectedTeam?.name ?? "")
+            // Keep the root title in the toolbar from the first frame so the
+            // title menu (team switcher) is available without requiring a
+            // scroll to collapse a large navigation title first.
+            .toolbarTitleDisplayMode(.inlineLarge)
             .toolbarTitleMenu {
                 TeamSwitcherMenu()
             }
