@@ -70,6 +70,19 @@ final class ProgrammeUITests: XCTestCase {
         return strip.label
     }
 
+    /// Native lists create rows and section headers lazily. Scroll the list until
+    /// the user-visible element is present rather than depending on the eager
+    /// hierarchy exposed by the old hand-built card stack.
+    @discardableResult
+    private func revealInList(_ target: XCUIElement, app: XCUIApplication) -> XCUIElement {
+        var attempts = 0
+        while !target.exists && attempts < 10 {
+            app.swipeUp()
+            attempts += 1
+        }
+        return target
+    }
+
     // MARK: - Live scoring
 
     func testScoringWorkspaceShowsScoreClockLineupAndPalette() {
@@ -700,8 +713,8 @@ final class ProgrammeUITests: XCTestCase {
         XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
 
         element(app, "match.Dixie").tap()
-        XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
-        XCTAssertTrue(element(app, "section.Stat Completeness").exists)
+        XCTAssertTrue(app.staticTexts["Team"].waitForExistence(timeout: 15))
+        XCTAssertTrue(revealInList(app.staticTexts["Stat Completeness"], app: app).exists)
 
         // The MaxPreps profile does not track offsides, so it has to read as
         // unknown rather than as a zero.
@@ -712,7 +725,7 @@ final class ProgrammeUITests: XCTestCase {
             "An untracked category was not reported as unknown: \(offsides.label)")
 
         // A category that was tracked and genuinely happened zero times is a zero.
-        let steals = element(app, "completeness.steals")
+        let steals = revealInList(element(app, "completeness.steals"), app: app)
         XCTAssertTrue(steals.label.contains("Complete"))
         attachScreenshot(named: "Match detail")
     }
@@ -722,9 +735,9 @@ final class ProgrammeUITests: XCTestCase {
         XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
 
         element(app, "match.Dixie").tap()
-        XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Team"].waitForExistence(timeout: 15))
 
-        app.buttons["Actions"].tap()
+        app.buttons["More"].tap()
         app.buttons["Export…"].tap()
         XCTAssertTrue(app.navigationBars["Export"].waitForExistence(timeout: 5))
 
