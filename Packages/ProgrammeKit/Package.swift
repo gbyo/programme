@@ -15,7 +15,7 @@ let package = Package(
     targets: [
         // Pure domain. No SwiftUI, no SwiftData, no Foundation-heavy dependencies.
         .target(name: "ProgrammeCore"),
-        .target(name: "ProgrammePersistence", dependencies: ["ProgrammeCore"]),
+        .target(name: "ProgrammePersistence", dependencies: ["ProgrammeCore", "ProgrammeCollaboration"]),
         .target(name: "ProgrammeExport", dependencies: ["ProgrammeCore"]),
         .target(name: "ProgrammeUI", dependencies: ["ProgrammeCore"]),
         // CloudKit replication. Depends on Core values only: no CloudKit in
