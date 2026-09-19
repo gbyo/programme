@@ -21,7 +21,7 @@
     <key>WKApplication</key>
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
-    <string>org.programme.Programme</string>
+    <string>com.gbyo.programme.Programme</string>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
