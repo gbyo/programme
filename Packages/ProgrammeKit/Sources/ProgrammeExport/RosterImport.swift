@@ -45,6 +45,10 @@ public struct RosterImportRow: Identifiable, Hashable, Sendable {
     /// Set when the row cannot become a player as mapped.
     public var problem: String?
     public var isSelected: Bool = true
+
+    public init(fields: [String]) {
+        self.fields = fields
+    }
 }
 
 /// The result of reading a table, before anything is written to the database.
@@ -56,6 +60,17 @@ public struct RosterImportPreview: Hashable, Sendable {
     public var hasHeaderRow: Bool
     /// True when every column was recognised, so the mapping step can be skipped.
     public var mappingIsUnambiguous: Bool
+
+    public init(
+        headers: [String], rows: [RosterImportRow], mapping: [Int: RosterColumn],
+        hasHeaderRow: Bool, mappingIsUnambiguous: Bool
+    ) {
+        self.headers = headers
+        self.rows = rows
+        self.mapping = mapping
+        self.hasHeaderRow = hasHeaderRow
+        self.mappingIsUnambiguous = mappingIsUnambiguous
+    }
 
     public var mappedColumns: Set<RosterColumn> {
         Set(mapping.values.filter { $0 != .ignore })
@@ -169,7 +184,8 @@ public enum RosterImporter {
             }
         }
 
-        let hasName = mapping.values.contains(.fullName)
+        let hasName =
+            mapping.values.contains(.fullName)
             || (mapping.values.contains(.firstName) && mapping.values.contains(.lastName))
             || mapping.values.contains(.lastName)
         let unmapped = mapping.values.filter { $0 == .ignore }.count

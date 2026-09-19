@@ -24,6 +24,7 @@ struct RosterImportView: View {
     @State private var isShowingScanner = false
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecognizingPhoto = false
+    @State private var isInterpreting = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -87,6 +88,12 @@ struct RosterImportView: View {
                     guard let text = strings.first else { return }
                     rawText = text
                     analyze()
+                }
+                if RosterInterpreter.isAvailable {
+                    Button("Interpret with On-Device Model…", systemImage: "apple.intelligence") {
+                        Task { await interpretWithModel() }
+                    }
+                    .disabled(rawText.isEmpty || isInterpreting)
                 }
                 if appModel.managed.configuration.isRosterRecognitionAllowed {
                     if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
@@ -275,6 +282,25 @@ struct RosterImportView: View {
         }
         errorMessage = nil
         preview = result
+    }
+
+    /// Optional on-device interpretation. Its output lands in the same
+    /// review step as every other import and is never written directly.
+    private func interpretWithModel() async {
+        isInterpreting = true
+        defer { isInterpreting = false }
+        do {
+            let result = try await RosterInterpreter.interpret(rawText)
+            guard !result.rows.isEmpty else {
+                errorMessage = "The on-device model found no players in that."
+                return
+            }
+            errorMessage = nil
+            preview = result
+        } catch {
+            errorMessage =
+                "The on-device model couldn't read that. The rule-based import still works."
+        }
     }
 
     private func commit() async {
