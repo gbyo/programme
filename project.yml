@@ -17,6 +17,10 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
+    # Programme is owned and signed by the gbyo Apple Developer team.
+    # Keeping this in the XcodeGen source of truth prevents regenerated
+    # projects from losing the team selection before physical-device runs.
+    DEVELOPMENT_TEAM: 57CW34C9J4
     SWIFT_EMIT_LOC_STRINGS: "YES"
     ENABLE_USER_SCRIPT_SANDBOXING: "YES"
     GENERATE_INFOPLIST_FILE: "NO"
