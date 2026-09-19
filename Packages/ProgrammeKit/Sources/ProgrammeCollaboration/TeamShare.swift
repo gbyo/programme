@@ -26,6 +26,42 @@ import ProgrammeCore
 /// need review, deletions descope as voids, and statistics re-derive
 /// locally. Accepting a share grants access; it never deletes, overwrites,
 /// or merges anything by itself.
+///
+/// Which database holds a team's zone-wide share. Owned teams live in the
+/// current user's private database; a team shared with this user lives in
+/// the shared database under the sharer's real zone owner name (taken from
+/// the shared-database zone list, never guessed).
+public enum TeamShareScope: Hashable, Sendable {
+    case owned
+    case shared(ownerName: String)
+}
+
+/// Outcome of resolving a team's zone-wide share. Only "no such record"
+/// means unshared; every other failure stays unavailable so the UI never
+/// offers to share a team merely because CloudKit hiccuped.
+public enum ShareLookup: Sendable {
+    case shared(CKShare)
+    case notShared
+    case unavailable
+}
+
+/// Thrown when a share lookup cannot even be attempted meaningfully, e.g.
+/// preparing a share while CloudKit is unreachable.
+public enum ShareLookupError: Error, Sendable {
+    case unavailable
+}
+
+/// The one sharing configuration Programme Teams ever offer: private
+/// invitations to specified recipients with View/Edit permissions, never a
+/// public link. Apple's `.standard` options are the most permissive
+/// combination, so every share surface passes these explicitly.
+public enum TeamSharingOptions {
+    public nonisolated static var invitationOnly: CKAllowedSharingOptions {
+        CKAllowedSharingOptions(
+            allowedParticipantPermissionOptions: .any,
+            allowedParticipantAccessOptions: .specifiedRecipientsOnly)
+    }
+}
 public actor TeamShareCoordinator: Sendable {
     private let makeContainer: @Sendable () -> CKContainer
     private let sharedZones: SharedZoneStore
@@ -60,13 +96,54 @@ public actor TeamShareCoordinator: Sendable {
 
     // MARK: - Network paths (thin; exercised against CloudKit, not faked)
 
+    /// Which database holds the team's zone-wide share. Owned teams live
+    /// in the current user's private database; accepted shares live in the
+    /// shared database under the sharer's owner name.
+    public func lookupShare(teamID: TeamID, scope: TeamShareScope) async -> ShareLookup {
+        let container = makeContainer()
+        let database: CKDatabase
+        let zoneID: CKRecordZone.ID
+        switch scope {
+        case .owned:
+            database = container.privateCloudDatabase
+            zoneID = TeamZone.zoneID(for: teamID)
+        case .shared(let ownerName):
+            database = container.sharedCloudDatabase
+            zoneID = TeamZone.zoneID(for: teamID, ownerName: ownerName)
+        }
+        let id = CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)
+        do {
+            let record = try await database.record(for: id)
+            guard let share = record as? CKShare else { return .unavailable }
+            return .shared(share)
+        } catch {
+            return Self.mapLookupError(error)
+        }
+    }
+
+    /// Maps a share-fetch failure to a lookup outcome. Only the error that
+    /// actually means "no such record" becomes `.notShared`; network,
+    /// account, service and quota failures stay `.unavailable` so the UI
+    /// never offers to share a team merely because CloudKit hiccuped.
+    public nonisolated static func mapLookupError(_ error: Error) -> ShareLookup {
+        if let ckError = error as? CKError, ckError.code == .unknownItem {
+            return .notShared
+        }
+        let nsError = error as NSError
+        if nsError.domain == CKErrorDomain as String,
+            nsError.code == CKError.Code.unknownItem.rawValue
+        {
+            return .notShared
+        }
+        return .unavailable
+    }
+
     /// Fetches the live share without creating anything. Nil when the team
     /// is not shared (or the fetch fails); never throws for "not shared".
     public func existingShare(teamID: TeamID) async -> CKShare? {
-        let database = makeContainer().privateCloudDatabase
-        guard let record = try? await database.record(for: Self.shareID(for: teamID)),
-            let share = record as? CKShare
-        else { return nil }
+        guard case .shared(let share) = await lookupShare(teamID: teamID, scope: .owned) else {
+            return nil
+        }
         return share
     }
 
@@ -74,12 +151,19 @@ public actor TeamShareCoordinator: Sendable {
     /// call. Reuses the well-known share record when one exists so repeated
     /// calls never fork parallel shares — and never resaves any Programme
     /// record: only the zone (if missing) and the share itself are written.
+    /// Owner-only: preparing a share for a team shared with this user is a
+    /// programmer error (use the shared-database lookup instead).
     public func prepareShare(teamID: TeamID, teamName: String) async throws -> CKShare {
         let database = makeContainer().privateCloudDatabase
         let zoneID = TeamZone.zoneID(for: teamID)
         try await ensureZone(zoneID, in: database)
-        if let existing = try await existingShare(teamID: teamID) {
+        switch await lookupShare(teamID: teamID, scope: .owned) {
+        case .shared(let existing):
             return existing
+        case .notShared:
+            break
+        case .unavailable:
+            throw ShareLookupError.unavailable
         }
         let share = Self.makeShare(teamID: teamID, teamName: teamName)
         _ = try await database.modifyRecords(
@@ -93,18 +177,24 @@ public actor TeamShareCoordinator: Sendable {
     /// share sheet for adding participants and changing permissions, so
     /// Programme never builds a parallel editor — this list answers "who
     /// has access" and nothing more.
-    public func participants(teamID: TeamID) async -> [ShareParticipant] {
-        guard let share = await existingShare(teamID: teamID) else { return [] }
+    public func participants(teamID: TeamID, scope: TeamShareScope = .owned) async -> [ShareParticipant] {
+        guard case .shared(let share) = await lookupShare(teamID: teamID, scope: scope) else {
+            return []
+        }
         return Self.participants(of: share)
     }
 
     /// Maps a live share's participants to display values. Pure so the
-    /// mapping stays obvious; untested because `CKShare.Participant` has no
-    /// public initializer — participants only ever come from the server.
+    /// mapping stays obvious; untested end-to-end because
+    /// `CKShare.Participant` has no public initializer — participants only
+    /// ever come from the server. The stable-identity derivation is factored
+    /// into `participantID(recordName:email:phone:fallback:)` so it stays
+    /// covered without server objects.
     public nonisolated static func participants(of share: CKShare) -> [ShareParticipant] {
-        share.participants.map { participant in
+        share.participants.enumerated().map { index, participant in
+            let identity = participant.userIdentity
             let name =
-                participant.userIdentity.nameComponents
+                identity.nameComponents
                 .flatMap { PersonNameComponentsFormatter.localizedString(from: $0, style: .medium) }
                 ?? "Invited collaborator"
             let role: ShareParticipant.Role
@@ -118,10 +208,29 @@ public actor TeamShareCoordinator: Sendable {
             let isCurrent =
                 share.currentUserParticipant.map { Self.isSameParticipant(participant, $0) } ?? false
             return ShareParticipant(
+                id: participantID(
+                    recordName: identity.userRecordID?.recordName,
+                    email: identity.lookupInfo?.emailAddress,
+                    phone: identity.lookupInfo?.phoneNumber,
+                    fallback: String(index)),
                 displayName: name, role: role, isCurrentUser: isCurrent,
                 accepted: participant.acceptanceStatus == .accepted)
         }
         .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Stable participant identity for list diffing. The iCloud user record
+    /// name wins; unresolved invitations fall back to their lookup address;
+    /// only a bare invitation with no address at all uses the positional
+    /// fallback (unique within one fetch, never persisted). Display names
+    /// are never identity: two people can share a visible name.
+    public nonisolated static func participantID(
+        recordName: String?, email: String?, phone: String?, fallback: String
+    ) -> String {
+        if let recordName, !recordName.isEmpty { return "user:\(recordName)" }
+        if let email, !email.isEmpty { return "email:\(email)" }
+        if let phone, !phone.isEmpty { return "phone:\(phone)" }
+        return "invited:\(fallback)"
     }
 
     /// Participant identity is the iCloud user record, never object
@@ -186,20 +295,24 @@ public struct SharedZoneInfo: Codable, Hashable, Sendable {
 }
 
 /// Who has access to a shared team, for display. Role derives from the
-/// live participant list; nothing here is persisted or editable.
-public struct ShareParticipant: Hashable, Sendable {
+/// live participant list; nothing here is persisted or editable. Identity
+/// is the iCloud user record (or a lookup-address fallback), never the
+/// display name: two people can share a visible name.
+public struct ShareParticipant: Hashable, Sendable, Identifiable {
     public enum Role: String, Hashable, Sendable {
         case owner
         case collaborator
         case viewer
     }
 
+    public var id: String
     public var displayName: String
     public var role: Role
     public var isCurrentUser: Bool
     public var accepted: Bool
 
-    public init(displayName: String, role: Role, isCurrentUser: Bool, accepted: Bool) {
+    public init(id: String, displayName: String, role: Role, isCurrentUser: Bool, accepted: Bool) {
+        self.id = id
         self.displayName = displayName
         self.role = role
         self.isCurrentUser = isCurrentUser

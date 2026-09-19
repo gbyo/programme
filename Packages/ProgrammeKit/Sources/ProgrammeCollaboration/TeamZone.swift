@@ -22,6 +22,13 @@ public enum TeamZone {
         CKRecordZone.ID(zoneName: zoneName(for: teamID), ownerName: CKCurrentUserDefaultName)
     }
 
+    /// Zone ID for a team zone owned by someone else: used when resolving
+    /// the zone-wide share of a team that was shared with this user. The
+    /// owner name comes from the shared-database zone list, never guessed.
+    public static func zoneID(for teamID: TeamID, ownerName: String) -> CKRecordZone.ID {
+        CKRecordZone.ID(zoneName: zoneName(for: teamID), ownerName: ownerName)
+    }
+
     public static func teamID(forZoneName zoneName: String) -> TeamID? {
         guard zoneName.hasPrefix("team_") else { return nil }
         guard let uuid = UUID(uuidString: String(zoneName.dropFirst("team_".count))) else {

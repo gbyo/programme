@@ -122,6 +122,14 @@ public actor TeamSyncService: Sendable {
         return await coordinator.status
     }
 
+    /// Teams visible in the shared database mapped to their zone owner
+    /// names. Lets share resolution distinguish teams this device owns
+    /// (private database) from teams shared with it — without inventing
+    /// another ownership store.
+    public func sharedZoneOwners() async -> [TeamID: String] {
+        await coordinator.sharedZoneOwners()
+    }
+
     /// Unresolved same-revision contradictions for a team, oldest first.
     /// Readable offline: conflicts are local records, not CloudKit state.
     public func unresolvedConflicts(teamID: TeamID) async -> [TeamConflict] {
