@@ -158,8 +158,14 @@ struct SettingsView: View {
             profileID: defaultProfileID,
             rulesName: defaultRulesName,
             tracking: OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam,
-            loaded: loadedDefaults,
-            managed: appModel.managed.configuration)
+            loaded: loadedDefaults)
+        // Later edits compare against what is now stored, so toggling a
+        // value away and back writes the return trip instead of leaving
+        // the intermediate value stranded in storage.
+        self.loadedDefaults = TeamMatchDefaults.LoadedDefaults(
+            profileID: defaultProfileID,
+            rulesName: defaultRulesName,
+            tracking: OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam)
     }
 
     private var appVersion: String {

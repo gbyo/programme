@@ -185,8 +185,7 @@ struct NewMatchView: View {
                     profileID: profileID,
                     rulesName: rulesPresetName,
                     tracking: tracking,
-                    loaded: loadedDefaults,
-                    managed: appModel.managed.configuration)
+                    loaded: loadedDefaults)
             }
 
             await appModel.refreshWidgetSnapshot()

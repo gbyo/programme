@@ -14,7 +14,7 @@ Programme's bundle ID. All keys are optional.
 | `defaultRulesName` | String | No | `High School`, `High School (No Overtime)`, `College`, `Professional`, `Middle School`, `Youth (Quarters)` | `High School` | Suggestion: fallback for teams with no stored default. A stored user default always wins. |
 | `defaultTrackingMode` | String | No | `ourTeam`, `bothTeams` | `ourTeam` | Suggestion: fallback for teams with no stored default. A stored user default always wins. |
 | `allowCollaboration` | Boolean | No | `true` / `false` | `true` (allowed) | Enforced policy when `false`: no new team shares, no share surfaces, incoming invitations refused. See below. |
-| `allowAutomatedRosterExtraction` | Boolean | No | `true` / `false` | `true` (allowed) | Enforced policy when `false`: camera scan, photo import and on-device-model roster interpretation are hidden. File, paste and manual entry always remain. |
+| `allowAutomatedRosterExtraction` | Boolean | No | `true` / `false` | `true` (allowed) | Enforced policy when `false`: camera scan, photo import and on-device-model roster interpretation are hidden. File, paste and manual entry always remain. Legacy `allowRosterRecognition` is still honored when the new key is absent (new key wins if both are present), so deployed profiles keep working. |
 
 Invalid values (unknown preset name, unknown tracking mode, malformed team
 ID, mistyped policy) throw a validation error bridged to ManagedApp's

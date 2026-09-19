@@ -46,28 +46,27 @@ enum TeamMatchDefaults {
         return (profile, rules, tracking)
     }
 
-    /// Persists explicit user choices only. A field is stored only when it
-    /// differs from both what was loaded (untouched fallbacks are never
-    /// user choices) and the live managed suggestion (a managed value must
-    /// never be persisted as though the user picked it, so a later MDM
-    /// change still applies to values the user never overrode). Callers
-    /// pass back the snapshot they loaded alongside the current values.
+    /// Persists explicit user choices only. A field is stored whenever it
+    /// differs from what was loaded: untouched fallbacks (managed or
+    /// Programme defaults) compare equal and are never written, while a
+    /// user picking the managed value is a real override and is stored.
+    /// Callers pass back the snapshot they loaded alongside the current
+    /// values, and advance it after saving (see SettingsView).
     static func save(
         teamID: TeamID,
         profileID: String,
         rulesName: String,
         tracking: OpponentTrackingMode,
-        loaded: LoadedDefaults,
-        managed: ManagedProgrammeConfiguration = .unmanaged
+        loaded: LoadedDefaults
     ) {
         let defaults = UserDefaults.standard
         if profileID != loaded.profileID {
             defaults.set(profileID, forKey: key("statProfile", teamID: teamID))
         }
-        if rulesName != loaded.rulesName, rulesName != managed.defaultRulesName {
+        if rulesName != loaded.rulesName {
             defaults.set(rulesName, forKey: key("rulesPreset", teamID: teamID))
         }
-        if tracking != loaded.tracking, tracking != managed.defaultTrackingMode {
+        if tracking != loaded.tracking {
             defaults.set(tracking.rawValue, forKey: key("opponentTracking", teamID: teamID))
         }
     }
@@ -87,12 +86,12 @@ final class TeamWorkspace {
     /// changes which season is current.
     var viewedStatsSeasonID: SeasonID?
 
-    private static let selectedTeamKey = "programme.selectedTeamID"
+    static let selectedTeamKey = "programme.selectedTeamID"
     /// True when the stored selection came from an explicit user choice
     /// (tapping a team, creating one). An automatic fallback or MDM
     /// suggestion persists its team ID with this false, so a later MDM
     /// suggestion can still apply while a real user choice always wins.
-    private static let explicitSelectionKey = "programme.selectedTeamID.userChosen"
+    static let explicitSelectionKey = "programme.selectedTeamID.userChosen"
 
     var selectedTeam: TeamListItem? {
         guard let selectedTeamID else { return nil }
@@ -119,6 +118,19 @@ final class TeamWorkspace {
         guard UserDefaults.standard.bool(forKey: explicitSelectionKey) else { return false }
         let raw = UserDefaults.standard.string(forKey: selectedTeamKey)
         return raw == teamID.rawValue.uuidString
+    }
+
+    /// One-time upgrade for selections stored before provenance tracking
+    /// existed: an ID with no flag. Only explicit paths persisted then, so
+    /// the stored selection is marked explicit rather than left eligible
+    /// for replacement by a later MDM suggestion. Fresh installs (no
+    /// stored ID) and already-migrated devices are untouched.
+    static func migrateSelectionProvenance() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: explicitSelectionKey) == nil,
+            defaults.string(forKey: selectedTeamKey) != nil
+        else { return }
+        defaults.set(true, forKey: explicitSelectionKey)
     }
 
     func persistSelection(explicit: Bool) {
@@ -217,14 +229,11 @@ final class AppModel {
     }
 
     func teamShareItem(teamID: TeamID) async throws -> TeamShareItem {
-        // Collaboration policy is enforced here, below the UI: when
-        // management disables collaboration no share surface can load, so
-        // no new CKShare can be created from ShareLink or the system UI.
-        // Private same-user CloudKit sync is unaffected — see
-        // docs/MANAGED_CONFIGURATION.md for the exact policy.
-        guard managed.configuration.isCollaborationAllowed else {
-            throw TeamShareError.collaborationDisabled
-        }
+        // Looking up an existing share stays available under any policy so
+        // owners can revoke (and participants can leave) through the system
+        // UI when collaboration is disabled. Creating a new share is gated
+        // separately in the prepare handler below. Private same-user
+        // CloudKit sync is unaffected — see docs/MANAGED_CONFIGURATION.md.
         guard cloudAccount.state.isUsable else { throw TeamShareError.iCloudUnavailable }
         guard let store else { throw TeamShareError.noLibrary }
         let details = try await store.teamDetails(teamID: teamID)
@@ -243,7 +252,8 @@ final class AppModel {
         }
         return TeamShareItem(
             teamID: teamID, teamName: details.name, prepared: prepared,
-            scope: scope, coordinator: coordinator
+            scope: scope, coordinator: coordinator,
+            creationAllowed: managed.configuration.isCollaborationAllowed
         ) {
             CKContainer.default()
         }
@@ -321,7 +331,9 @@ final class AppModel {
         } else if let coordinator = try? sharing() {
             try? await coordinator.accept(metadata)
         }
-        await reloadWorkspace(selecting: workspace.selectedTeamID)
+        // Reload-only: keep the current selection with its provenance
+        // intact rather than re-marking it explicit (see reloadWorkspace).
+        await reloadWorkspace()
         await startSyncIfAvailable()
     }
 
@@ -354,7 +366,9 @@ final class AppModel {
             Task { await self?.stageForSync(mutation) }
         }
         await service.setWorkspaceChangedHandler { [weak self] in
-            Task { await self?.reloadWorkspace(selecting: self?.workspace.selectedTeamID) }
+            // Reload-only: preserve the selection's provenance so an
+            // automatic fallback stays eligible for MDM suggestions.
+            Task { await self?.reloadWorkspace() }
         }
         await service.start()
     }
@@ -492,6 +506,9 @@ final class AppModel {
         guard !isReady else { return }
         defer { isReady = true }
         guard let container, let store else { return }
+        // Pre-provenance selections were always user choices; mark them
+        // before any reload can treat them as automatic fallbacks.
+        TeamWorkspace.migrateSelectionProvenance()
         // Resolve the initial MDM configuration before the first automatic
         // team selection, so an MDM suggestion wins over the plain
         // first-team fallback. Apple documents the initial value as
@@ -508,7 +525,13 @@ final class AppModel {
             }
         }
         // CloudKit account state resolves in the background; launch and
-        // scoring never wait on it.
+        // scoring never wait on it. When the account becomes usable —
+        // after the first check or a later sign-in — replication starts;
+        // bootstrap's own startSyncIfAvailable call below covers the
+        // already-available case.
+        cloudAccount.onBecameAvailable = { [weak self] in
+            Task { [weak self] in await self?.startSyncIfAvailable() }
+        }
         cloudAccount.start()
         // Invitations that launched the app before the acceptance closure
         // was installed are drained here, exactly once.
