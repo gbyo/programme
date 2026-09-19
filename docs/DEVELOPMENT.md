@@ -176,9 +176,12 @@ layer in two layers:
   an ephemeral two-team store. They run on every deployment target, because
   `@Dependency`-bound query/intent types trap when called directly
   in-process outside the intent perform flow.
-- `AppIntentsTestingTests` runs the same behaviors through Apple's
-  `AppIntentsTesting` framework (iOS 27+) where the dependency context
-  exists, including Spotlight/Siri query paths.
+- `ProgrammeUITests/AppIntentsTestingTests` runs equivalent behaviors through
+  Apple's `AppIntentsTesting` framework (iOS 27+) from the UI-test process.
+  Each test independently seeds the launched application process through a
+  debug-only, non-discoverable test intent, and verifies framework results or
+  state read back from that process rather than an ephemeral test-process
+  `AppModel`. This includes Spotlight/Siri query paths.
 
 Known environment limitation: in the Xcode 27.0 simulator runtime Apple's
 own `AppIntentsLiveEntityService` XPC service traps
