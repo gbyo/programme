@@ -4,6 +4,7 @@ import ProgrammeUI
 import SwiftUI
 
 /// Reviewing a `.programme` file opened from Files, before deciding to import it.
+/// The import destination team is explicit.
 @available(iOS 27.0, *)
 struct ArchiveDocumentView: View {
     @Bindable var document: ProgrammeArchiveDocument
@@ -11,6 +12,7 @@ struct ArchiveDocumentView: View {
     @Environment(AppModel.self) private var appModel
     @State private var importMessage: String?
     @State private var isImporting = false
+    @State private var destinationTeamID: TeamID?
 
     private var archive: ProgrammeArchive { document.archive }
 
@@ -24,6 +26,20 @@ struct ArchiveDocumentView: View {
                     value: archive.manifest.createdAt.formatted(date: .abbreviated, time: .shortened))
                 LabeledContent("Format version", value: "\(archive.manifest.schemaVersion)")
                 LabeledContent("Written by", value: archive.manifest.generator)
+            }
+
+            Section {
+                Picker("Import into", selection: $destinationTeamID) {
+                    Text("Selected team").tag(nil as TeamID?)
+                    ForEach(appModel.workspace.teams) { team in
+                        Text(team.name).tag(team.id as TeamID?)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Import Destination")
+            } footer: {
+                Text("Matches are imported into this team, never silently into whichever workspace was selected.")
             }
 
             ForEach(archive.matches, id: \.descriptor.id) { match in
@@ -55,15 +71,20 @@ struct ArchiveDocumentView: View {
     }
 
     private func importAll() async {
-        guard let store = appModel.store, let teamID = appModel.teamID else {
+        guard let store = appModel.store else {
             importMessage = "Create a team in Programme first, then import this archive."
             return
         }
+        guard let teamID = destinationTeamID ?? appModel.workspace.selectedTeamID else {
+            importMessage = "Create a team in Programme first, then import this archive."
+            return
+        }
+        let seasonID = try? await store.currentSeasonID(teamID: teamID)
         isImporting = true
         defer { isImporting = false }
         var imported = 0
         for match in archive.matches {
-            if (try? await store.importMatch(match.context, teamID: teamID, seasonID: appModel.seasonID))
+            if (try? await store.importMatch(match.context, teamID: teamID, seasonID: seasonID))
                 != nil
             {
                 imported += 1

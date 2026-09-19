@@ -6,11 +6,14 @@ import SwiftData
 import SwiftUI
 import TipKit
 
+/// Roster for one team. Team-level, not season-level. Scoped at fetch time
+/// through the store; never reads another team's players.
 struct RosterView: View {
-    @Environment(AppModel.self) private var appModel
-    @Query(sort: [SortDescriptor(\PlayerModel.jerseyNumber), SortDescriptor(\PlayerModel.lastName)])
-    private var players: [PlayerModel]
+    let teamID: TeamID
 
+    @Environment(AppModel.self) private var appModel
+
+    @State private var roster: RosterSnapshot = .empty
     @State private var searchText = ""
     @State private var isAddingPlayer = false
     @State private var isImporting = false
@@ -25,9 +28,12 @@ struct RosterView: View {
             if !filtered.isEmpty {
                 Section {
                     ForEach(filtered) { player in
-                        NavigationLink(value: AppRoute.player(player.playerID)) {
-                            PlayerRosterRow(player: player)
+                        Button {
+                            Task { await appModel.open(.player(player.id)) }
+                        } label: {
+                            PlayerRosterRow(snapshot: player)
                         }
+                        .buttonStyle(.plain)
                     }
                 } header: {
                     Text(showsFormer ? "All Players" : "Roster")
@@ -35,10 +41,10 @@ struct RosterView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Roster")
+        .teamWorkspaceTitle("Roster")
         .searchable(text: $searchText, prompt: "Players")
         .overlay {
-            if players.isEmpty {
+            if roster.players.isEmpty {
                 ContentUnavailableView {
                     Label("No Players Yet", systemImage: "person.3")
                 } description: {
@@ -72,6 +78,11 @@ struct RosterView: View {
             ToolbarItem(placement: .secondaryAction) {
                 Toggle("Show Former Players", isOn: $showsFormer)
             }
+            ToolbarItem(placement: .secondaryAction) {
+                Button("Settings", systemImage: "gearshape") {
+                    appModel.navigation.isPresentingSettings = true
+                }
+            }
         }
         .dropDestination(for: Data.self) { items, _ in
             guard let data = items.first, let text = String(data: data, encoding: .utf8) else { return false }
@@ -89,18 +100,24 @@ struct RosterView: View {
             }
         }
         .sheet(isPresented: $isAddingPlayer) {
-            NavigationStack { PlayerEditorView(player: nil) }
+            NavigationStack { PlayerEditorView(teamID: teamID, player: nil) }
         }
         .sheet(isPresented: $isImporting) {
-            NavigationStack { RosterImportView(initialText: nil) }
+            NavigationStack { RosterImportView(teamID: teamID, initialText: nil) }
         }
         .sheet(item: Binding(get: { importText.map(IdentifiableText.init) }, set: { importText = $0?.text })) { item in
-            NavigationStack { RosterImportView(initialText: item.text) }
+            NavigationStack { RosterImportView(teamID: teamID, initialText: item.text) }
         }
+        .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await reload() }
     }
 
-    private var filtered: [PlayerModel] {
-        players
+    private func reload() async {
+        guard let store = appModel.store else { return }
+        roster = (try? await store.roster(teamID: teamID, includeFormer: true)) ?? .empty
+    }
+
+    private var filtered: [PlayerSnapshot] {
+        roster.sortedByNumber
             .filter { showsFormer || $0.isOnRoster }
             .filter {
                 guard !searchText.isEmpty else { return true }
@@ -118,35 +135,47 @@ struct IdentifiableText: Identifiable {
 }
 
 struct PlayerRosterRow: View {
-    let player: PlayerModel
+    let snapshot: PlayerSnapshot
+
+    init(player: PlayerModel) {
+        self.snapshot = player.snapshot
+    }
+
+    init(snapshot: PlayerSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         HStack(spacing: 14) {
-            Text(player.jerseyNumber.map(String.init) ?? "–")
+            Text(snapshot.jerseyNumber.map(String.init) ?? "–")
                 .font(.system(size: 17, weight: .semibold).monospacedDigit())
                 .frame(width: 34, alignment: .trailing)
-                .foregroundStyle(player.isOnRoster ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(snapshot.isOnRoster ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
             VStack(alignment: .leading, spacing: 2) {
-                Text(player.snapshot.fullName)
+                Text(snapshot.fullName)
                     .font(.body)
                 HStack(spacing: 6) {
-                    if let position = player.position {
+                    if let position = snapshot.position {
                         Text(position.label).font(.caption).foregroundStyle(.secondary)
                     }
-                    if let classYear = player.classYear {
+                    if let classYear = snapshot.classYear {
                         Text(classYear).font(.caption).foregroundStyle(.tertiary)
                     }
-                    if !player.isOnRoster {
+                    if !snapshot.isOnRoster {
                         Text("Former").font(.caption2.weight(.medium)).foregroundStyle(.tertiary)
                     }
                 }
             }
             Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(player.snapshot.accessibilityLabel)
+        .accessibilityLabel(snapshot.accessibilityLabel)
     }
 }
 
@@ -160,9 +189,23 @@ struct RosterImportTip: Tip {
     var image: Image? { Image(systemName: "square.and.arrow.down") }
 }
 
-/// Add or edit one player.
+/// Add or edit one player on an explicit team. Never uses a mutable global.
 struct PlayerEditorView: View {
-    let player: PlayerModel?
+    let teamID: TeamID
+    let existing: PlayerSnapshot?
+
+    init(teamID: TeamID, player: PlayerModel? = nil) {
+        self.teamID = teamID
+        self.existing = player?.snapshot
+    }
+
+    init(teamID: TeamID, existing: PlayerSnapshot?) {
+        self.teamID = teamID
+        self.existing = existing
+    }
+
+    /// Snapshot-based editing for previews/tests without a model object.
+    var editingSnapshot: PlayerSnapshot? { existing }
 
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
@@ -191,7 +234,7 @@ struct PlayerEditorView: View {
                 }
                 TextField("Class (optional)", text: $classYear).textInputAutocapitalization(.words)
             }
-            if player != nil {
+            if existing != nil {
                 Section {
                     Toggle("On the current roster", isOn: $isOnRoster)
                 } footer: {
@@ -202,7 +245,7 @@ struct PlayerEditorView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(player == nil ? "Add Player" : "Edit Player")
+        .navigationTitle(existing == nil ? "Add Player" : "Edit Player")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -213,27 +256,27 @@ struct PlayerEditorView: View {
             }
         }
         .onAppear {
-            guard let player else { return }
-            firstName = player.firstName
-            lastName = player.lastName
-            jerseyNumber = player.jerseyNumber.map(String.init) ?? ""
-            position = player.position
-            classYear = player.classYear ?? ""
-            isOnRoster = player.isOnRoster
+            guard let snapshot = editingSnapshot else { return }
+            firstName = snapshot.firstName
+            lastName = snapshot.lastName
+            jerseyNumber = snapshot.jerseyNumber.map(String.init) ?? ""
+            position = snapshot.position
+            classYear = snapshot.classYear ?? ""
+            isOnRoster = snapshot.isOnRoster
         }
     }
 
     private func save() async {
-        guard let store = appModel.store, let teamID = appModel.teamID else { return }
+        guard let store = appModel.store else { return }
         let snapshot = PlayerSnapshot(
-            id: player?.playerID ?? PlayerID(),
+            id: existing?.id ?? PlayerID(),
             firstName: firstName.trimmingCharacters(in: .whitespaces),
             lastName: lastName.trimmingCharacters(in: .whitespaces),
             jerseyNumber: Int(jerseyNumber),
             position: position,
             classYear: classYear.isEmpty ? nil : classYear,
             isOnRoster: isOnRoster)
-        if player == nil {
+        if existing == nil {
             try? await store.addPlayer(teamID: teamID, snapshot)
         } else {
             try? await store.updatePlayer(snapshot)

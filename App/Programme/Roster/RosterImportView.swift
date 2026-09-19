@@ -11,6 +11,7 @@ import VisionKit
 /// Nothing is written until the mapping is confirmed, and Programme only skips
 /// the mapping step when every column was recognised without guessing.
 struct RosterImportView: View {
+    let teamID: TeamID
     let initialText: String?
 
     @Environment(AppModel.self) private var appModel
@@ -208,7 +209,7 @@ struct RosterImportView: View {
     }
 
     private func commit() async {
-        guard let store = appModel.store, let teamID = appModel.teamID, let preview else { return }
+        guard let store = appModel.store, let preview else { return }
         do {
             try await store.addPlayers(teamID: teamID, preview.players)
             dismiss()

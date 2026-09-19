@@ -27,7 +27,9 @@ struct ProgrammeApp: App {
                     AppDependencyManager.shared.add { provider }
                     await provider.reindexSpotlight()
                 }
-                .onOpenURL { appModel.navigation.handle(url: $0) }
+                .onOpenURL { url in
+                    Task { await appModel.handle(url: url) }
+                }
         }
         .modelContainer(appModel.containerForScene)
         .commands { ProgrammeCommands(appModel: appModel) }

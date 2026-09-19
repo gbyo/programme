@@ -59,7 +59,8 @@ struct MatchDetailView: View {
                 NavigationStack {
                     ExportSheet(
                         payload: ExportPayload(
-                            teamName: appModel.teamName, teamShortName: appModel.teamShortName,
+                            teamName: context.descriptor.teamName,
+                            teamShortName: context.descriptor.teamShortName,
                             contexts: [context]),
                         exporters: ProgrammeExporters.forMatch())
                 }

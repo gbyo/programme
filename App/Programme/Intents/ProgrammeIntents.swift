@@ -7,7 +7,9 @@ import SwiftUI
 
 // MARK: - Entities
 
-/// A match, exposed to Shortcuts, Siri and Spotlight.
+/// A match, exposed to Shortcuts, Siri and Spotlight. Indexed across all
+/// teams so an item never disappears merely because another workspace is
+/// selected; the team name disambiguates shared opponents.
 struct MatchEntity: AppEntity, IndexedEntity {
     static var typeDisplayRepresentation: TypeDisplayRepresentation { "Match" }
     static let defaultQuery = MatchEntityQuery()
@@ -17,21 +19,26 @@ struct MatchEntity: AppEntity, IndexedEntity {
     @Property(title: "Kickoff") var kickoff: Date
     @Property(title: "Score") var scoreText: String
     @Property(title: "Result") var resultText: String
+    @Property(title: "Team") var teamName: String
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(
+        let detail =
+            resultText.isEmpty
+            ? kickoff.formatted(date: .abbreviated, time: .shortened) : resultText
+        return DisplayRepresentation(
             title: "\(opponent)",
-            subtitle: "\(resultText.isEmpty ? kickoff.formatted(date: .abbreviated, time: .shortened) : resultText)",
+            subtitle: "\(detail) — \(teamName)",
             image: .init(systemName: "sportscourt")
         )
     }
 
-    init(item: MatchListItem, venueLabel: String) {
+    init(item: MatchListItem, venueLabel: String, teamName: String = "") {
         self.id = item.id.rawValue
         self.opponent = "\(venueLabel) \(item.opponentName)"
         self.kickoff = item.kickoff
         self.scoreText = "\(item.score.us)–\(item.score.opponent)"
         self.resultText = item.resultText ?? ""
+        self.teamName = teamName
     }
 }
 
@@ -55,20 +62,24 @@ struct PlayerEntity: AppEntity, IndexedEntity {
     @Property(title: "Name") var name: String
     @Property(title: "Jersey number") var jerseyNumber: Int?
     @Property(title: "Position") var position: String
+    @Property(title: "Team") var teamName: String
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(
+        let number = jerseyNumber.map { "#\($0) " } ?? ""
+        let team = teamName.isEmpty ? "" : " — \(teamName)"
+        return DisplayRepresentation(
             title: "\(name)",
-            subtitle: "\(jerseyNumber.map { "#\($0)" } ?? "") \(position)",
+            subtitle: "\(number)\(position)\(team)",
             image: .init(systemName: "person")
         )
     }
 
-    init(player: PlayerSnapshot) {
+    init(player: PlayerSnapshot, teamName: String = "") {
         self.id = player.id.rawValue
         self.name = player.fullName
         self.jerseyNumber = player.jerseyNumber
         self.position = player.position?.label ?? ""
+        self.teamName = teamName
     }
 }
 
@@ -99,7 +110,7 @@ struct OpenMatchIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        provider.open(.match(MatchID(match.id)))
+        await provider.open(.match(MatchID(match.id)))
         return .result()
     }
 }
@@ -147,7 +158,7 @@ struct ShowSeasonStatsIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        provider.open(.season(nil))
+        await provider.open(.season(nil))
         return .result()
     }
 }
@@ -207,19 +218,43 @@ final class ProgrammeIntentProvider {
 
     init(appModel: AppModel) { self.appModel = appModel }
 
+    /// All teams' matches so Spotlight items never disappear with a workspace
+    /// switch. The selected team's matches come first for ranking.
     func matches() async throws -> [MatchEntity] {
         guard let store = appModel.store else { return [] }
-        let items = try await store.matches(teamID: appModel.teamID, limit: 60)
-        return items.map { MatchEntity(item: $0, venueLabel: $0.venue.shortLabel) }
+        let teams = try await store.teams()
+        var entities: [MatchEntity] = []
+        for team in teams {
+            let items = try await store.matches(teamID: team.id, limit: 60)
+            entities += items.map {
+                MatchEntity(item: $0, venueLabel: $0.venue.shortLabel, teamName: team.shortName)
+            }
+        }
+        let selected = appModel.workspace.selectedTeam?.shortName
+        entities.sort {
+            ($0.teamName == selected ? 0 : 1, $0.kickoff)
+                < ($1.teamName == selected ? 0 : 1, $1.kickoff)
+        }
+        return entities
     }
 
     func players() async throws -> [PlayerEntity] {
-        guard let store = appModel.store, let teamID = appModel.teamID else { return [] }
-        return try await store.roster(teamID: teamID).sortedByNumber.map(PlayerEntity.init(player:))
+        guard let store = appModel.store else { return [] }
+        let teams = try await store.teams()
+        var entities: [PlayerEntity] = []
+        for team in teams {
+            let roster = try await store.roster(teamID: team.id)
+            entities += roster.sortedByNumber.map {
+                PlayerEntity(player: $0, teamName: team.shortName)
+            }
+        }
+        return entities
     }
 
-    func open(_ route: AppRoute) {
-        appModel.navigation.open(route)
+    /// Team-aware routing through the single application path. Opening a
+    /// specific match/player selects its owning team first.
+    func open(_ route: AppRoute) async {
+        await appModel.open(route)
     }
 
     func presentNewMatch() {

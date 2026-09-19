@@ -8,10 +8,90 @@ import SwiftData
 import SwiftUI
 import TipKit
 
+/// Per-team New Match defaults, keyed by TeamID in UserDefaults.
+/// No schema migration: these are local UI preferences, not match truth.
+/// Global scoring preferences (haptics, keep-awake, confirm) stay global.
+@MainActor
+enum TeamMatchDefaults {
+    private static func key(_ field: String, teamID: TeamID) -> String {
+        "programme.team.\(teamID.rawValue.uuidString).\(field)"
+    }
+
+    static func load(teamID: TeamID) -> (
+        profileID: String, rulesName: String, tracking: OpponentTrackingMode
+    ) {
+        let defaults = UserDefaults.standard
+        let profile =
+            defaults.string(forKey: key("statProfile", teamID: teamID))
+            ?? StatProfile.maxPreps.id
+        let rules =
+            defaults.string(forKey: key("rulesPreset", teamID: teamID))
+            ?? MatchRules.highSchool.name
+        let trackingRaw = defaults.string(forKey: key("opponentTracking", teamID: teamID))
+        let tracking =
+            trackingRaw.flatMap(OpponentTrackingMode.init(rawValue:))
+            ?? .ourTeam
+        return (profile, rules, tracking)
+    }
+
+    static func save(
+        teamID: TeamID, profileID: String, rulesName: String, tracking: OpponentTrackingMode
+    ) {
+        let defaults = UserDefaults.standard
+        defaults.set(profileID, forKey: key("statProfile", teamID: teamID))
+        defaults.set(rulesName, forKey: key("rulesPreset", teamID: teamID))
+        defaults.set(tracking.rawValue, forKey: key("opponentTracking", teamID: teamID))
+    }
+}
+
+/// The selected-team source of truth. Team is workspace context in which the
+/// four sections (Home/Matches/Roster/Stats) operate.
+@MainActor
+@Observable
+final class TeamWorkspace {
+    var teams: [TeamListItem] = []
+    var selectedTeamID: TeamID?
+    /// Current season belongs to the team; used by Home, New Match, default
+    /// Matches filtering, player stats and widgets.
+    var currentSeasonID: SeasonID?
+    /// Viewed stats season is temporary UI state. Viewing an old season never
+    /// changes which season is current.
+    var viewedStatsSeasonID: SeasonID?
+
+    private static let selectedTeamKey = "programme.selectedTeamID"
+
+    var selectedTeam: TeamListItem? {
+        guard let selectedTeamID else { return nil }
+        return teams.first { $0.id == selectedTeamID }
+    }
+
+    var hasTeam: Bool { selectedTeamID != nil }
+
+    static func restoredSelection(from teams: [TeamListItem]) -> TeamID? {
+        guard
+            let raw = UserDefaults.standard.string(forKey: selectedTeamKey),
+            let uuid = UUID(uuidString: raw)
+        else { return nil }
+        let id = TeamID(uuid)
+        return teams.contains(where: { $0.id == id }) ? id : nil
+    }
+
+    func persistSelection() {
+        if let selectedTeamID {
+            UserDefaults.standard.set(
+                selectedTeamID.rawValue.uuidString, forKey: Self.selectedTeamKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.selectedTeamKey)
+        }
+    }
+}
+
 /// Application-level state and services.
 ///
-/// Deliberately small. It owns the database, the recovery journal and the one
-/// live scoring session, and nothing else: feature state lives with the feature.
+/// Owns the database, the recovery journal, the one live scoring session and
+/// the team workspace. Feature state lives with the feature. The live
+/// scorer's MatchContext remains the source of truth while scoring; browsing
+/// selection never redefines it.
 @MainActor
 @Observable
 final class AppModel {
@@ -29,25 +109,26 @@ final class AppModel {
     private(set) var recoveryCandidates: [RecoverableMatch] = []
 
     var navigation = NavigationModel()
+    var workspace = TeamWorkspace()
+    /// Bumped on every observed store write so browsing lists refetch.
+    /// Views combine this with their team/season ids in `.task(id:)`.
+    var storeRevision = 0
     /// Set once at launch; used by App Intents, Spotlight and Shortcuts.
     var intentProvider: ProgrammeIntentProvider?
     private let storeObserver = StoreChangeObserver()
-    var teamID: TeamID?
-    var seasonID: SeasonID?
-    var teamName: String = "Programme"
-    var teamShortName: String = "Programme"
 
     /// If the on-disk store cannot be opened at all, the app still launches into
     /// an in-memory one so it can explain what happened instead of crashing.
     private static let fallbackContainer: ModelContainer? = try? ProgrammeStore.container(inMemory: true)
 
     var containerForScene: ModelContainer {
-        container ?? Self.fallbackContainer ?? {
-            // A container is required by the scene. If even an in-memory store
-            // cannot be created the process is unusable; surface it immediately
-            // rather than shipping a silently broken app.
-            fatalError("Programme could not create a data store.")
-        }()
+        container ?? Self.fallbackContainer
+            ?? {
+                // A container is required by the scene. If even an in-memory store
+                // cannot be created the process is unusable; surface it immediately
+                // rather than shipping a silently broken app.
+                fatalError("Programme could not create a data store.")
+            }()
     }
 
     /// Launch arguments used by the UI tests and by `--demo` runs. They never
@@ -105,10 +186,10 @@ final class AppModel {
             .datastoreLocation(.applicationDefault),
         ])
 
-        try? await loadTeamContext(store: store)
-        if launchOptions.opensLiveMatch, let teamID {
-            let matches = (try? await store.matches(teamID: teamID)) ?? []
-            if let live = matches.first(where: \.isInterrupted) {
+        await reloadWorkspace(selecting: nil)
+        if launchOptions.opensLiveMatch {
+            let items = (try? await store.matches(limit: 60)) ?? []
+            if let live = items.first(where: \.isInterrupted) {
                 await openLiveSession(matchID: live.id)
             }
         }
@@ -116,28 +197,68 @@ final class AppModel {
         await refreshWidgetSnapshot()
 
         storeObserver.start(container: container) { [weak self] in
+            await self?.noteStoreChanged()
             await self?.refreshWidgetSnapshot()
             await self?.refreshRecoveryCandidates()
         }
     }
 
-    private func loadTeamContext(store: MatchStore) async throws {
-        let teams = try await store.teams()
-        guard let team = teams.first else { return }
-        teamID = team.id
-        teamName = team.name
-        teamShortName = team.shortName
-        seasonID = try await store.currentSeasonID(teamID: team.id)
+    /// Reload teams and resolve selection. When `selecting` is non-nil (a new
+    /// team was just created), select it.
+    func reloadWorkspace(selecting preferred: TeamID? = nil) async {
+        guard let store else { return }
+        let teams = (try? await store.teams()) ?? []
+        workspace.teams = teams
+        guard !teams.isEmpty else {
+            workspace.selectedTeamID = nil
+            workspace.currentSeasonID = nil
+            workspace.viewedStatsSeasonID = nil
+            workspace.persistSelection()
+            return
+        }
+        let restored: TeamID?
+        if let preferred, teams.contains(where: { $0.id == preferred }) {
+            restored = preferred
+        } else {
+            restored = TeamWorkspace.restoredSelection(from: teams) ?? teams.first?.id
+        }
+        workspace.selectedTeamID = restored
+        workspace.persistSelection()
+        if let selected = restored {
+            workspace.currentSeasonID = try? await store.currentSeasonID(teamID: selected)
+            workspace.viewedStatsSeasonID = workspace.currentSeasonID
+        }
+        navigation.section = .home
+        navigation.clearTeamScopedPaths()
+        await refreshWidgetSnapshot()
+    }
+
+    /// Select another team workspace. Keeps the section, clears pushed
+    /// team-specific state, resolves the new current season and resets the
+    /// viewed stats season.
+    func selectTeam(_ teamID: TeamID) async {
+        guard let store else { return }
+        guard workspace.teams.contains(where: { $0.id == teamID }) else { return }
+        guard workspace.selectedTeamID != teamID else { return }
+        workspace.selectedTeamID = teamID
+        workspace.persistSelection()
+        workspace.currentSeasonID = try? await store.currentSeasonID(teamID: teamID)
+        workspace.viewedStatsSeasonID = workspace.currentSeasonID
+        navigation.clearTeamScopedPaths()
+        await refreshWidgetSnapshot()
     }
 
     /// Loads the fictional Ninety Six team and four played matches so the app can
     /// be explored without entering a roster first. Always explicit, never
     /// automatic, and the rest of Programme knows nothing about it.
     func loadSampleData() async {
-        guard let container else { return }
+        guard let container, let store else { return }
         do {
             try ProgrammeStore.seedSampleData(into: container.mainContext)
-            await reloadTeamContext()
+            // Select the sample team explicitly rather than relying on ordering.
+            let teams = (try? await store.teams()) ?? []
+            let sample = teams.first { $0.id == ProgrammeSample.teamID } ?? teams.first
+            await reloadWorkspace(selecting: sample?.id)
         } catch {
             navigation.errorToShow = ProgrammeError(
                 title: "Couldn't load the sample team",
@@ -146,10 +267,82 @@ final class AppModel {
         }
     }
 
-    func reloadTeamContext() async {
-        guard let store else { return }
-        try? await loadTeamContext(store: store)
-        await refreshWidgetSnapshot()
+    // MARK: - Team-aware routing
+
+    /// Database-aware routing above the pure navigation model. Selecting a
+    /// match/player/season first selects its owning team.
+    func open(_ route: AppRoute) async {
+        guard let store else {
+            navigation.open(route)
+            return
+        }
+        switch route {
+        case .match(let id):
+            if let owner = try? await store.teamID(forMatch: id) {
+                await ensureTeamSelected(owner)
+            }
+            navigation.open(route)
+        case .player(let id):
+            if let owner = try? await store.teamID(forPlayer: id) {
+                await ensureTeamSelected(owner)
+            }
+            navigation.open(route)
+        case .season(let id):
+            if let id {
+                if let owner = try? await store.teamID(forSeason: id) {
+                    await ensureTeamSelected(owner)
+                }
+                // Viewing a historical season never marks it current.
+                workspace.viewedStatsSeasonID = id
+            }
+            navigation.open(route)
+        case .eventLog:
+            navigation.open(route)
+        }
+    }
+
+    func handle(url: URL) async -> Bool {
+        guard url.scheme == "programme" else { return false }
+        let host = url.host()
+        let identifier = url.pathComponents.first { $0 != "/" }
+        switch host {
+        case "match":
+            guard let identifier, let uuid = UUID(uuidString: identifier) else { return false }
+            await open(.match(MatchID(uuid)))
+            return true
+        case "player":
+            guard let identifier, let uuid = UUID(uuidString: identifier) else { return false }
+            await open(.player(PlayerID(uuid)))
+            return true
+        case "team", "season":
+            if let identifier, let uuid = UUID(uuidString: identifier) {
+                await open(.season(SeasonID(uuid)))
+            } else {
+                navigation.section = .stats
+            }
+            return true
+        case "live":
+            if let identifier, let uuid = UUID(uuidString: identifier) {
+                await openLiveSession(matchID: MatchID(uuid))
+            } else {
+                navigation.isShowingLiveMatch = true
+            }
+            return true
+        case "today", "home":
+            navigation.section = .home
+            return true
+        case "newmatch":
+            navigation.isPresentingNewMatch = true
+            return true
+        default:
+            return navigation.handle(url: url)
+        }
+    }
+
+    private func ensureTeamSelected(_ teamID: TeamID) async {
+        if workspace.selectedTeamID != teamID {
+            await selectTeam(teamID)
+        }
     }
 
     // MARK: - Recovery
@@ -162,10 +355,17 @@ final class AppModel {
         var candidates: [RecoverableMatch] = []
         for item in interrupted {
             let summary = journals.first { $0.matchID == item.id }
+            // Use the match's own team identity, never the selected workspace.
+            let title: String
+            if let context = try? await store.context(for: item.id) {
+                title = context.descriptor.title
+            } else {
+                title = "\(item.venue.shortLabel) \(item.opponentName)"
+            }
             candidates.append(
                 RecoverableMatch(
                     matchID: item.id,
-                    title: "\(teamShortName) \(item.venue.shortLabel) \(item.opponentName)",
+                    title: title,
                     eventCount: max(item.eventCount, summary?.eventCount ?? 0),
                     lastEventAt: summary?.lastEventAt,
                     isInDatabase: true))
@@ -176,8 +376,7 @@ final class AppModel {
             candidates.append(
                 RecoverableMatch(
                     matchID: summary.matchID,
-                    title:
-                        "\(summary.descriptor.teamShortName) \(summary.descriptor.venue.shortLabel) \(summary.descriptor.opponentShortName)",
+                    title: summary.descriptor.title,
                     eventCount: summary.eventCount,
                     lastEventAt: summary.lastEventAt,
                     isInDatabase: false))
@@ -187,6 +386,10 @@ final class AppModel {
 
     func dismissRecovery(for matchID: MatchID) {
         recoveryCandidates.removeAll { $0.matchID == matchID }
+    }
+
+    private func noteStoreChanged() {
+        storeRevision += 1
     }
 
     // MARK: - Live session
@@ -222,11 +425,26 @@ final class AppModel {
                 } else if journaled != nil, !journaledIDs.isSuperset(of: storedIDs) {
                     journal.discard(matchID: matchID)
                 }
-            } else if let journaled = try? journal.recover(matchID: matchID), let teamID {
-                _ = try await store.importMatch(journaled, teamID: teamID, seasonID: seasonID)
+            } else if let journaled = try? journal.recover(matchID: matchID) {
+                // Journal-only recovery: import into the journal's own team,
+                // never into whichever workspace happens to be selected.
+                let ownerID = journaled.descriptor.teamID
+                let ownerTeams = (try? await store.teams()) ?? []
+                guard ownerTeams.contains(where: { $0.id == ownerID }) else {
+                    throw StoreError.teamNotFound
+                }
+                let ownerSeason = (try? await store.currentSeasonID(teamID: ownerID)) ?? journaled.descriptor.seasonID
+                _ = try await store.importMatch(journaled, teamID: ownerID, seasonID: ownerSeason)
                 context = journaled
             } else {
                 throw StoreError.matchNotFound
+            }
+            // Resuming a stored match selects its owning team first, so closing
+            // the scorer returns to the correct workspace.
+            let ownerID = context.descriptor.teamID
+            let ownerTeams = (try? await store.teams()) ?? []
+            if ownerTeams.contains(where: { $0.id == ownerID }) {
+                await ensureTeamSelected(ownerID)
             }
             let session = LiveMatchSession(context: context, store: store, journal: journal, appModel: self)
             liveSession = session
@@ -257,17 +475,24 @@ final class AppModel {
         if phase == .background { MaintenanceScheduler.scheduleIfNeeded() }
     }
 
-    // MARK: - Widgets
+    // MARK: - Widgets (selected-team scoped)
 
+    /// The widget snapshot represents the currently selected team. While a
+    /// match is live, its team identity comes from the live session's
+    /// MatchContext, not from browsing state.
     func refreshWidgetSnapshot() async {
-        guard let store, let teamID else { return }
-        let matches = (try? await store.matches(teamID: teamID, limit: 40)) ?? []
-        let season = try? await store.seasonStats(teamID: teamID, seasonID: seasonID)
+        guard let store, let selectedTeamID = workspace.selectedTeamID else { return }
+        let currentSeasonID = workspace.currentSeasonID
+        let details = try? await store.teamDetails(teamID: selectedTeamID)
+        let teamName = details?.name ?? workspace.selectedTeam?.name ?? "Programme"
+        let teamShort = details?.shortName ?? workspace.selectedTeam?.shortName ?? "Programme"
+        let matches = (try? await store.matches(teamID: selectedTeamID, limit: 40)) ?? []
+        let season = try? await store.seasonStats(teamID: selectedTeamID, seasonID: currentSeasonID)
 
         let live: ProgrammeWidgetSnapshot.LiveMatch? = liveSession.map { session in
             ProgrammeWidgetSnapshot.LiveMatch(
                 matchID: session.matchID.rawValue.uuidString,
-                teamShortName: teamShortName,
+                teamShortName: session.descriptor.teamShortName,
                 opponentShortName: session.context.descriptor.opponentShortName,
                 scoreUs: session.snapshot.score.us,
                 scoreOpponent: session.snapshot.score.opponent,
@@ -278,7 +503,8 @@ final class AppModel {
                 lastEventText: session.lastEventDescription?.oneLine)
         }
 
-        let upcoming = matches
+        let upcoming =
+            matches
             .filter { $0.phase == .scheduled && $0.kickoff > Date().addingTimeInterval(-7_200) }
             .sorted { $0.kickoff < $1.kickoff }
             .first
@@ -288,7 +514,8 @@ final class AppModel {
                     venueLabel: $0.venue.shortLabel, kickoff: $0.kickoff)
             }
 
-        let recent = matches
+        let recent =
+            matches
             .filter { $0.phase == .finalized }
             .prefix(4)
             .map {
@@ -302,7 +529,7 @@ final class AppModel {
         ProgrammeSharedContainer.write(
             ProgrammeWidgetSnapshot(
                 teamName: teamName,
-                teamShortName: teamShortName,
+                teamShortName: teamShort,
                 seasonName: nil,
                 recordText: season?.recordText ?? "0-0-0",
                 live: live,

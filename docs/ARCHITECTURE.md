@@ -64,6 +64,36 @@ Exporters consume verified domain snapshots rather than querying SwiftData or re
 
 Owns reusable Apple-platform presentation pieces, including the vector pitch, visual tokens, Live Activity attributes, and statistic rendering helpers.
 
+## App shell
+
+Programme is iPad-first, with one adaptive `TabView` (`.sidebarAdaptable`, modern
+`Tab` API) providing exactly four top-level sections: **Home | Matches | Roster
+| Stats**. SwiftUI renders those as a bottom tab bar on iPhone and an adaptable
+tab bar/sidebar on iPad; there is no hand-built navigation chrome and no
+device branching. Each section keeps its own `NavigationStack`/`NavigationPath`
+(`AppSection` + `homePath`/`matchesPath`/`rosterPath`/`statsPath` in
+`NavigationModel`, which describes where the user is, not how it is presented).
+
+A **Team is the workspace** in which those sections operate — never a
+destination. `TeamWorkspace` (owned by `AppModel`) holds one selected team,
+that team's current season, and the Stats tab's viewed season. Every
+team-scoped screen takes its `TeamID` explicitly and fetches scoped data
+(`MatchModel.teamIdentifier`, the player→team relationship) at fetch time.
+Switching teams keeps the section, clears pushed team-specific state, resolves
+the new current season, resets the viewed season, and refreshes widgets.
+
+Current season vs viewed season: the current season belongs to the team and
+drives Home, New Match, default filtering, player stats and widgets. The viewed
+season is temporary Stats/Matches viewing state; looking at an old season never
+marks it current — only Team/Season management does.
+
+The live scorer is not a tab. While a match is being scored, `LiveMatchView`
+replaces the whole browsing shell; closing it returns to the same team,
+section and navigation state. The match's `MatchContext` is the source of truth
+while scoring, and recovery/journal handling always uses the match's own team
+identity, never the selected workspace as a guess. Export and archive import
+likewise carry explicit team identity. Widgets show the selected team.
+
 ## Event model
 
 A `MatchEvent` has stable identity, match time, stable sequence ordering, recorded wall-clock date, revision/audit information, and a closed event payload.

@@ -28,7 +28,29 @@
                 appModel: nil)
         }
 
-        static var appModel: AppModel { AppModel() }
+        /// An app model whose own store holds the sample team, so browsing
+        /// previews read the same container their views fetch through.
+        static var appModel: AppModel {
+            let model = AppModel()
+            if let container = model.container {
+                try? ProgrammeStore.seedSampleData(into: container.mainContext)
+            }
+            return model
+        }
+
+        /// The sample team as the selected workspace, so section roots render.
+        static func seededAppModel() -> AppModel {
+            let model = appModel
+            Task { @MainActor in
+                guard let store = model.store else { return }
+                model.workspace.teams = (try? await store.teams()) ?? []
+                model.workspace.selectedTeamID = ProgrammeSample.teamID
+                model.workspace.currentSeasonID = try? await store.currentSeasonID(
+                    teamID: ProgrammeSample.teamID)
+                model.workspace.viewedStatsSeasonID = model.workspace.currentSeasonID
+            }
+            return model
+        }
     }
 
     /// A live match on a full-width iPad: the layout Programme is designed around.
@@ -188,51 +210,24 @@
 
     // MARK: - Browsing
 
-    #Preview("Today") {
-        if let container = PreviewSupport.container() {
-            NavigationStack { TodayView() }
-                .environment(PreviewSupport.appModel)
-                .modelContainer(container)
-        }
-    }
-
-    /// The empty state a new installation actually starts in.
-    #Preview("Today · empty") {
-        if let container = try? ProgrammeStore.container(inMemory: true) {
-            NavigationStack { TodayView() }
-                .environment(PreviewSupport.appModel)
-                .modelContainer(container)
-        }
+    #Preview("Home") {
+        NavigationStack { HomeView(teamID: ProgrammeSample.teamID) }
+            .environment(PreviewSupport.seededAppModel())
     }
 
     #Preview("Matches") {
-        if let container = PreviewSupport.container() {
-            NavigationStack { MatchesView() }
-                .environment(PreviewSupport.appModel)
-                .modelContainer(container)
-        }
+        NavigationStack { MatchesView(teamID: ProgrammeSample.teamID) }
+            .environment(PreviewSupport.seededAppModel())
     }
 
     #Preview("Roster") {
-        if let container = PreviewSupport.container() {
-            NavigationStack { RosterView() }
-                .environment(PreviewSupport.appModel)
-                .modelContainer(container)
-        }
-    }
-
-    /// An empty roster, which is where most people start.
-    #Preview("Roster · empty") {
-        if let container = try? ProgrammeStore.container(inMemory: true) {
-            NavigationStack { RosterView() }
-                .environment(PreviewSupport.appModel)
-                .modelContainer(container)
-        }
+        NavigationStack { RosterView(teamID: ProgrammeSample.teamID) }
+            .environment(PreviewSupport.seededAppModel())
     }
 
     #Preview("New match") {
-        NewMatchView()
-            .environment(PreviewSupport.appModel)
+        NewMatchView(teamID: ProgrammeSample.teamID)
+            .environment(PreviewSupport.seededAppModel())
     }
 
     #Preview("Scoreboard window") {

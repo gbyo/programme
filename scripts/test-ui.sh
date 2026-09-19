@@ -55,6 +55,8 @@ if [[ -n "${PROGRAMME_XCRESULT_PATH:-}" ]]; then
 fi
 
 set -o pipefail
+# macOS /bin/bash is 3.2: "${empty[@]}" fails under `set -u`, so suspend nounset here.
+set +u
 xcodebuild test \
     -project Programme.xcodeproj \
     -scheme Programme \
@@ -62,3 +64,4 @@ xcodebuild test \
     -only-testing:ProgrammeUITests \
     "${result_args[@]}" \
     "$@"
+set -u

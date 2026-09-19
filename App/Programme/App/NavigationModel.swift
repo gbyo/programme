@@ -3,32 +3,42 @@ import Observation
 import ProgrammeCore
 import SwiftUI
 
-enum SidebarDestination: String, Hashable, Identifiable, CaseIterable {
-    case today
+/// The four top-level destinations. Team is context, not a destination:
+/// the selected team scopes what each section shows.
+enum AppSection: String, Hashable, Identifiable, CaseIterable {
+    case home
     case matches
     case roster
-    case season
-    case exports
+    case stats
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .today: "Today"
+        case .home: "Home"
         case .matches: "Matches"
         case .roster: "Roster"
-        case .season: "Season Stats"
-        case .exports: "Exports"
+        case .stats: "Stats"
+        }
+    }
+
+    /// Navigation title for the root of each section. Stats keeps the
+    /// established "Season Stats" screen title even though the tab reads Stats.
+    var rootTitle: String {
+        switch self {
+        case .home: "Home"
+        case .matches: "Matches"
+        case .roster: "Roster"
+        case .stats: "Season Stats"
         }
     }
 
     var symbolName: String {
         switch self {
-        case .today: "sun.horizon"
+        case .home: "house"
         case .matches: "calendar"
         case .roster: "person.3"
-        case .season: "chart.bar.xaxis"
-        case .exports: "square.and.arrow.up"
+        case .stats: "chart.bar.xaxis"
         }
     }
 }
@@ -41,72 +51,80 @@ enum AppRoute: Hashable {
     case eventLog(MatchID)
 }
 
-/// One navigation system for taps, deep links, App Intents and Spotlight.
-/// Nothing navigates by reaching into a view.
+/// Navigation state: where the user is. Persistence lookups (which team owns
+/// a match/player/season) live in AppModel above this model.
 @MainActor
 @Observable
 final class NavigationModel {
-    var sidebar: SidebarDestination? = .today
-    var isSidebarCollapsed = false
-    var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// Selected top-level section. Presentation (bottom tabs on iPhone,
+    /// adaptable tabs/sidebar on iPad) is owned by SwiftUI.
+    var section: AppSection = .home
 
-    var todayPath = NavigationPath()
+    var homePath = NavigationPath()
     var matchesPath = NavigationPath()
     var rosterPath = NavigationPath()
-    var seasonPath = NavigationPath()
-    var exportsPath = NavigationPath()
+    var statsPath = NavigationPath()
 
-    /// The live scorer takes over the window rather than living in a column.
+    /// The live scorer takes over the window rather than living in a tab.
     var isShowingLiveMatch = false
     var pendingMatchToOpen: MatchID?
     var errorToShow: ProgrammeError?
     var isPresentingNewMatch = false
     var isPresentingSettings = false
+    var isPresentingManageTeams = false
+    var isPresentingNewTeam = false
 
     func presentLiveMatch() {
         isShowingLiveMatch = true
-        // Give the whole window to scoring.
-        columnVisibility = .detailOnly
     }
 
     func dismissLiveMatch() {
         isShowingLiveMatch = false
-        columnVisibility = .automatic
+    }
+
+    /// Clear team-specific pushed state so content from one team can never
+    /// remain displayed under another. Section selection is preserved.
+    func clearTeamScopedPaths() {
+        homePath = NavigationPath()
+        matchesPath = NavigationPath()
+        rosterPath = NavigationPath()
+        statsPath = NavigationPath()
     }
 
     func open(_ route: AppRoute) {
         switch route {
         case .match(let id):
-            sidebar = .matches
+            section = .matches
             matchesPath = NavigationPath()
             matchesPath.append(AppRoute.match(id))
         case .player(let id):
-            sidebar = .roster
+            section = .roster
             rosterPath = NavigationPath()
             rosterPath.append(AppRoute.player(id))
         case .season(let id):
-            sidebar = .season
-            seasonPath = NavigationPath()
-            if id != nil { seasonPath.append(AppRoute.season(id)) }
+            section = .stats
+            statsPath = NavigationPath()
+            if id != nil { statsPath.append(AppRoute.season(id)) }
         case .eventLog(let id):
-            sidebar = .matches
+            section = .matches
             matchesPath = NavigationPath()
             matchesPath.append(AppRoute.match(id))
             matchesPath.append(AppRoute.eventLog(id))
         }
     }
 
-    func path(for destination: SidebarDestination) -> Binding<NavigationPath> {
-        switch destination {
-        case .today: Binding(get: { self.todayPath }, set: { self.todayPath = $0 })
+    func path(for section: AppSection) -> Binding<NavigationPath> {
+        switch section {
+        case .home: Binding(get: { self.homePath }, set: { self.homePath = $0 })
         case .matches: Binding(get: { self.matchesPath }, set: { self.matchesPath = $0 })
         case .roster: Binding(get: { self.rosterPath }, set: { self.rosterPath = $0 })
-        case .season: Binding(get: { self.seasonPath }, set: { self.seasonPath = $0 })
-        case .exports: Binding(get: { self.exportsPath }, set: { self.exportsPath = $0 })
+        case .stats: Binding(get: { self.statsPath }, set: { self.statsPath = $0 })
         }
     }
 
     /// `programme://match/{uuid}`, `programme://player/{uuid}`, `programme://live`.
+    /// Team-aware resolution happens in AppModel; this handles only the
+    /// team-independent cases synchronously.
     @discardableResult
     func handle(url: URL) -> Bool {
         guard url.scheme == "programme" else { return false }
@@ -114,31 +132,25 @@ final class NavigationModel {
         let identifier = url.pathComponents.first { $0 != "/" }
 
         switch host {
-        case "match":
-            guard let identifier, let uuid = UUID(uuidString: identifier) else { return false }
-            open(.match(MatchID(uuid)))
+        case .none: return false
+        case .some("today"), .some("home"):
+            section = .home
             return true
-        case "player":
-            guard let identifier, let uuid = UUID(uuidString: identifier) else { return false }
-            open(.player(PlayerID(uuid)))
+        case .some("season"), .some("team"):
+            section = .stats
             return true
-        case "team", "season":
-            open(.season(nil))
+        case .some("newmatch"):
+            isPresentingNewMatch = true
             return true
-        case "live":
+        case .some("live"):
             if let identifier, let uuid = UUID(uuidString: identifier) {
                 pendingMatchToOpen = MatchID(uuid)
             } else {
                 isShowingLiveMatch = true
             }
             return true
-        case "today":
-            sidebar = .today
-            return true
-        case "newmatch":
-            isPresentingNewMatch = true
-            return true
         default:
+            // match/player URLs need store lookup; AppModel handles them.
             return false
         }
     }
