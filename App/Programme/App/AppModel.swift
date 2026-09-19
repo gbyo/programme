@@ -176,6 +176,20 @@ final class AppModel {
         }
     }
 
+    // MARK: - Testing
+
+    /// Test seam for intent tests: replace the library with an empty
+    /// in-memory store (and a throwaway journal) so tests exercise the real
+    /// team-aware routing without touching the on-disk library.
+    func useEphemeralStoreForTests() throws {
+        let container = try ProgrammeStore.container(inMemory: true)
+        self.container = container
+        self.store = MatchStore(modelContainer: container)
+        self.journal = try RecoveryJournal(
+            directory: FileManager.default.temporaryDirectory
+                .appending(path: "ProgrammeIntentTests/\(UUID().uuidString)"))
+    }
+
     func bootstrap() async {
         guard !isReady else { return }
         defer { isReady = true }

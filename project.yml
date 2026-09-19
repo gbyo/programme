@@ -73,6 +73,20 @@ targets:
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
 
+  ProgrammeIntentTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: App/ProgrammeIntentTests
+    dependencies:
+      - target: Programme
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.IntentTests
+        TEST_TARGET_NAME: Programme
+        GENERATE_INFOPLIST_FILE: "YES"
+        FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks
+
 schemes:
   Programme:
     build:
@@ -80,9 +94,11 @@ schemes:
         Programme: all
         ProgrammeWidgets: all
         ProgrammeUITests: [test]
+        ProgrammeIntentTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - ProgrammeUITests
+        - ProgrammeIntentTests
