@@ -276,11 +276,18 @@ struct PlayerEditorView: View {
             position: position,
             classYear: classYear.isEmpty ? nil : classYear,
             isOnRoster: isOnRoster)
-        if existing == nil {
-            try? await store.addPlayer(teamID: teamID, snapshot)
-        } else {
-            try? await store.updatePlayer(snapshot)
+        do {
+            if existing == nil {
+                _ = try await store.addPlayer(teamID: teamID, snapshot)
+            } else {
+                try await store.updatePlayer(snapshot)
+            }
+            dismiss()
+        } catch {
+            appModel.navigation.errorToShow = ProgrammeError(
+                title: "Couldn't save player",
+                message: "Nothing was changed. Try again.",
+                underlying: error)
         }
-        dismiss()
     }
 }
