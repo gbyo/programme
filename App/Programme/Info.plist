@@ -48,7 +48,7 @@
     <string>Programme looks for nearby matches to show a read-only scoreboard on this display. Scoring stays on the scorer's device.</string>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
-        <string>org.programme.maintenance</string>
+        <string>com.gbyo.programme.maintenance</string>
     </array>
     <key>UILaunchScreen</key>
     <dict>
@@ -76,7 +76,7 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>org.programme.deeplink</string>
+            <string>com.gbyo.programme.deeplink</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>programme</string>
@@ -87,7 +87,7 @@
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>org.programme.archive</string>
+            <string>com.gbyo.programme.archive</string>
             <key>UTTypeDescription</key>
             <string>Programme Archive</string>
             <key>UTTypeConformsTo</key>
@@ -119,7 +119,7 @@
             <string>Owner</string>
             <key>LSItemContentTypes</key>
             <array>
-                <string>org.programme.archive</string>
+                <string>com.gbyo.programme.archive</string>
             </array>
         </dict>
     </array>
