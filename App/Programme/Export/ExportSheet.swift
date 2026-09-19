@@ -88,10 +88,7 @@ struct ExportSheet: View {
                     if generated.count > 1 {
                         ShareLink(items: generated.map(\.url)) {
                             Label("Share All \(generated.count) Files", systemImage: "square.and.arrow.up")
-                                .frame(minHeight: 40)
                         }
-                        .programmePrimaryAction()
-                        .buttonSizing(.flexible)
                         .selectionDisabled()
                     }
                 }

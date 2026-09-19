@@ -215,6 +215,12 @@ struct RosterImportView: View {
         }
     }
 
+    /// Review step. Forced edit mode is Apple's native multi-selection
+    /// pattern: a `List(selection:)` with a set binding only offers
+    /// multi-select while edit mode is active. The semantic question is
+    /// answered by the checkmark selection itself ("import this row"), so
+    /// no custom checkbox UI is used; interactive controls opt out via
+    /// `.selectionDisabled()`.
     private func mappingStep(_ preview: RosterImportPreview) -> some View {
         List(selection: selectedRows) {
             Section {
