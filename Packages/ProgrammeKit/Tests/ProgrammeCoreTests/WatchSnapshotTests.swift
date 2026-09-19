@@ -74,4 +74,27 @@ struct WatchSnapshotTests {
         let decoded = try JSONDecoder().decode(WatchSnapshot.self, from: data)
         #expect(decoded == snapshot)
     }
+
+    @Test("Stale live snapshots read stale; timeless sections never do")
+    func liveStaleness() {
+        let base = Date(timeIntervalSinceReferenceDate: 1000)
+        func live(at updatedAt: Date) -> WatchSnapshot {
+            WatchSnapshot(
+                teamName: "Ninety Six", teamShortName: "NX", recordText: "3-1-0",
+                live: WatchSnapshot.Live(
+                    matchID: MatchID(ProgrammeSample.id("match.dixie")),
+                    teamShortName: "NX", opponentShortName: "Dixie",
+                    scoreUs: 2, scoreOpponent: 1,
+                    clock: ClockAnchor(period: 2, elapsedAtAnchor: 300, runningSince: nil),
+                    rules: .highSchool, phase: .inPeriod, needsReviewCount: 1,
+                    lastEventText: nil),
+                updatedAt: updatedAt)
+        }
+        #expect(live(at: base).isLiveStale(now: base.addingTimeInterval(60)) == false)
+        #expect(live(at: base).isLiveStale(now: base.addingTimeInterval(121)) == true)
+        let timeless = WatchSnapshot(
+            teamName: "Ninety Six", teamShortName: "NX", recordText: "3-1-0",
+            updatedAt: base)
+        #expect(timeless.isLiveStale(now: base.addingTimeInterval(99999)) == false)
+    }
 }

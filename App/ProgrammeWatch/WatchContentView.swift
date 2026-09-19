@@ -13,7 +13,12 @@ struct WatchContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     header(snapshot)
                     if let live = snapshot.live {
-                        liveView(live)
+                        // Staleness re-evaluates on a slow timeline: no new
+                        // radio traffic, but an old anchor never presents as
+                        // unquestionably current.
+                        TimelineView(.periodic(from: Date(), by: 15)) { context in
+                            liveView(live, snapshot: snapshot, now: context.date)
+                        }
                     } else if let upcoming = snapshot.upcoming {
                         upcomingView(upcoming)
                     } else {
@@ -52,11 +57,22 @@ struct WatchContentView: View {
         }
     }
 
-    private func liveView(_ live: WatchSnapshot.Live) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label("LIVE", systemImage: "record.circle")
+    private func liveView(_ live: WatchSnapshot.Live, snapshot: WatchSnapshot, now: Date) -> some View {
+        let stale = snapshot.isLiveStale(now: now)
+        let updatedAt = snapshot.updatedAt
+        return VStack(alignment: .leading, spacing: 4) {
+            if stale {
+                Label(
+                    "Updated \(updatedAt.formatted(.relative(presentation: .named)))",
+                    systemImage: "wifi.exclamationmark"
+                )
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.red)
+                .foregroundStyle(.orange)
+            } else {
+                Label("LIVE", systemImage: "record.circle")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.red)
+            }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("\(live.scoreUs)")
                     .font(.system(size: 34, weight: .semibold, design: .rounded).monospacedDigit())
@@ -68,15 +84,16 @@ struct WatchContentView: View {
                 .font(.footnote.weight(.medium))
                 .lineLimit(1)
             // The clock renders on-watch from the anchor carried in the
-            // snapshot: no tick stream crosses the radio.
-            if live.clock.isRunning {
+            // snapshot: no tick stream crosses the radio. A stale snapshot
+            // freezes at its update time instead of ticking an old anchor.
+            if live.clock.isRunning, !stale {
                 TimelineView(.periodic(from: Date(), by: 1)) { context in
                     Text(clockText(live, at: context.date))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text(clockText(live, at: Date()))
+                Text(clockText(live, at: stale ? updatedAt : now))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
