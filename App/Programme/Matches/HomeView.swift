@@ -324,22 +324,6 @@ struct MatchRowContent: View {
     }
 }
 
-struct SectionBox<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .programmeSectionHeader()
-                .accessibilityIdentifier("section.\(title)")
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        }
-    }
-}
-
 struct EmptyHint: View {
     let title: String
     let message: String
