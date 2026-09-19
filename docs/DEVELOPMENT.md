@@ -79,14 +79,16 @@ If your Xcode app has another name/path, use its `Contents/Developer` directory 
 
 `Programme.xcodeproj` is ignored by Git and should never be hand-maintained.
 
-The generated project leaves code signing enabled for interactive Xcode builds. Simulator
-runs use an ad-hoc signature automatically; running on a physical device requires selecting
-your own development team in Xcode for Programme and any embedded targets you build. The
-repo deliberately does not commit a personal `DEVELOPMENT_TEAM` value. Programme's signing
-namespace is `com.gbyo.programme`; CloudKit uses `iCloud.com.gbyo.programme`, which must be
-created and assigned to the app identifier in the Apple Developer portal before device sync
-can work. The command-line build and CI scripts pass `CODE_SIGNING_ALLOWED=NO` explicitly
-so their simulator-only verification remains independent of developer accounts and signing assets.
+The generated project leaves code signing enabled for interactive Xcode builds. Programme's
+gbyo Apple Developer team (`57CW34C9J4`) is committed in `project.yml` so regenerating the
+Xcode project does not erase the team selection before physical-device runs. Simulator runs
+use an ad-hoc signature automatically, and CI passes `CODE_SIGNING_ALLOWED=NO`, so simulator-
+only verification remains independent of signing assets. Contributors who need to sign with
+another team can override `DEVELOPMENT_TEAM` locally for their build.
+
+Programme's signing namespace is `com.gbyo.programme`; CloudKit uses
+`iCloud.com.gbyo.programme`, which must be created and assigned to the app identifier in
+the Apple Developer portal before device sync can work.
 
 After adding/moving targets or changing project settings:
 
