@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "ProgrammeKit",
     defaultLocalization: "en",
-    platforms: [.iOS(.v26), .macOS(.v26)],
+    platforms: [.iOS(.v26), .macOS(.v26), .watchOS(.v26)],
     products: [
         .library(name: "ProgrammeCore", targets: ["ProgrammeCore"]),
         .library(name: "ProgrammePersistence", targets: ["ProgrammePersistence"]),

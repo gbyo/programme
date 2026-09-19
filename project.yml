@@ -4,6 +4,7 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "26.0"
   groupSortPosition: top
 
 packages:
@@ -31,6 +32,7 @@ targets:
       - package: ProgrammeKit
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI, ProgrammeCollaboration]
       - target: ProgrammeWidgets
+      - target: ProgrammeWatch
     # CloudKit container for team collaboration, declared in
     # App/Programme/Programme.entitlements. Still required as external
     # steps before any device syncs: provision the
@@ -73,6 +75,23 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "1.0"
 
+  ProgrammeWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: App/ProgrammeWatch
+    dependencies:
+      - package: ProgrammeKit
+        products: [ProgrammeCore]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.watchkitapp
+        PRODUCT_NAME: ProgrammeWatch
+        INFOPLIST_FILE: App/ProgrammeWatch/Info.plist
+        SKIP_INSTALL: "YES"
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0"
+
   ProgrammeUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -106,6 +125,7 @@ schemes:
       targets:
         Programme: all
         ProgrammeWidgets: all
+        ProgrammeWatch: all
         ProgrammeUITests: [test]
         ProgrammeIntentTests: [test]
     run:
@@ -115,3 +135,7 @@ schemes:
       targets:
         - ProgrammeUITests
         - ProgrammeIntentTests
+  ProgrammeWatch:
+    build:
+      targets:
+        ProgrammeWatch: all
