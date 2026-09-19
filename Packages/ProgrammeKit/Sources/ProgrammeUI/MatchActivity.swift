@@ -203,7 +203,7 @@ public enum ProgrammeSharedContainer {
     /// Configure an App Group in the project to let widgets read live data.
     /// Without it Programme still works completely; widgets fall back to a
     /// "no data yet" state rather than showing anything invented.
-    public static let appGroupIdentifier = "group.org.programme"
+    public static let appGroupIdentifier = "group.com.gbyo.programme"
 
     public static var directory: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)

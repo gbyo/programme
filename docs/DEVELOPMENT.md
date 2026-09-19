@@ -81,9 +81,12 @@ If your Xcode app has another name/path, use its `Contents/Developer` directory 
 
 The generated project leaves code signing enabled for interactive Xcode builds. Simulator
 runs use an ad-hoc signature automatically; running on a physical device requires selecting
-your development team for both the Programme app and ProgrammeWidgets extension in Xcode.
-The command-line build and CI scripts pass `CODE_SIGNING_ALLOWED=NO` explicitly so their
-simulator-only verification remains independent of developer accounts and signing assets.
+your own development team in Xcode for Programme and any embedded targets you build. The
+repo deliberately does not commit a personal `DEVELOPMENT_TEAM` value. Programme's signing
+namespace is `com.gbyo.programme`; CloudKit uses `iCloud.com.gbyo.programme`, which must be
+created and assigned to the app identifier in the Apple Developer portal before device sync
+can work. The command-line build and CI scripts pass `CODE_SIGNING_ALLOWED=NO` explicitly
+so their simulator-only verification remains independent of developer accounts and signing assets.
 
 After adding/moving targets or changing project settings:
 

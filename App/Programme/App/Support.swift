@@ -99,7 +99,7 @@ enum WidgetRefresher {
 /// Background work is only ever maintenance. Nothing about a match's
 /// correctness depends on a future background launch.
 enum MaintenanceScheduler {
-    static let identifier = "org.programme.maintenance"
+    static let identifier = "com.gbyo.programme.maintenance"
 
     static func register() {
         #if os(iOS)

@@ -56,7 +56,7 @@ enum ProgrammeWidgetRelevance {
 /// What is happening right now: a live match, or the next one.
 struct MatchStatusWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "org.programme.matchStatus", provider: ProgrammeTimelineProvider()) { entry in
+        StaticConfiguration(kind: "com.gbyo.programme.matchStatus", provider: ProgrammeTimelineProvider()) { entry in
             MatchStatusWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
@@ -154,7 +154,7 @@ struct MatchStatusWidgetView: View {
 /// The season at a glance.
 struct SeasonRecordWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "org.programme.seasonRecord", provider: ProgrammeTimelineProvider()) { entry in
+        StaticConfiguration(kind: "com.gbyo.programme.seasonRecord", provider: ProgrammeTimelineProvider()) { entry in
             SeasonRecordWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }

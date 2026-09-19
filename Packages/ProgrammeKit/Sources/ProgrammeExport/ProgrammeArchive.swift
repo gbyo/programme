@@ -17,6 +17,8 @@ public struct ArchiveManifest: Codable, Hashable, Sendable {
     public var matchCount: Int
 
     public init(
+        // Stable on-disk format marker. This is intentionally independent of the
+        // app's bundle/UTType namespace so existing .programme files remain readable.
         format: String = "org.programme.archive",
         schemaVersion: Int = programmeArchiveSchemaVersion,
         createdAt: Date = Date(),
@@ -168,6 +170,8 @@ public enum ProgrammeArchiveCoder {
         } catch {
             throw ArchiveError.notAProgrammeArchive
         }
+        // Keep accepting the original stable archive marker even though the app's
+        // exported UTType now uses the com.gbyo.programme namespace.
         guard probe.manifest.format == "org.programme.archive" else {
             throw ArchiveError.notAProgrammeArchive
         }
