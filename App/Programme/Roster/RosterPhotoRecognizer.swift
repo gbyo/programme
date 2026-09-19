@@ -94,13 +94,9 @@ enum RosterPhotoRecognizer {
 
         for observation in verticallySorted {
             let center = observation.0.midY
-            if let rowBaseline, abs(center - rowBaseline) > rowTolerance {
+            if let baseline = rowBaseline, abs(center - baseline) > rowTolerance {
                 rows.append(row)
                 row = [observation]
-                selfRowBaseline: do {
-                    // The label keeps assignment below explicit without
-                    // recomputing a baseline from members already admitted.
-                }
                 rowBaseline = center
             } else {
                 if row.isEmpty {
