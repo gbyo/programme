@@ -167,18 +167,20 @@ CI uses that path and uploads the `.xcresult` only when the UI-test job fails.
 
 ## Intent tests
 
-`App/ProgrammeIntentTests` (`ProgrammeIntentTests` target in `project.yml`,
-run as part of the `Programme` scheme's test action) covers the App Intents
-layer in two layers:
+`App/ProgrammeIntentTests` and `App/ProgrammeUITests/AppIntentsTestingTests.swift`
+cover the App Intents layer in two layers:
 
 - `EntityQueryTests` / `IntentNavigationTests` exercise the real
   `ProgrammeIntentProvider` and the real `AppModel.open(_:)` routing against
   an ephemeral two-team store. They run on every deployment target, because
   `@Dependency`-bound query/intent types trap when called directly
   in-process outside the intent perform flow.
-- `AppIntentsTestingTests` runs the same behaviors through Apple's
-  `AppIntentsTesting` framework (iOS 27+) where the dependency context
-  exists, including Spotlight/Siri query paths.
+- `ProgrammeUITests/AppIntentsTestingTests` runs equivalent behaviors through
+  Apple's `AppIntentsTesting` framework (iOS 27+) from the UI-test process.
+  Each test independently seeds the launched application process through a
+  debug-only, non-discoverable test intent, and verifies framework results or
+  state read back from that process rather than an ephemeral test-process
+  `AppModel`. This includes Spotlight/Siri query paths.
 
 Known environment limitation: in the Xcode 27.0 simulator runtime Apple's
 own `AppIntentsLiveEntityService` XPC service traps

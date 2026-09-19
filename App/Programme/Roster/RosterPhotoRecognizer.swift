@@ -16,7 +16,7 @@ import Vision
 /// as a lines fallback. Table columns are therefore not preserved — the
 /// review step's column mapping is where columns get fixed by a human.
 enum RosterPhotoRecognizer {
-    enum Failure: Error {
+    enum Failure: Error, Equatable {
         /// The data is not a readable image at all.
         case unreadableImage
         /// A valid image, but Vision found no text in it.
@@ -77,21 +77,41 @@ enum RosterPhotoRecognizer {
     /// left column first within a row. Vision's bounding boxes use a
     /// bottom-left origin, so higher rows have a larger maxY.
     private static func sortTopToBottom(_ paired: [(CGRect, String)]) -> [String] {
-        // A row groups observations whose vertical centers sit within a
-        // fraction of the tallest box — enough for phone photos of printed
-        // tables without pretending to understand real columns.
+        // Build rows from vertical order first. Keeping one baseline for each
+        // row avoids a pairwise comparator treating overlapping adjacent rows
+        // inconsistently, then each completed row can be read left to right.
         let rowTolerance = (paired.map(\.0.height).max() ?? 0.02) * 1.5 + 0.005
-        return
-            paired
-            .sorted { left, right in
-                let leftCenter = left.0.midY
-                let rightCenter = right.0.midY
-                if abs(leftCenter - rightCenter) > rowTolerance {
-                    return leftCenter > rightCenter
-                }
+        let verticallySorted = paired.sorted { left, right in
+            if left.0.midY == right.0.midY {
                 return left.0.minX < right.0.minX
             }
-            .map(\.1)
+            return left.0.midY > right.0.midY
+        }
+
+        var rows: [[(CGRect, String)]] = []
+        var row: [(CGRect, String)] = []
+        var rowBaseline: CGFloat?
+
+        for observation in verticallySorted {
+            let center = observation.0.midY
+            if let baseline = rowBaseline, abs(center - baseline) > rowTolerance {
+                rows.append(row)
+                row = [observation]
+                rowBaseline = center
+            } else {
+                if row.isEmpty {
+                    rowBaseline = center
+                }
+                row.append(observation)
+            }
+        }
+        if !row.isEmpty {
+            rows.append(row)
+        }
+
+        return rows.flatMap { row in
+            row.sorted { $0.0.minX < $1.0.minX }.map(\.1)
+        }
     }
 }
 

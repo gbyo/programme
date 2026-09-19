@@ -55,6 +55,8 @@ public struct PitchView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.preferredPencilDoubleTapAction) private var preferredPencilDoubleTapAction
+    @Environment(\.preferredPencilSqueezeAction) private var preferredPencilSqueezeAction
     @State private var hoverPoint: CGPoint?
 
     public init(
@@ -111,14 +113,18 @@ public struct PitchView: View {
             // governs tool switching) has nothing to switch between; the fixed
             // mapping is clear, matching the on-screen Clear affordance.
             .onPencilDoubleTap { _ in
-                guard isPlacementActive else { return }
+                guard isPlacementActive, preferredPencilDoubleTapAction != .ignore else { return }
                 onClearPendingLocation?()
             }
             // Apple Pencil Pro squeeze confirms, mirroring the Record button.
             // Only the release phase commits, so previewing the squeeze does
             // nothing; with no pending point it is a no-op.
             .onPencilSqueeze { phase in
-                guard isPlacementActive, case .ended = phase else { return }
+                guard
+                    isPlacementActive,
+                    preferredPencilSqueezeAction != .ignore,
+                    case .ended = phase
+                else { return }
                 onConfirmPendingLocation?()
             }
             .onContinuousHover { phase in

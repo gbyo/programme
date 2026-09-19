@@ -137,6 +137,7 @@ struct RosterImportView: View {
             }
         }
         .formStyle(.grouped)
+        .disabled(isRecognizingPhoto)
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             photoItem = nil
