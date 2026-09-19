@@ -1,6 +1,6 @@
 name: Programme
 options:
-  bundleIdPrefix: org.programme
+  bundleIdPrefix: com.gbyo.programme
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "26.0"
@@ -37,7 +37,7 @@ targets:
     # CloudKit container for team collaboration, declared in
     # App/Programme/Programme.entitlements. Still required as external
     # steps before any device syncs: provision the
-    # iCloud.org.programme.Programme container in the Developer Portal,
+    # iCloud.com.gbyo.programme container in the Developer Portal,
     # and enable the Xcode iCloud + Push Notifications capabilities
     # (Xcode writes aps-environment itself at signing time; it is never
     # hard-coded here). Until then sync reports unavailable and all local
@@ -46,7 +46,7 @@ targets:
       path: App/Programme/Programme.entitlements
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme
         PRODUCT_NAME: Programme
         INFOPLIST_FILE: App/Programme/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -69,7 +69,7 @@ targets:
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeUI]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.Widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.widgets
         PRODUCT_NAME: ProgrammeWidgets
         INFOPLIST_FILE: App/ProgrammeWidgets/Info.plist
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -86,7 +86,7 @@ targets:
         products: [ProgrammeCore]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.watchkitapp
         PRODUCT_NAME: ProgrammeWatch
         INFOPLIST_FILE: App/ProgrammeWatch/Info.plist
         SKIP_INSTALL: "YES"
@@ -100,7 +100,7 @@ targets:
       - path: App/ProgrammeThumbnails
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.Thumbnails
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.thumbnails
         PRODUCT_NAME: ProgrammeThumbnails
         INFOPLIST_FILE: App/ProgrammeThumbnails/Info.plist
         CURRENT_PROJECT_VERSION: "1"
@@ -115,7 +115,7 @@ targets:
       - target: Programme
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.UITests
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.uitests
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
         FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks
@@ -129,7 +129,7 @@ targets:
       - target: Programme
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.IntentTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.intenttests
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
         FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks
