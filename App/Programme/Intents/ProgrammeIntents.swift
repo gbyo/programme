@@ -178,33 +178,33 @@ struct NewMatchIntent: AppIntent {
 }
 
 #if DEBUG
-private enum ProgrammeIntentTestFixtureError: Error {
-    case unavailableStore
-}
-
-struct SeedProgrammeIntentTestsIntent: AppIntent {
-    static let title: LocalizedStringResource = "Seed Programme Intent Tests"
-    static let isDiscoverable = false
-
-    @Dependency private var provider: ProgrammeIntentProvider
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        .result(value: try await provider.seedIntentTestFixture())
+    private enum ProgrammeIntentTestFixtureError: Error {
+        case unavailableStore
     }
-}
 
-struct ReadProgrammeIntentTestStateIntent: AppIntent {
-    static let title: LocalizedStringResource = "Read Programme Intent Test State"
-    static let isDiscoverable = false
+    struct SeedProgrammeIntentTestsIntent: AppIntent {
+        static let title: LocalizedStringResource = "Seed Programme Intent Tests"
+        static let isDiscoverable = false
 
-    @Dependency private var provider: ProgrammeIntentProvider
+        @Dependency private var provider: ProgrammeIntentProvider
 
-    @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        .result(value: provider.intentTestState())
+        @MainActor
+        func perform() async throws -> some IntentResult & ReturnsValue<String> {
+            .result(value: try await provider.seedIntentTestFixture())
+        }
     }
-}
+
+    struct ReadProgrammeIntentTestStateIntent: AppIntent {
+        static let title: LocalizedStringResource = "Read Programme Intent Test State"
+        static let isDiscoverable = false
+
+        @Dependency private var provider: ProgrammeIntentProvider
+
+        @MainActor
+        func perform() async throws -> some IntentResult & ReturnsValue<String> {
+            .result(value: provider.intentTestState())
+        }
+    }
 #endif
 
 struct ProgrammeShortcuts: AppShortcutsProvider {
@@ -312,90 +312,90 @@ final class ProgrammeIntentProvider {
     }
 
     #if DEBUG
-    /// Seeds the app process itself for AppIntentsTesting. Those tests execute
-    /// out of process, so their own AppModel/store can never be test data for
-    /// entity queries or intents that the application process performs.
-    func seedIntentTestFixture() async throws -> String {
-        try appModel.useEphemeralStoreForTests()
-        appModel.liveSession = nil
-        appModel.navigation = NavigationModel()
-        appModel.workspace = TeamWorkspace()
+        /// Seeds the app process itself for AppIntentsTesting. Those tests execute
+        /// out of process, so their own AppModel/store can never be test data for
+        /// entity queries or intents that the application process performs.
+        func seedIntentTestFixture() async throws -> String {
+            try appModel.useEphemeralStoreForTests()
+            appModel.liveSession = nil
+            appModel.navigation = NavigationModel()
+            appModel.workspace = TeamWorkspace()
 
-        guard let store = appModel.store else {
-            throw ProgrammeIntentTestFixtureError.unavailableStore
+            guard let store = appModel.store else {
+                throw ProgrammeIntentTestFixtureError.unavailableStore
+            }
+
+            let teamA = try await store.createTeam(name: "Ninety Six", shortName: "NX")
+            let teamB = try await store.createTeam(name: "Greenwood", shortName: "GW")
+            let seasonA = try await store.createSeason(
+                teamID: teamA,
+                name: "2026–27",
+                startDate: Date(timeIntervalSince1970: 1_780_000_000),
+                endDate: nil,
+                makeCurrent: true)
+            _ = try await store.createSeason(
+                teamID: teamB,
+                name: "2026–27",
+                startDate: Date(timeIntervalSince1970: 1_780_000_000),
+                endDate: nil,
+                makeCurrent: true)
+
+            let bellA = PlayerSnapshot(
+                firstName: "Tucker", lastName: "Bell", jerseyNumber: 1, position: .goalkeeper)
+            let bellB = PlayerSnapshot(
+                firstName: "Tucker", lastName: "Bell", jerseyNumber: 1, position: .goalkeeper)
+            let playerIDsA = try await store.addPlayers(teamID: teamA, [bellA])
+            let playerIDsB = try await store.addPlayers(teamID: teamB, [bellB])
+
+            let rosterA = try await store.roster(teamID: teamA)
+            let rosterB = try await store.roster(teamID: teamB)
+            let matchA = try await store.createMatch(
+                teamID: teamA,
+                seasonID: seasonA,
+                opponentName: "Dixie",
+                opponentShortName: "DIX",
+                kickoff: Date(timeIntervalSince1970: 1_790_000_000),
+                venue: .home,
+                rules: .highSchool,
+                statProfile: .maxPreps,
+                tracking: .ourTeam,
+                competition: nil,
+                roster: rosterA)
+            let matchB = try await store.createMatch(
+                teamID: teamB,
+                seasonID: nil,
+                opponentName: "Dixie",
+                opponentShortName: "DIX",
+                kickoff: Date(timeIntervalSince1970: 1_791_000_000),
+                venue: .away,
+                rules: .highSchool,
+                statProfile: .maxPreps,
+                tracking: .ourTeam,
+                competition: nil,
+                roster: rosterB)
+
+            await appModel.reloadWorkspace(selecting: teamA)
+            await reindexSpotlight()
+
+            return [
+                teamA.rawValue.uuidString,
+                teamB.rawValue.uuidString,
+                matchA.rawValue.uuidString,
+                matchB.rawValue.uuidString,
+                playerIDsA[0].rawValue.uuidString,
+                playerIDsB[0].rawValue.uuidString,
+            ].joined(separator: "|")
         }
 
-        let teamA = try await store.createTeam(name: "Ninety Six", shortName: "NX")
-        let teamB = try await store.createTeam(name: "Greenwood", shortName: "GW")
-        let seasonA = try await store.createSeason(
-            teamID: teamA,
-            name: "2026–27",
-            startDate: Date(timeIntervalSince1970: 1_780_000_000),
-            endDate: nil,
-            makeCurrent: true)
-        _ = try await store.createSeason(
-            teamID: teamB,
-            name: "2026–27",
-            startDate: Date(timeIntervalSince1970: 1_780_000_000),
-            endDate: nil,
-            makeCurrent: true)
-
-        let bellA = PlayerSnapshot(
-            firstName: "Tucker", lastName: "Bell", jerseyNumber: 1, position: .goalkeeper)
-        let bellB = PlayerSnapshot(
-            firstName: "Tucker", lastName: "Bell", jerseyNumber: 1, position: .goalkeeper)
-        let playerIDsA = try await store.addPlayers(teamID: teamA, [bellA])
-        let playerIDsB = try await store.addPlayers(teamID: teamB, [bellB])
-
-        let rosterA = try await store.roster(teamID: teamA)
-        let rosterB = try await store.roster(teamID: teamB)
-        let matchA = try await store.createMatch(
-            teamID: teamA,
-            seasonID: seasonA,
-            opponentName: "Dixie",
-            opponentShortName: "DIX",
-            kickoff: Date(timeIntervalSince1970: 1_790_000_000),
-            venue: .home,
-            rules: .highSchool,
-            statProfile: .maxPreps,
-            tracking: .ourTeam,
-            competition: nil,
-            roster: rosterA)
-        let matchB = try await store.createMatch(
-            teamID: teamB,
-            seasonID: nil,
-            opponentName: "Dixie",
-            opponentShortName: "DIX",
-            kickoff: Date(timeIntervalSince1970: 1_791_000_000),
-            venue: .away,
-            rules: .highSchool,
-            statProfile: .maxPreps,
-            tracking: .ourTeam,
-            competition: nil,
-            roster: rosterB)
-
-        await appModel.reloadWorkspace(selecting: teamA)
-        await reindexSpotlight()
-
-        return [
-            teamA.rawValue.uuidString,
-            teamB.rawValue.uuidString,
-            matchA.rawValue.uuidString,
-            matchB.rawValue.uuidString,
-            playerIDsA[0].rawValue.uuidString,
-            playerIDsB[0].rawValue.uuidString,
-        ].joined(separator: "|")
-    }
-
-    /// Returns only state that the AppIntentsTesting process needs to verify.
-    /// Keeping this behind a test-only intent preserves the process boundary.
-    func intentTestState() -> String {
-        [
-            appModel.workspace.selectedTeamID?.rawValue.uuidString ?? "",
-            appModel.navigation.section.rawValue,
-            appModel.navigation.isPresentingNewMatch ? "1" : "0",
-            appModel.liveSession?.matchID.rawValue.uuidString ?? "",
-        ].joined(separator: "|")
-    }
+        /// Returns only state that the AppIntentsTesting process needs to verify.
+        /// Keeping this behind a test-only intent preserves the process boundary.
+        func intentTestState() -> String {
+            [
+                appModel.workspace.selectedTeamID?.rawValue.uuidString ?? "",
+                appModel.navigation.section.rawValue,
+                appModel.navigation.isPresentingNewMatch ? "1" : "0",
+                appModel.liveSession?.matchID.rawValue.uuidString ?? "",
+            ].joined(separator: "|")
+        }
     #endif
 }
