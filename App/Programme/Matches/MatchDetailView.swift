@@ -1,3 +1,4 @@
+import MapKit
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
@@ -14,7 +15,11 @@ struct MatchDetailView: View {
     @State private var snapshot: MatchSnapshot?
     @State private var issues: [ValidationIssue] = []
     @State private var isExporting = false
+    @State private var isPresentingCalendar = false
+    @State private var reminderMinutes: Int?
+    @State private var reminderMessage: String?
     @State private var loadFailed = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Group {
@@ -66,6 +71,15 @@ struct MatchDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $isPresentingCalendar) {
+            if let context {
+                SystemCalendarEditor(
+                    draft: CalendarEventDraft(descriptor: context.descriptor),
+                    isPresented: $isPresentingCalendar
+                )
+                .ignoresSafeArea()
+            }
+        }
         .task(id: matchID) { await load() }
     }
 
@@ -85,6 +99,7 @@ struct MatchDetailView: View {
             context = loaded
             snapshot = derived
             issues = ValidationEngine.issues(context: loaded, snapshot: derived)
+            reminderMinutes = try? await store.reminderMinutesBefore(for: matchID)
         } catch {
             loadFailed = true
         }
@@ -98,6 +113,16 @@ struct MatchDetailView: View {
                     .padding(.vertical, 8)
             }
 
+            if let location = context.descriptor.location {
+                Section("Location") {
+                    LabeledContent(location.name, value: location.address ?? "")
+                    Button("Open in Maps", systemImage: "map") {
+                        openInMaps(location)
+                    }
+                    .accessibilityIdentifier("matchDetail.openInMaps")
+                }
+            }
+
             if context.phase != .finalized {
                 Section {
                     EmptyHint(
@@ -106,6 +131,33 @@ struct MatchDetailView: View {
                         actionTitle: "Open Scorer"
                     ) {
                         Task { await appModel.openLiveSession(matchID: matchID) }
+                    }
+                    if context.phase == .scheduled {
+                        Button("Add to Calendar…", systemImage: "calendar.badge.plus") {
+                            isPresentingCalendar = true
+                        }
+                        .accessibilityIdentifier("matchDetail.addToCalendar")
+                        Menu {
+                            ForEach(MatchReminderOption.allCases) { option in
+                                Button {
+                                    Task { await chooseReminder(option, context: context) }
+                                } label: {
+                                    if reminderMinutes == option.minutesBefore {
+                                        Label(option.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Remind Me", systemImage: "bell")
+                        }
+                        .accessibilityIdentifier("matchDetail.remindMe")
+                        if let status = reminderStatus(context: context) {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -123,12 +175,10 @@ struct MatchDetailView: View {
                     .padding(.vertical, 6)
             }
 
-            Section {
+            Section("Box Score") {
                 BoxScoreTable(context: context, snapshot: snapshot)
                     .padding(.vertical, 6)
-            } header: {
-                // Plain header carrying the identifier its coverage asks for.
-                Text("Box Score").accessibilityIdentifier("section.Box Score")
+                    .accessibilityIdentifier("section.Box Score")
             }
 
             if context.profile.tracks(.goalkeeping) {
@@ -163,8 +213,8 @@ struct MatchDetailView: View {
                     CompletenessRow(stat: stat, state: snapshot.completeness(stat))
                 }
             } header: {
-                // Plain header carrying the identifier its coverage asks for.
-                Text("Stat Completeness").accessibilityIdentifier("section.Stat Completeness")
+                Text("Stat Completeness")
+                    .accessibilityIdentifier("section.Stat Completeness")
             } footer: {
                 Text("A dash in an export means the category was not tracked. It is unknown, not zero.")
             }
@@ -217,6 +267,64 @@ struct MatchDetailView: View {
             .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Explicit Remind Me choice. Permission is requested here and only
+    /// here; a denial or an already-past fire time schedules nothing and
+    /// persists nothing, with a plain-language explanation instead.
+    private func chooseReminder(_ option: MatchReminderOption, context: MatchContext) async {
+        guard let store = appModel.store else { return }
+        reminderMessage = nil
+        guard let minutes = option.minutesBefore else {
+            try? await store.setReminderMinutesBefore(nil, for: matchID)
+            reminderMinutes = nil
+            await appModel.reminderCenter.cancel(matchID: matchID)
+            return
+        }
+        guard await appModel.reminderCenter.requestAuthorization() else {
+            reminderMessage =
+                "Notifications are off. Turn them on in Settings to use reminders — nothing was scheduled."
+            return
+        }
+        let descriptor = context.descriptor
+        guard
+            MatchReminderRequest.fireDate(kickoff: descriptor.kickoff, minutesBefore: minutes) != nil
+        else {
+            reminderMessage = "That reminder time has already passed — nothing was scheduled."
+            return
+        }
+        try? await store.setReminderMinutesBefore(minutes, for: matchID)
+        reminderMinutes = minutes
+        await appModel.reminderCenter.sync(
+            matchID: matchID, kickoff: descriptor.kickoff, minutesBefore: minutes,
+            title: MatchReminderRequest.title(descriptor: descriptor),
+            body: MatchReminderRequest.body(descriptor: descriptor, minutesBefore: minutes))
+    }
+
+    private func reminderStatus(context: MatchContext) -> String? {
+        if let reminderMessage { return reminderMessage }
+        guard let minutes = reminderMinutes else { return nil }
+        if MatchReminderRequest.fireDate(
+            kickoff: context.descriptor.kickoff, minutesBefore: minutes) == nil
+        {
+            return "Reminder time has passed."
+        }
+        return
+            "Reminds \(MatchReminderOption.option(minutesBefore: minutes).label.lowercased()) kickoff."
+    }
+
+    private func openInMaps(_ location: MatchLocation) {
+        if let latitude = location.latitude, let longitude = location.longitude {
+            let item = MKMapItem(
+                location: CLLocation(latitude: latitude, longitude: longitude), address: nil)
+            item.name = location.name
+            item.openInMaps()
+        } else if let query = (location.address ?? location.name)
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+            let url = URL(string: "https://maps.apple.com/?q=" + query)
+        {
+            openURL(url)
+        }
     }
 
     private func statusTitle(_ phase: MatchPhase) -> String {
@@ -311,11 +419,23 @@ struct BoxScoreTable: View {
     let context: MatchContext
     let snapshot: MatchSnapshot
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private var players: [PlayerSnapshot] {
         context.roster.sortedByNumber.filter { snapshot.player($0.id).appeared }
     }
 
     var body: some View {
+        Group {
+            if horizontalSizeClass == .compact {
+                compactRows
+            } else {
+                regularGrid
+            }
+        }
+    }
+
+    private var regularGrid: some View {
         Grid(horizontalSpacing: 12, verticalSpacing: 0) {
             headerRow
             ForEach(players) { player in
@@ -337,27 +457,14 @@ struct BoxScoreTable: View {
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 16)
         .padding(.bottom, 6)
     }
 
     private func playerRow(_ player: PlayerSnapshot) -> some View {
         let line = snapshot.player(player.id)
         return GridRow {
-            HStack(spacing: 6) {
-                Text(player.shortLabel).font(.subheadline)
-                if line.started {
-                    Text("GS")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                if line.gameWinningGoals > 0 {
-                    Text("GWG")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            playerIdentity(player, line: line)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Text("\(line.minutesPlayed)")
             StatValueText(context.profile.value(.goals, line.goals))
@@ -371,11 +478,79 @@ struct BoxScoreTable: View {
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
+
+    private var compactRows: some View {
+        VStack(spacing: 0) {
+            ForEach(players) { player in
+                if player.id != players.first?.id {
+                    Divider()
+                }
+                compactPlayerRow(player)
+            }
+        }
+    }
+
+    private func compactPlayerRow(_ player: PlayerSnapshot) -> some View {
+        let line = snapshot.player(player.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                playerIdentity(player, line: line)
+                Spacer(minLength: 8)
+                Text("\(line.minutesPlayed) min")
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 48), spacing: 12)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                compactStat("G", context.profile.value(.goals, line.goals))
+                compactStat("A", context.profile.value(.assists, line.assists))
+                compactStat("PTS", context.profile.value(.goals, line.points))
+                compactStat("SH", context.profile.value(.shots, line.shots))
+                compactStat("SOG", context.profile.value(.shots, line.shotsOnGoal))
+            }
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func playerIdentity(_ player: PlayerSnapshot, line: PlayerStatLine) -> some View {
+        HStack(spacing: 6) {
+            Text(player.shortLabel).font(.subheadline)
+            if line.started {
+                Text("GS")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            if line.gameWinningGoals > 0 {
+                Text("GWG")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    private func compactStat(_ label: String, _ value: StatValue) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            StatValueText(value)
+                .font(.subheadline.weight(.semibold))
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .monospacedDigit()
+    }
 }
 
 struct KeeperTable: View {
     let context: MatchContext
     let snapshot: MatchSnapshot
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var keepers: [KeeperStatLine] {
         snapshot.keepers.values
@@ -384,54 +559,142 @@ struct KeeperTable: View {
     }
 
     var body: some View {
-        Grid(horizontalSpacing: 12, verticalSpacing: 0) {
-            GridRow {
-                Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading).gridColumnAlignment(.leading)
-                Text("MIN").gridColumnAlignment(.trailing)
-                Text("SOGA").gridColumnAlignment(.trailing)
-                Text("SV").gridColumnAlignment(.trailing)
-                Text("GA").gridColumnAlignment(.trailing)
-                Text("SV%").gridColumnAlignment(.trailing)
-                Text("GAA").gridColumnAlignment(.trailing)
+        Group {
+            if horizontalSizeClass == .compact {
+                compactRows
+            } else {
+                regularGrid
             }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
+        }
+    }
 
+    private var regularGrid: some View {
+        Grid(horizontalSpacing: 12, verticalSpacing: 0) {
+            headerRow
             ForEach(keepers, id: \.playerID) { keeper in
                 Divider().gridCellColumns(7)
-                GridRow {
-                    HStack(spacing: 6) {
-                        Text(context.roster[keeper.playerID]?.shortLabel ?? "Goalkeeper")
-                            .font(.subheadline)
-                        if keeper.shutouts > 0 {
-                            Text("SHO").font(.caption2.weight(.semibold)).foregroundStyle(Color.accentColor)
-                        } else if keeper.sharedShutouts > 0 {
-                            Text("SHO (shared)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                keeperRow(keeper)
+            }
+        }
+    }
 
-                    Text("\(keeper.minutesPlayed)")
-                    Text("\(keeper.shotsOnGoalFaced)")
-                    Text("\(keeper.saves)")
-                    Text("\(keeper.goalsAllowed)")
+    private var headerRow: some View {
+        GridRow {
+            Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading).gridColumnAlignment(.leading)
+            Text("MIN").gridColumnAlignment(.trailing)
+            Text("SOGA").gridColumnAlignment(.trailing)
+            Text("SV").gridColumnAlignment(.trailing)
+            Text("GA").gridColumnAlignment(.trailing)
+            Text("SV%").gridColumnAlignment(.trailing)
+            Text("GAA").gridColumnAlignment(.trailing)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.bottom, 6)
+    }
+
+    private func keeperRow(_ keeper: KeeperStatLine) -> some View {
+        GridRow {
+            keeperIdentity(keeper)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(keeper.minutesPlayed)")
+            Text("\(keeper.shotsOnGoalFaced)")
+            Text("\(keeper.saves)")
+            Text("\(keeper.goalsAllowed)")
+            StatValueText(
+                keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable,
+                style: .percent
+            )
+            StatValueText(
+                keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
+                    .map { StatValue.rate($0) } ?? .notApplicable,
+                style: .decimal
+            )
+        }
+        .font(.subheadline)
+        .monospacedDigit()
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var compactRows: some View {
+        VStack(spacing: 0) {
+            ForEach(keepers, id: \.playerID) { keeper in
+                if keeper.playerID != keepers.first?.playerID {
+                    Divider()
+                }
+                compactKeeperRow(keeper)
+            }
+        }
+    }
+
+    private func compactKeeperRow(_ keeper: KeeperStatLine) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            keeperIdentity(keeper)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 54), spacing: 12)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                compactStat("MIN") {
+                    Text("\(keeper.minutesPlayed)").monospacedDigit()
+                }
+                compactStat("SOGA") {
+                    Text("\(keeper.shotsOnGoalFaced)").monospacedDigit()
+                }
+                compactStat("SV") {
+                    Text("\(keeper.saves)").monospacedDigit()
+                }
+                compactStat("GA") {
+                    Text("\(keeper.goalsAllowed)").monospacedDigit()
+                }
+                compactStat("SV%") {
                     StatValueText(
-                        keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable, style: .percent
-                    )
-                    StatValueText(
-                        keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
-                            .map { StatValue.rate($0) } ?? .notApplicable, style: .decimal
+                        keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable,
+                        style: .percent
                     )
                 }
-                .font(.subheadline)
-                .monospacedDigit()
-                .padding(.vertical, 8)
-                .accessibilityElement(children: .combine)
+                compactStat("GAA") {
+                    StatValueText(
+                        keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
+                            .map { StatValue.rate($0) } ?? .notApplicable,
+                        style: .decimal
+                    )
+                }
             }
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func keeperIdentity(_ keeper: KeeperStatLine) -> some View {
+        HStack(spacing: 6) {
+            Text(context.roster[keeper.playerID]?.shortLabel ?? "Goalkeeper")
+                .font(.subheadline)
+            if keeper.shutouts > 0 {
+                Text("SHO")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            } else if keeper.sharedShutouts > 0 {
+                Text("SHO (shared)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func compactStat<Content: View>(
+        _ label: String,
+        @ViewBuilder value: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            value()
+                .font(.subheadline.weight(.semibold))
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
         }
     }
 }

@@ -15,6 +15,8 @@ ProgrammePersistence             SwiftData + recovery journal
 ProgrammeExport                  archive/import/export
 ProgrammeUI                      reusable platform UI
     ↑
+ProgrammeCollaboration           optional CloudKit replication/sharing
+    ↑
 Programme app + widget extension composition and presentation
 ```
 
@@ -63,6 +65,58 @@ Exporters consume verified domain snapshots rather than querying SwiftData or re
 ### ProgrammeUI
 
 Owns reusable Apple-platform presentation pieces, including the vector pitch, visual tokens, Live Activity attributes, and statistic rendering helpers.
+
+### ProgrammeCollaboration
+
+Owns optional CloudKit replication, never truth or recovery:
+
+- one custom record zone per Team, with UUID-derived record names
+- source-truth-only record mapping (no derived totals, no device preferences)
+- `CKSyncEngine` coordination with a durable file-backed outbox/inbox
+- deterministic event merge policy (revision wins; same-revision conflicts
+  surface for review, never wall-clock)
+- zone-wide sharing (`CKShare(recordZoneID:)`): one team = one zone = at
+  most one share, invitation-only, no nominated root record, so preparing
+  a share never resaves Programme truth
+- applier materialization: Team/Season/Player/Match upsert by stable ID in
+  dependency order (deferred when parents are missing, never dropped);
+  only event deletions materialize, as voids; statistics always re-derive
+- production wiring in `TeamSyncService` (Persistence): starts engines,
+  stages outbound mutations reported by `MatchStore`, drains the inbox
+  through the applier, and routes participant writes into the sharer's
+  zone. Remote application runs echo-suppressed, and sync is inert until
+  started — scoring never waits on it.
+
+Cloud collaboration is optional replication. Recording and recovering a live
+match never depends on CloudKit.
+
+Signed/provisioned builds are required before any device syncs: the
+`iCloud.org.programme.Programme` container must exist in the Developer
+Portal with the Xcode iCloud and Push Notifications capabilities enabled
+(`aps-environment` is written by Xcode at signing time, never stored in
+the repo). Until then the sync coordinator reports unavailable and every
+local behavior is unchanged. Remote-change notifications need no custom
+subscription code: `CKSyncEngine` discovers or creates the database
+subscription itself; the engine also syncs on launch, foreground, and
+after staging.
+
+### Nearby read-only scoreboard
+
+Separate from CloudKit collaboration (which shares persistent Team data,
+this answers which nearby device displays this live match right now):
+
+- `ScoreboardSnapshot` in ProgrammeCore: presentation data only
+  (short names, score, clock anchor, phase, last-event summary). No
+  command vocabulary exists on this path, so displays are read-only by
+  construction.
+- Transport is `Network` (TCP over Bonjour `_programme-sb._tcp`);
+  pairing UI is `DeviceDiscoveryUI` (`DevicePicker` on the display,
+  scorer advertising with a waiting/serving indicator). No Multipeer
+  Connectivity, no broad local-network access beyond Bonjour.
+- The clock travels as an anchor and renders locally on the display; a
+  slow heartbeat only keeps `sentAt` fresh. Disconnects and scorer
+  backgrounding surface as staleness on the display and never affect
+  scoring.
 
 ## App shell
 

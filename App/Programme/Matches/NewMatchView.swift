@@ -24,10 +24,15 @@ struct NewMatchView: View {
     @State private var opponentShort = ""
     @State private var kickoff = Date().addingTimeInterval(3_600)
     @State private var venue: Venue = .home
+    @State private var location: MatchLocation?
     @State private var competition = ""
     @State private var rulesPresetName = MatchRules.highSchool.name
     @State private var profileID = StatProfile.maxPreps.id
     @State private var tracking: OpponentTrackingMode = .ourTeam
+    /// What the form was loaded from. Creating a match persists only
+    /// explicit user changes against this — untouched managed suggestions
+    /// are never written into the team's stored defaults.
+    @State private var loadedDefaults: TeamMatchDefaults.LoadedDefaults?
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -57,6 +62,7 @@ struct NewMatchView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    LocationSearchField(selection: $location)
                 }
 
                 Section("Kickoff") {
@@ -124,10 +130,12 @@ struct NewMatchView: View {
     }
 
     private func loadDefaults() {
-        let saved = TeamMatchDefaults.load(teamID: teamID)
+        let saved = TeamMatchDefaults.load(
+            teamID: teamID, managed: appModel.managed.configuration)
         rulesPresetName = saved.rulesName
         profileID = saved.profileID
         tracking = saved.tracking
+        loadedDefaults = saved
     }
 
     private func create(openingScorer: Bool) async {
@@ -150,6 +158,7 @@ struct NewMatchView: View {
             let roster = try await store.roster(teamID: teamID)
             guard !roster.players.isEmpty else {
                 errorMessage = "Add players to your roster before creating a match."
+                ProgrammeStateReporter.reportWorkflow(.browsing)
                 return
             }
             let trimmed = opponent.trimmingCharacters(in: .whitespaces)
@@ -164,11 +173,21 @@ struct NewMatchView: View {
                 statProfile: profile,
                 tracking: tracking,
                 competition: competition.isEmpty ? nil : competition,
+                location: location,
                 roster: roster)
 
-            // What was just used becomes this team's default for the next match.
-            TeamMatchDefaults.save(
-                teamID: teamID, profileID: profileID, rulesName: rulesPresetName, tracking: tracking)
+            // What the user explicitly chose becomes this team's default for
+            // the next match. Untouched managed suggestions are not
+            // persisted: they re-derive from the live MDM configuration.
+            if let loadedDefaults {
+                TeamMatchDefaults.save(
+                    teamID: teamID,
+                    profileID: profileID,
+                    rulesName: rulesPresetName,
+                    tracking: tracking,
+                    loaded: loadedDefaults,
+                    managed: appModel.managed.configuration)
+            }
 
             await appModel.refreshWidgetSnapshot()
             dismiss()
@@ -182,6 +201,7 @@ struct NewMatchView: View {
                 await appModel.open(.match(matchID))
             }
         } catch {
+            ProgrammeStateReporter.reportWorkflow(.browsing)
             errorMessage = "Programme couldn't create that match. Nothing was changed. Try again."
         }
     }

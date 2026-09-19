@@ -162,6 +162,7 @@ struct MatchControlsToolbar: ToolbarContent {
     var onEditOpponentRoster: () -> Void
     var onAdjustClock: () -> Void
     var onOpenScoreboard: () -> Void
+    var onConnectDisplay: () -> Void
     var onShootout: () -> Void
     var onFinalize: () -> Void
     var onToggleClock: () -> Void
@@ -225,6 +226,7 @@ struct MatchControlsToolbar: ToolbarContent {
                 onEditOpponentRoster: onEditOpponentRoster,
                 onAdjustClock: onAdjustClock,
                 onOpenScoreboard: onOpenScoreboard,
+                onConnectDisplay: onConnectDisplay,
                 onShootout: onShootout,
                 onFinalize: onFinalize,
                 onClose: onClose)
@@ -272,6 +274,7 @@ private struct MatchManagementMenu: View {
     var onEditOpponentRoster: () -> Void
     var onAdjustClock: () -> Void
     var onOpenScoreboard: () -> Void
+    var onConnectDisplay: () -> Void
     var onShootout: () -> Void
     var onFinalize: () -> Void
     var onClose: () -> Void
@@ -292,6 +295,9 @@ private struct MatchManagementMenu: View {
             Button(
                 "Open Scoreboard Window", systemImage: "rectangle.on.rectangle",
                 action: onOpenScoreboard)
+            Button(
+                "Connect Nearby Display…", systemImage: "wifi",
+                action: onConnectDisplay)
 
             Divider()
 

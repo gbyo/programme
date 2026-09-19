@@ -50,6 +50,7 @@ struct LiveMatchView: View {
         case finalize
         case shootout
         case editEvent(EventID)
+        case nearbyDisplay
 
         var id: String {
             switch self {
@@ -66,6 +67,7 @@ struct LiveMatchView: View {
             case .finalize: "finalize"
             case .shootout: "shootout"
             case .editEvent(let id): "edit-\(id)"
+            case .nearbyDisplay: "nearby-display"
             }
         }
     }
@@ -182,6 +184,7 @@ struct LiveMatchView: View {
                         onOpenScoreboard: {
                             openWindow(id: ProgrammeScene.scoreboard.rawValue)
                         },
+                        onConnectDisplay: { activeSheet = .nearbyDisplay },
                         onShootout: { activeSheet = .shootout },
                         onFinalize: { activeSheet = .finalize },
                         onToggleClock: { session.toggleClock() },
@@ -228,6 +231,12 @@ struct LiveMatchView: View {
             }
         } message: {
             Text("Notes appear in the event log and in exported stat sheets.")
+        }
+        .task {
+            publishScoreboard()
+        }
+        .onChange(of: session.context) { _, _ in
+            publishScoreboard()
         }
         .onChange(of: session.phase) { _, phase in
             switch phase {
@@ -345,7 +354,21 @@ struct LiveMatchView: View {
             if let event = session.context.events.first(where: { $0.id == id }) {
                 NavigationStack { EventEditView(session: session, event: event) }
             }
+
+        case .nearbyDisplay:
+            NearbyAdvertiseSheet()
+                .environment(appModel.nearby)
         }
+    }
+
+    /// Broadcasts the current presentation snapshot when advertising.
+    /// Cheap struct copy off the scoring path; sending is fire-and-forget.
+    private func publishScoreboard() {
+        guard appModel.nearby.advertising != .off else { return }
+        appModel.nearby.publish(
+            ScoreboardSnapshot.live(
+                context: session.context, snapshot: session.snapshot,
+                clock: session.context.clock))
     }
 
     private func closeScorer() {

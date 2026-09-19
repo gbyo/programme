@@ -87,6 +87,40 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Match detail")
     }
 
+    func testMatchDetailWithoutLocationOffersNoMapsAction() {
+        let app = launch()
+        waitForHome(app)
+
+        // The fixture match has no location, so Match Detail must not offer
+        // an Open in Maps action for it. Home shows only the three most
+        // recent results, so reach the older Dixie fixture via Matches.
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
+        element(app, "match.Dixie").tap()
+        XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
+        XCTAssertFalse(
+            element(app, "matchDetail.openInMaps").exists,
+            "Open in Maps must not appear for a match with no location")
+    }
+
+    func testScheduledMatchOffersCalendarAndReminderActions() {
+        let app = launch()
+        waitForHome(app)
+
+        // The Clinton fixture kicks off in the future, so its detail offers
+        // the scheduled-match system actions. Neither is tapped: that would
+        // present system permission UI.
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
+        element(app, "match.Clinton").tap()
+        XCTAssertTrue(
+            element(app, "matchDetail.addToCalendar").waitForExistence(timeout: 15),
+            "Add to Calendar is missing from scheduled Match Detail")
+        XCTAssertTrue(
+            element(app, "matchDetail.remindMe").exists,
+            "Remind Me is missing from scheduled Match Detail")
+    }
+
     func testExportProducesShareableFiles() {
         let app = launch()
         waitForHome(app)

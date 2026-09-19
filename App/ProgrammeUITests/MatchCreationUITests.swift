@@ -125,6 +125,20 @@ final class MatchCreationUITests: ProgrammeUITestCase {
             "The match clock was started automatically")
     }
 
+    func testNewMatchLocationIsOptionalAndOfflineSafe() {
+        let app = launch()
+        waitForHome(app)
+
+        app.buttons["New Match"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["New Match"].waitForExistence(timeout: 5))
+
+        // The venue search row is present but a match is complete without one:
+        // offline scoring must never wait on a place lookup.
+        XCTAssertTrue(
+            element(app, "matchLocation.search").waitForExistence(timeout: 5),
+            "The optional location search row is missing from New Match")
+    }
+
     func testNewMatchRemembersTheScoringConfiguration() {
         let app = launch()
         waitForHome(app)

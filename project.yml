@@ -4,6 +4,7 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "26.0"
   groupSortPosition: top
 
 packages:
@@ -29,8 +30,20 @@ targets:
       - path: App/Programme
     dependencies:
       - package: ProgrammeKit
-        products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI]
+        products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI, ProgrammeCollaboration]
       - target: ProgrammeWidgets
+      - target: ProgrammeWatch
+      - target: ProgrammeThumbnails
+    # CloudKit container for team collaboration, declared in
+    # App/Programme/Programme.entitlements. Still required as external
+    # steps before any device syncs: provision the
+    # iCloud.org.programme.Programme container in the Developer Portal,
+    # and enable the Xcode iCloud + Push Notifications capabilities
+    # (Xcode writes aps-environment itself at signing time; it is never
+    # hard-coded here). Until then sync reports unavailable and all local
+    # behavior is unchanged.
+    entitlements:
+      path: App/Programme/Programme.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme
@@ -63,6 +76,36 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "1.0"
 
+  ProgrammeWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: App/ProgrammeWatch
+    dependencies:
+      - package: ProgrammeKit
+        products: [ProgrammeCore]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.watchkitapp
+        PRODUCT_NAME: ProgrammeWatch
+        INFOPLIST_FILE: App/ProgrammeWatch/Info.plist
+        SKIP_INSTALL: "YES"
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0"
+
+  ProgrammeThumbnails:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: App/ProgrammeThumbnails
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.Thumbnails
+        PRODUCT_NAME: ProgrammeThumbnails
+        INFOPLIST_FILE: App/ProgrammeThumbnails/Info.plist
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0"
+
   ProgrammeUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -75,6 +118,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.UITests
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
+        FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks
 
   ProgrammeIntentTests:
     type: bundle.unit-test
@@ -96,6 +140,8 @@ schemes:
       targets:
         Programme: all
         ProgrammeWidgets: all
+        ProgrammeWatch: all
+        ProgrammeThumbnails: all
         ProgrammeUITests: [test]
         ProgrammeIntentTests: [test]
     run:
@@ -109,3 +155,7 @@ schemes:
           # run concurrently across simulator clones.
           parallelizable: true
         - ProgrammeIntentTests
+  ProgrammeWatch:
+    build:
+      targets:
+        ProgrammeWatch: all

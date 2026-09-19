@@ -28,6 +28,42 @@ struct ArchiveTests {
         #expect(before.completeness == after.completeness)
     }
 
+    @Test("A match location survives the archive round trip")
+    func locationRoundTrip() throws {
+        var original = ProgrammeSample.completedContext()
+        original.descriptor.location = MatchLocation(
+            name: "Abbeville High School", address: "701 Washington St",
+            latitude: 34.178, longitude: -82.379)
+        let archive = ProgrammeArchive(contexts: [original], teamName: ProgrammeSample.teamName)
+        let data = try ProgrammeArchiveCoder.encode(archive)
+        let decoded = try ProgrammeArchiveCoder.decode(data)
+        let restored = try #require(decoded.matches.first).context
+        #expect(restored.descriptor.location == original.descriptor.location)
+    }
+
+    @Test("An archive written before locations existed restores with no location")
+    func missingLocationDecodesAsNil() throws {
+        var original = ProgrammeSample.completedContext()
+        original.descriptor.location = nil
+        let archive = ProgrammeArchive(contexts: [original], teamName: ProgrammeSample.teamName)
+        let data = try ProgrammeArchiveCoder.encode(archive)
+        // Simulate a pre-location archive by stripping the key entirely: a
+        // missing optional key must read as nil rather than failing.
+        var document = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var matches = try #require(document["matches"] as? [[String: Any]])
+        var first = try #require(matches.first)
+        var descriptor = try #require(first["descriptor"] as? [String: Any])
+        descriptor.removeValue(forKey: "location")
+        first["descriptor"] = descriptor
+        matches[0] = first
+        document["matches"] = matches
+        let stripped = try JSONSerialization.data(withJSONObject: document)
+        let decoded = try ProgrammeArchiveCoder.decode(stripped)
+        let restored = try #require(decoded.matches.first).context
+        #expect(restored.descriptor.location == nil)
+    }
+
     @Test("The tracked/untracked distinction survives the round trip")
     func trackedDistinctionSurvives() throws {
         var context = ProgrammeSample.completedContext()

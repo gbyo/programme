@@ -9,6 +9,9 @@ import SwiftUI
 struct ProgrammeApp: App {
     @State private var appModel = AppModel()
     @Environment(\.scenePhase) private var scenePhase
+    // System entry point for CloudKit share invitations accepted outside
+    // the app. Forwards to AppModel; see ShareAcceptanceDelegate.
+    @UIApplicationDelegateAdaptor(ShareAcceptanceDelegate.self) private var shareDelegate
 
     init() {
         // Background task handlers have to be registered before the app finishes
@@ -24,6 +27,10 @@ struct ProgrammeApp: App {
             RootView()
                 .environment(appModel)
                 .task {
+                    ShareAcceptanceDelegate.onAccept = { metadata in
+                        Task { await appModel.acceptShare(metadata) }
+                    }
+                    appModel.watchBridge.activate()
                     await appModel.bootstrap()
                     let provider = ProgrammeIntentProvider(appModel: appModel)
                     appModel.intentProvider = provider

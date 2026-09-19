@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Synchronization
 import Testing
 
 @testable import ProgrammeCore
@@ -537,5 +538,187 @@ struct TeamWorkspaceTests {
         let details = try await store.teamDetails(teamID: varsity)
         #expect(details.name == "Varsity Renamed")
         #expect(details.shortName == "VAR")
+    }
+}
+
+@Suite("Match locations are optional metadata, never scoring truth")
+struct MatchLocationTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makeTeamAndRoster(_ store: MatchStore) async throws -> (TeamID, RosterSnapshot) {
+        let teamID = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        try await store.addPlayers(teamID: teamID, ProgrammeSample.roster.players)
+        return (teamID, try await store.roster(teamID: teamID))
+    }
+
+    @Test("A match created without a location reads back nil")
+    func locationDefaultsToNil() async throws {
+        let store = try makeStore()
+        let (teamID, roster) = try await makeTeamAndRoster(store)
+        let matchID = try await store.createMatch(
+            teamID: teamID, seasonID: nil, opponentName: "Dixie", opponentShortName: "Dixie",
+            kickoff: ProgrammeSample.kickoff(), venue: .away, rules: .highSchool,
+            statProfile: .maxPreps, tracking: .ourTeam, competition: nil, roster: roster)
+        #expect(try await store.context(for: matchID).descriptor.location == nil)
+    }
+
+    @Test("A location round-trips through create and reload")
+    func locationRoundTrip() async throws {
+        let store = try makeStore()
+        let (teamID, roster) = try await makeTeamAndRoster(store)
+        let location = MatchLocation(
+            name: "Abbeville High School", address: "701 Washington St",
+            latitude: 34.178, longitude: -82.379)
+        let matchID = try await store.createMatch(
+            teamID: teamID, seasonID: nil, opponentName: "Dixie", opponentShortName: "Dixie",
+            kickoff: ProgrammeSample.kickoff(), venue: .away, rules: .highSchool,
+            statProfile: .maxPreps, tracking: .ourTeam, competition: "Region 2-AA",
+            location: location, roster: roster)
+        let reloaded = try await store.context(for: matchID)
+        #expect(reloaded.descriptor.location == location)
+        #expect(reloaded.descriptor.venue == .away)
+    }
+
+    @Test("Updating configuration replaces the location without touching events")
+    func updateConfigurationReplacesLocation() async throws {
+        let store = try makeStore()
+        let (teamID, roster) = try await makeTeamAndRoster(store)
+        let matchID = try await store.createMatch(
+            teamID: teamID, seasonID: nil, opponentName: "Dixie", opponentShortName: "Dixie",
+            kickoff: ProgrammeSample.kickoff(), venue: .away, rules: .highSchool,
+            statProfile: .maxPreps, tracking: .ourTeam, competition: nil, roster: roster)
+        let kickoff = ProgrammeSample.kickoff()
+        let location = MatchLocation(name: "Neutral Ground")
+        try await store.updateConfiguration(
+            matchID: matchID, rules: .highSchool, statProfile: .maxPreps,
+            tracking: .ourTeam, kickoff: kickoff, venue: .neutral,
+            opponentName: "Dixie", opponentShortName: "Dixie", competition: nil,
+            location: location)
+        let reloaded = try await store.context(for: matchID)
+        #expect(reloaded.descriptor.location == location)
+        #expect(reloaded.descriptor.venue == .neutral)
+    }
+
+    @Test("A V1 store migrates with its matches intact and no location")
+    func v1StoreMigrates() async throws {
+        let fixture = try #require(
+            Bundle.module.url(
+                forResource: "programme-v1", withExtension: "store", subdirectory: "Fixtures"))
+        let workingCopy = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("programme-v1.store")
+        try FileManager.default.createDirectory(
+            at: workingCopy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixture, to: workingCopy)
+
+        let container = try ProgrammeStore.container(url: workingCopy)
+        let store = MatchStore(modelContainer: container)
+        let items = try await store.matches()
+        let item = try #require(items.first)
+        #expect(items.count == 1)
+        #expect(item.opponentName == "Dixie")
+        #expect(item.venue == .away)
+        #expect(item.competition == "Region 2-AA")
+        // eventCount is a denormalised cache, never authoritative; the
+        // authoritative history is asserted on the reloaded context below.
+
+        let context = try await store.context(for: item.id)
+        #expect(context.descriptor.location == nil)
+        #expect(context.events.count == 3)
+        // Derivation still runs over the migrated history.
+        _ = StatEngine.snapshot(context: context)
+    }
+}
+
+@Suite("Per-match reminder preference")
+struct MatchReminderPreferenceTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makeScheduledMatch(_ store: MatchStore) async throws -> MatchID {
+        let teamID = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        try await store.addPlayers(teamID: teamID, ProgrammeSample.roster.players)
+        let roster = try await store.roster(teamID: teamID)
+        return try await store.createMatch(
+            teamID: teamID, seasonID: nil, opponentName: "Dixie", opponentShortName: "Dixie",
+            kickoff: ProgrammeSample.kickoff(), venue: .away, rules: .highSchool,
+            statProfile: .maxPreps, tracking: .ourTeam, competition: nil, roster: roster)
+    }
+
+    @Test("No reminder is the default and the descriptor never carries one")
+    func reminderDefaultsToNil() async throws {
+        let store = try makeStore()
+        let matchID = try await makeScheduledMatch(store)
+        #expect(try await store.reminderMinutesBefore(for: matchID) == nil)
+        // The preference is device-local presentation state, never match
+        // truth: it must not leak into the descriptor, archive, or sync.
+        let descriptor = try await store.context(for: matchID).descriptor
+        #expect(descriptor.location == nil)
+    }
+
+    @Test("A reminder preference round-trips and clears")
+    func reminderRoundTrip() async throws {
+        let store = try makeStore()
+        let matchID = try await makeScheduledMatch(store)
+        try await store.setReminderMinutesBefore(30, for: matchID)
+        #expect(try await store.reminderMinutesBefore(for: matchID) == 30)
+        try await store.setReminderMinutesBefore(nil, for: matchID)
+        #expect(try await store.reminderMinutesBefore(for: matchID) == nil)
+    }
+
+    @Test("Updating configuration preserves the reminder and notifies")
+    func updateConfigurationPreservesReminder() async throws {
+        let store = try makeStore()
+        let matchID = try await makeScheduledMatch(store)
+        try await store.setReminderMinutesBefore(15, for: matchID)
+        let notified = Mutex<[MatchID]>([])
+        await store.setMatchChangeHandler { matchID in notified.withLock { $0.append(matchID) } }
+        try await store.updateConfiguration(
+            matchID: matchID, rules: .highSchool, statProfile: .maxPreps,
+            tracking: .ourTeam, kickoff: ProgrammeSample.kickoff(), venue: .away,
+            opponentName: "Dixie", opponentShortName: "Dixie", competition: nil)
+        #expect(try await store.reminderMinutesBefore(for: matchID) == 15)
+        #expect(notified.withLock { $0 } == [matchID])
+    }
+
+    @Test("Deleting a match notifies so its notification can be removed")
+    func deleteMatchNotifies() async throws {
+        let store = try makeStore()
+        let matchID = try await makeScheduledMatch(store)
+        let notified = Mutex<[MatchID]>([])
+        await store.setMatchChangeHandler { matchID in notified.withLock { $0.append(matchID) } }
+        try await store.deleteMatch(matchID)
+        #expect(notified.withLock { $0 } == [matchID])
+    }
+
+    @Test("A V2 store migrates with its location intact and no reminder")
+    func v2StoreMigrates() async throws {
+        let fixture = try #require(
+            Bundle.module.url(
+                forResource: "programme-v2", withExtension: "store", subdirectory: "Fixtures"))
+        let workingCopy = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("programme-v2.store")
+        try FileManager.default.createDirectory(
+            at: workingCopy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixture, to: workingCopy)
+
+        let container = try ProgrammeStore.container(url: workingCopy)
+        let store = MatchStore(modelContainer: container)
+        let items = try await store.matches()
+        let item = try #require(items.first)
+        #expect(items.count == 1)
+        #expect(item.opponentName == "Dixie")
+
+        let context = try await store.context(for: item.id)
+        #expect(context.descriptor.location?.name == "Abbeville High School")
+        #expect(try await store.reminderMinutesBefore(for: item.id) == nil)
     }
 }

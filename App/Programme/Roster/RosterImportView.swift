@@ -24,6 +24,7 @@ struct RosterImportView: View {
     @State private var isShowingScanner = false
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecognizingPhoto = false
+    @State private var isInterpreting = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -88,19 +89,49 @@ struct RosterImportView: View {
                     rawText = text
                     analyze()
                 }
-                if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
-                    Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
-                        isShowingScanner = true
+                if appModel.managed.configuration.isAutomatedRosterExtractionAllowed {
+                    if RosterInterpreter.isAvailable {
+                        Button("Interpret with On-Device Model…", systemImage: "apple.intelligence") {
+                            Task { await interpretWithModel() }
+                        }
+                        .disabled(
+                            rawText.isEmpty || isInterpreting
+                                || !RosterInterpreter.isLocaleSupported)
+                        if !RosterInterpreter.isLocaleSupported {
+                            Text(
+                                "Model-assisted import doesn't support this device's language yet. File and paste still work."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    } else if let reason = RosterInterpreter.unavailabilityMessage {
+                        Text("\(reason) File and paste import still work.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                PhotosPicker(
-                    selection: $photoItem,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Label("Choose Photo or Screenshot…", systemImage: "photo")
+                if appModel.managed.configuration.isAutomatedRosterExtractionAllowed {
+                    if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                        Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
+                            isShowingScanner = true
+                        }
+                    }
+                    PhotosPicker(
+                        selection: $photoItem,
+                        matching: .images,
+                        photoLibrary: .shared()
+                    ) {
+                        Label("Choose Photo or Screenshot…", systemImage: "photo")
+                    }
+                    .disabled(isRecognizingPhoto)
+                } else {
+                    Label(
+                        "Camera and photo import are disabled by this device's management. File and paste still work.",
+                        systemImage: "lock.circle"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
-                .disabled(isRecognizingPhoto)
                 if isRecognizingPhoto {
                     HStack {
                         ProgressView()
@@ -137,6 +168,7 @@ struct RosterImportView: View {
             }
         }
         .formStyle(.grouped)
+        .disabled(isRecognizingPhoto)
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             photoItem = nil
@@ -266,6 +298,44 @@ struct RosterImportView: View {
         }
         errorMessage = nil
         preview = result
+    }
+
+    /// Optional on-device interpretation. Its output lands in the same
+    /// review step as every other import and is never written directly.
+    /// Interprets a snapshot of the current text. The input stays editable
+    /// while the model runs; if the text changed underneath (paste, scan,
+    /// edit), the stale result is quietly discarded instead of replacing
+    /// the newer preview. Cancelled and superseded runs never write.
+    private func interpretWithModel() async {
+        // Below-the-UI enforcement: the button hides under this policy,
+        // but execution refuses too.
+        guard appModel.managed.configuration.isAutomatedRosterExtractionAllowed else {
+            return
+        }
+        guard RosterInterpreter.isLocaleSupported else {
+            errorMessage =
+                "Model-assisted import doesn't support this device's language. The rule-based import still works."
+            return
+        }
+        let source = rawText
+        isInterpreting = true
+        defer { isInterpreting = false }
+        do {
+            let result = try await RosterInterpreter.interpret(source)
+            // The text moved on while the model worked: drop this result.
+            guard source == rawText else { return }
+            guard !result.rows.isEmpty else {
+                errorMessage = "The on-device model found no players in that."
+                return
+            }
+            errorMessage = nil
+            preview = result
+        } catch {
+            // A late failure after an edit is also stale, not an error.
+            guard source == rawText else { return }
+            errorMessage =
+                "The on-device model couldn't read that. The rule-based import still works."
+        }
     }
 
     private func commit() async {

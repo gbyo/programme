@@ -1,4 +1,5 @@
 import Foundation
+import ProgrammeCollaboration
 import ProgrammeCore
 import SwiftData
 
@@ -122,6 +123,29 @@ public enum StoreError: Error, Sendable {
 @ModelActor
 public actor MatchStore {
 
+    /// Called after `updateConfiguration`/`deleteMatch` so the app layer can
+    /// keep device-local integrations (reminder notifications) in sync with
+    /// the new state. The store itself never touches notifications.
+    public var onMatchChanged: (@Sendable (MatchID) -> Void)?
+
+    public func setMatchChangeHandler(_ handler: (@Sendable (MatchID) -> Void)?) {
+        onMatchChanged = handler
+    }
+
+    public func setMutationHandler(_ handler: (@Sendable (OutboundMutation) -> Void)?) {
+        onMutation = handler
+    }
+
+    /// Reports shared-truth mutations for sync staging. The handler must
+    /// return immediately; staging happens off the mutation path.
+    /// Device-local writes (reminder preferences, derived caches) never
+    /// report. Remote changes applied by the sync applier run suppressed
+    /// (see `withoutOutboundStaging`) so they never echo back outbound.
+    public var onMutation: (@Sendable (OutboundMutation) -> Void)?
+
+    /// Set while applying remote changes so they never echo back outbound.
+    var suppressOutbound = false
+
     // MARK: - Teams
 
     public func createTeam(
@@ -133,6 +157,7 @@ public actor MatchStore {
             primaryColorHex: primaryColorHex, secondaryColorHex: secondaryColorHex)
         modelContext.insert(team)
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.team(team.teamID)) }
         return team.teamID
     }
 
@@ -156,6 +181,7 @@ public actor MatchStore {
         team.primaryColorHex = primaryColorHex
         team.secondaryColorHex = secondaryColorHex
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.team(teamID)) }
     }
 
     // MARK: - Seasons
@@ -172,6 +198,7 @@ public actor MatchStore {
         season.team = team
         modelContext.insert(season)
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.season(teamID: teamID, seasonID: season.seasonID)) }
         return season.seasonID
     }
 
@@ -207,6 +234,7 @@ public actor MatchStore {
         }
         for season in team.seasons { season.isCurrent = (season.identifier == seasonID.rawValue) }
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.season(teamID: teamID, seasonID: seasonID)) }
     }
 
     public func teamID(forMatch matchID: MatchID) throws -> TeamID {
@@ -254,6 +282,7 @@ public actor MatchStore {
         player.team = team
         modelContext.insert(player)
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.players(teamID: teamID, playerIDs: [player.playerID])) }
         return player.playerID
     }
 
@@ -278,6 +307,7 @@ public actor MatchStore {
             ids.append(player.playerID)
         }
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.players(teamID: teamID, playerIDs: ids)) }
         return ids
     }
 
@@ -290,19 +320,32 @@ public actor MatchStore {
         player.classYear = snapshot.classYear
         player.isOnRoster = snapshot.isOnRoster
         try modelContext.save()
+        if !suppressOutbound, let owner = player.team {
+            onMutation?(.players(teamID: owner.teamID, playerIDs: [snapshot.id]))
+        }
     }
 
     /// Players who appear in a played match are archived rather than deleted, so
     /// no historical match loses a name.
     public func removePlayer(_ playerID: PlayerID) throws {
         guard let player = try player(playerID) else { throw StoreError.playerNotFound }
+        let ownerID = player.team?.teamID
         let appearsInAMatch = try matchesReferencing(playerID)
+        let archived: Bool
         if appearsInAMatch > 0 {
             player.isOnRoster = false
+            archived = true
         } else {
             modelContext.delete(player)
+            archived = false
         }
         try modelContext.save()
+        if !suppressOutbound, let ownerID {
+            onMutation?(
+                archived
+                    ? .players(teamID: ownerID, playerIDs: [playerID])
+                    : .deletedPlayers(teamID: ownerID, playerIDs: [playerID]))
+        }
     }
 
     private func matchesReferencing(_ playerID: PlayerID) throws -> Int {
@@ -328,6 +371,7 @@ public actor MatchStore {
         statProfile: StatProfile,
         tracking: OpponentTrackingMode,
         competition: String?,
+        location: MatchLocation? = nil,
         roster: RosterSnapshot,
         opponentRoster: RosterSnapshot = .empty
     ) throws -> MatchID {
@@ -338,6 +382,7 @@ public actor MatchStore {
             opponentShortName: opponentShortName,
             kickoff: kickoff,
             venue: venue,
+            location: location,
             competition: competition,
             tracking: tracking
         )
@@ -352,6 +397,7 @@ public actor MatchStore {
         model.opponentRosterData = try ProgrammeCoding.encoder.encode(opponentRoster)
         modelContext.insert(model)
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.match(model.matchID)) }
         return model.matchID
     }
 
@@ -389,6 +435,20 @@ public actor MatchStore {
         }
         model.updatedAt = Date()
         try modelContext.save()
+        if !suppressOutbound {
+            var eventIDs: [EventID] = []
+            var matchTouched = false
+            for effect in effects {
+                switch effect {
+                case .appendEvent(let event), .replaceEvent(let event):
+                    eventIDs.append(event.id)
+                case .setClock, .setPhase, .setFinalized:
+                    matchTouched = true
+                }
+            }
+            if !eventIDs.isEmpty { onMutation?(.events(matchID: matchID, eventIDs: eventIDs)) }
+            if matchTouched { onMutation?(.match(matchID)) }
+        }
     }
 
     /// Refresh the denormalised list values from an authoritative snapshot.
@@ -401,7 +461,8 @@ public actor MatchStore {
     public func updateConfiguration(
         matchID: MatchID, rules: MatchRules, statProfile: StatProfile,
         tracking: OpponentTrackingMode, kickoff: Date, venue: Venue,
-        opponentName: String, opponentShortName: String, competition: String?
+        opponentName: String, opponentShortName: String, competition: String?,
+        location: MatchLocation? = nil
     ) throws {
         guard let model = try match(matchID) else { throw StoreError.matchNotFound }
         model.rulesData = try ProgrammeCoding.encoder.encode(rules)
@@ -412,8 +473,11 @@ public actor MatchStore {
         model.opponentName = opponentName
         model.opponentShortName = opponentShortName
         model.competition = competition
+        model.location = location
         model.updatedAt = Date()
         try modelContext.save()
+        onMatchChanged?(matchID)
+        if !suppressOutbound { onMutation?(.match(matchID)) }
     }
 
     public func updateMatchRoster(matchID: MatchID, roster: RosterSnapshot, opponentRoster: RosterSnapshot)
@@ -423,11 +487,33 @@ public actor MatchStore {
         model.rosterData = try ProgrammeCoding.encoder.encode(roster)
         model.opponentRosterData = try ProgrammeCoding.encoder.encode(opponentRoster)
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.match(matchID)) }
     }
 
     public func deleteMatch(_ matchID: MatchID) throws {
         guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        let eventIDs = model.events.map { EventID($0.identifier) }
+        let teamID = TeamID(model.teamIdentifier)
         modelContext.delete(model)
+        try modelContext.save()
+        onMatchChanged?(matchID)
+        if !suppressOutbound {
+            onMutation?(.deletedMatch(matchID: matchID, teamID: teamID, eventIDs: eventIDs))
+        }
+    }
+
+    /// Device-local reminder preference, in minutes before kickoff. Nil means
+    /// no reminder. This is presentation state, never match truth: it stays
+    /// out of the descriptor, archive, and sync payload.
+    public func reminderMinutesBefore(for matchID: MatchID) throws -> Int? {
+        guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        return model.reminderMinutesBefore
+    }
+
+    public func setReminderMinutesBefore(_ minutes: Int?, for matchID: MatchID) throws {
+        guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        model.reminderMinutesBefore = minutes
+        model.updatedAt = Date()
         try modelContext.save()
     }
 
@@ -491,6 +577,7 @@ public actor MatchStore {
             modelContext.insert(eventModel)
         }
         try modelContext.save()
+        if !suppressOutbound { onMutation?(.events(matchID: matchID, eventIDs: events.map(\.id))) }
     }
 
     /// Insert a complete match reconstructed from an archive or a journal.
@@ -532,6 +619,10 @@ public actor MatchStore {
         }
         MatchMapper.writeCache(snapshot: StatEngine.snapshot(context: context), into: model)
         try modelContext.save()
+        if !suppressOutbound {
+            onMutation?(.match(model.matchID))
+            onMutation?(.events(matchID: model.matchID, eventIDs: context.events.map(\.id)))
+        }
         return model.matchID
     }
 
