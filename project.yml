@@ -44,6 +44,11 @@ targets:
     # behavior is unchanged.
     entitlements:
       path: App/Programme/Programme.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.gbyo.programme
+        com.apple.developer.icloud-services:
+          - CloudKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme

@@ -1,6 +1,7 @@
 import CloudKit
 import Foundation
 import Observation
+import Security
 
 /// Programme's CloudKit availability, derived from Apple's account state —
 /// never from `ubiquityIdentityToken`, which answers a different question
@@ -32,6 +33,27 @@ enum CloudKitAccountState: Hashable, Sendable {
     var isUsable: Bool { self == .available }
 }
 
+
+/// Reads the *signed process* entitlement rather than trusting the source
+/// .entitlements file. Xcode/provisioning may legitimately strip a requested
+/// capability when the active profile does not grant it.
+enum CloudKitEntitlement {
+    static let servicesKey = "com.apple.developer.icloud-services"
+
+    static func isPresent() -> Bool {
+        guard let task = SecTaskCreateFromSelf(nil),
+            let value = SecTaskCopyValueForEntitlement(task, servicesKey as CFString, nil),
+            let services = value as? [String]
+        else { return false }
+        return includesCloudKit(services)
+    }
+
+    static func includesCloudKit(_ services: [String]?) -> Bool {
+        guard let services else { return false }
+        return services.contains("CloudKit") || services.contains("CloudKit-Anonymous")
+    }
+}
+
 /// Observes `CKContainer.accountStatus()` and re-checks whenever the
 /// system posts account-change notifications while Programme runs.
 @MainActor
@@ -44,11 +66,18 @@ final class CloudKitAccountMonitor {
     var onBecameAvailable: (() -> Void)?
 
     private let makeContainer: @Sendable () -> CKContainer
+    private let hasCloudKitEntitlement: @Sendable () -> Bool
     private var started = false
-    private var observer: NSObjectProtocol?
+    private var observer: (any NSObjectProtocol)?
 
-    init(makeContainer: @escaping @Sendable () -> CKContainer = { CKContainer.default() }) {
+    init(
+        makeContainer: @escaping @Sendable () -> CKContainer = { CKContainer.default() },
+        hasCloudKitEntitlement: @escaping @Sendable () -> Bool = {
+            CloudKitEntitlement.isPresent()
+        }
+    ) {
         self.makeContainer = makeContainer
+        self.hasCloudKitEntitlement = hasCloudKitEntitlement
     }
 
     /// Begins observation. Fire-and-forget: callers must never await CloudKit
@@ -66,6 +95,13 @@ final class CloudKitAccountMonitor {
 
     func refresh() async {
         let previous = state
+        // CKContainer traps before accountStatus() can throw when the signed
+        // process lacks the CloudKit entitlement. Treat that as unavailable
+        // instead: local scoring and recovery must never depend on signing.
+        guard hasCloudKitEntitlement() else {
+            state = .temporarilyUnavailable
+            return
+        }
         do {
             state = CloudKitAccountState.map(try await makeContainer().accountStatus())
         } catch {
