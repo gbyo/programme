@@ -89,14 +89,15 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Storage", value: "On this iPad")
+                    LabeledContent("Storage", value: "On this device")
                     LabeledContent("Account", value: "Not required")
-                    LabeledContent("Diagnostics", value: "On this iPad")
+                    LabeledContent("Sync", value: syncLabel)
+                    LabeledContent("Diagnostics", value: "On this device")
                 } header: {
                     Text("Privacy")
                 } footer: {
                     Text(
-                        "Programme works completely offline. Rosters and match data stay on this iPad, and nothing is uploaded unless you export it yourself. Diagnostics (timing intervals, on-device performance reports, and coarse app states like scoring or exporting) also stay on this device to help debug issues — they never leave it and never contain names, scores, or notes."
+                        "Programme is local-first and works fully offline with no account: scoring, rosters, and matches live on this device. Teams you share sync through iCloud when it's available, and exports only leave the device when you start them. Diagnostics (timing intervals, on-device performance reports, and coarse app states like scoring or exporting) also stay on this device to help debug issues — they never leave it and never contain names, scores, or notes."
                     )
                 }
 
@@ -166,6 +167,19 @@ struct SettingsView: View {
             profileID: defaultProfileID,
             rulesName: defaultRulesName,
             tracking: OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam)
+    }
+
+    /// Live iCloud account state, not a new subsystem: sharing and sync
+    /// may start only when the account is usable, and everything else runs
+    /// regardless — which is exactly what this row reports.
+    private var syncLabel: String {
+        switch appModel.cloudAccount.state {
+        case .unknown: "Checking…"
+        case .available: "iCloud available"
+        case .noAccount: "No iCloud account"
+        case .restricted: "Restricted"
+        case .temporarilyUnavailable: "Unavailable"
+        }
     }
 
     private var appVersion: String {
