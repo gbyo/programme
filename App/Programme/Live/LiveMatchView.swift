@@ -20,6 +20,7 @@ struct LiveMatchView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
     /// The platform's own answer to "is there room for more than one pane?".
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -181,7 +182,9 @@ struct LiveMatchView: View {
                         onEditLineup: { activeSheet = .lineup },
                         onEditOpponentRoster: { activeSheet = .opponentRoster },
                         onAdjustClock: { activeSheet = .adjustClock },
+                        supportsScoreboardWindow: supportsMultipleWindows,
                         onOpenScoreboard: {
+                            guard supportsMultipleWindows else { return }
                             openWindow(id: ProgrammeScene.scoreboard.rawValue)
                         },
                         onConnectDisplay: { activeSheet = .nearbyDisplay },
