@@ -1,3 +1,4 @@
+import PhotosUI
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
@@ -21,6 +22,8 @@ struct RosterImportView: View {
     @State private var preview: RosterImportPreview?
     @State private var isShowingFileImporter = false
     @State private var isShowingScanner = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isRecognizingPhoto = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -90,6 +93,21 @@ struct RosterImportView: View {
                         isShowingScanner = true
                     }
                 }
+                PhotosPicker(
+                    selection: $photoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label("Choose Photo or Screenshot…", systemImage: "photo")
+                }
+                .disabled(isRecognizingPhoto)
+                if isRecognizingPhoto {
+                    HStack {
+                        ProgressView()
+                        Text("Reading photo…")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 Text("Import")
             }
@@ -119,6 +137,44 @@ struct RosterImportView: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            photoItem = nil
+            Task { await loadPhoto(from: item) }
+        }
+    }
+
+    /// Loads only the photo the person picked (PhotosPicker grants access to
+    /// that single item — never the whole library) and recognizes roster
+    /// text into the same review pipeline as every other source. A failure
+    /// leaves all existing state untouched: the roster changes only when a
+    /// preview is confirmed below.
+    private func loadPhoto(from item: PhotosPickerItem) async {
+        isRecognizingPhoto = true
+        errorMessage = nil
+        defer { isRecognizingPhoto = false }
+        let data: Data?
+        do {
+            data = try await item.loadTransferable(type: Data.self)
+        } catch {
+            errorMessage =
+                "Programme couldn't load that photo. Nothing was changed — if it lives in iCloud, check the connection and try again."
+            return
+        }
+        guard let data else {
+            errorMessage =
+                "Programme couldn't load that photo. Nothing was changed — try a different image."
+            return
+        }
+        do {
+            rawText = try await RosterPhotoRecognizer.recognizeText(in: data)
+            analyze()
+        } catch let failure as RosterPhotoRecognizer.Failure {
+            errorMessage = failure.errorDescription
+        } catch {
+            errorMessage =
+                "Programme couldn't read that photo. Nothing was changed — try a clearer image."
+        }
     }
 
     private func mappingStep(_ preview: RosterImportPreview) -> some View {
