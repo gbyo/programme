@@ -495,10 +495,24 @@ final class ProgrammeUITests: XCTestCase {
         XCTAssertTrue(
             app.navigationBars["Starting Lineup"].waitForExistence(timeout: 15),
             "Create & Set Lineup did not open the lineup editor")
-        attachScreenshot(named: "Lineup editor")
 
         let confirm = element(app, "lineup.confirm")
-        XCTAssertTrue(confirm.isEnabled, "The prefilled lineup was not valid")
+        XCTAssertFalse(confirm.isEnabled, "A new match should start with no lineup selected")
+        XCTAssertTrue(element(app, "lineup.1").exists, "The roster list is missing")
+
+        attachScreenshot(named: "Lineup editor landscape")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(element(app, "lineup.1").waitForExistence(timeout: 5))
+        attachScreenshot(named: "Lineup editor portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+
+        let fallbackActions = element(app, "lineup.actions")
+        let actions = fallbackActions.exists ? fallbackActions : app.buttons["More"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 5), "The lineup actions menu is missing")
+        actions.tap()
+        app.buttons["Fill by Jersey Number"].tap()
+
+        XCTAssertTrue(confirm.isEnabled, "The explicitly filled lineup was not valid")
         confirm.tap()
 
         waitForScorer(app)
@@ -509,6 +523,20 @@ final class ProgrammeUITests: XCTestCase {
         XCTAssertTrue(
             element(app, "live.startPeriod").exists,
             "The match clock was started automatically")
+    }
+
+    func testEditingAnExistingLineupLoadsItsStartersAndGoalkeeper() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        app.buttons["Match options"].tap()
+        XCTAssertTrue(app.navigationBars["Match"].waitForExistence(timeout: 5))
+        app.buttons["Edit Lineup"].tap()
+
+        XCTAssertTrue(app.navigationBars["Starting Lineup"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["11 of 11 selected"].exists)
+        XCTAssertTrue(element(app, "lineup.goalkeeper").exists)
+        XCTAssertTrue(element(app, "lineup.confirm").isEnabled)
     }
 
     func testNewMatchRemembersTheScoringConfiguration() {
