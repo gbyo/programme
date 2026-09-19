@@ -15,8 +15,13 @@ struct TeamShareItem: Transferable, Sendable {
     let teamID: TeamID
     let teamName: String
     /// The live share when the view already resolved one (the common path);
-    /// nil falls back to the prepare handler below.
+    /// nil falls back to the prepare handler below. Nil together with a
+    /// shared scope means "shared with me, share not yet re-fetched" — the
+    /// view must never offer a second private share in that state.
     let prepared: CKShare?
+    /// Owned teams may invite (ShareLink) and manage; shared teams resolve
+    /// through the shared database and manage through the system UI only.
+    let scope: TeamShareScope
     let coordinator: TeamShareCoordinator
     let containerFactory: @Sendable () -> CKContainer
 
@@ -27,10 +32,11 @@ struct TeamShareItem: Transferable, Sendable {
     static var transferRepresentation: some TransferRepresentation {
         CKShareTransferRepresentation<TeamShareItem> { item in
             let container = item.containerFactory()
+            let options = TeamSharingOptions.invitationOnly
             if let prepared = item.prepared {
-                return .existing(prepared, container: container)
+                return .existing(prepared, container: container, allowedSharingOptions: options)
             }
-            return .prepareShare(container: container) {
+            return .prepareShare(container: container, allowedSharingOptions: options) {
                 try await item.coordinator.prepareShare(teamID: item.teamID, teamName: item.teamName)
             }
         }
@@ -62,7 +68,9 @@ struct CollaborationView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> SWCollaborationView {
         let provider = NSItemProvider()
-        provider.registerCKShare(share, container: container)
+        provider.registerCKShare(
+            share, container: container,
+            allowedSharingOptions: TeamSharingOptions.invitationOnly)
         let view = SWCollaborationView(itemProvider: provider)
         view.headerTitle = teamName
         return view
@@ -106,6 +114,8 @@ enum TeamSyncState: Hashable, Sendable {
 enum TeamShareError: LocalizedError {
     case iCloudUnavailable
     case noLibrary
+    case shareLookupFailed
+    case collaborationDisabled
 
     var errorDescription: String? {
         switch self {
@@ -113,29 +123,37 @@ enum TeamShareError: LocalizedError {
             return "Sign in to iCloud in Settings to share this team."
         case .noLibrary:
             return "The library is not ready yet. Try again in a moment."
+        case .shareLookupFailed:
+            return "Programme couldn't reach iCloud to check sharing. Nothing was changed. Try again."
+        case .collaborationDisabled:
+            return "Team sharing is disabled by this device's management."
         }
     }
 }
 
 /// Receives the system callback when the user accepts a team invitation
-/// outside the app. Forwards to AppModel, which accepts the share and
-/// reloads the workspace; materialization still goes through the applier,
-/// so shared content is review-gated exactly like synced content.
+/// outside the app. The callback can fire at launch, before SwiftUI has
+/// installed the acceptance closure — metadata that arrives early is
+/// buffered and drained exactly once when AppModel becomes ready, never
+/// dropped. Accepting only grants access; materialization still goes
+/// through the applier, so shared content is review-gated exactly like
+/// synced content.
 final class ShareAcceptanceDelegate: NSObject, UIApplicationDelegate {
     static var onAccept: ((CKShare.Metadata) -> Void)?
+    private static let pending = InvitationBuffer<CKShare.Metadata>()
 
     func application(
         _ application: UIApplication, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata
     ) {
-        Self.onAccept?(metadata)
+        if let onAccept = Self.onAccept {
+            onAccept(metadata)
+        } else {
+            Self.pending.stage(metadata)
+        }
     }
-}
 
-/// Lightweight iCloud gate for the Share surface. Checked before resolving
-/// the share item so the UI never constructs a CloudKit container just to
-/// learn iCloud is off.
-enum ShareAvailability {
-    static var isICloudAvailable: Bool {
-        FileManager.default.ubiquityIdentityToken != nil
+    /// Metadata that arrived before the acceptance closure was installed.
+    static func drainPending() -> [CKShare.Metadata] {
+        pending.drain()
     }
 }

@@ -19,9 +19,17 @@ enum TeamMatchDefaults {
         "programme.team.\(teamID.rawValue.uuidString).\(field)"
     }
 
+    /// Resolution order: stored user value wins, otherwise the managed
+    /// suggestion is a temporary fallback, otherwise the Programme default.
+    /// A managed suggestion is never written through — it is re-derived
+    /// from the live MDM configuration on every load.
+    typealias LoadedDefaults = (
+        profileID: String, rulesName: String, tracking: OpponentTrackingMode
+    )
+
     static func load(
         teamID: TeamID, managed: ManagedProgrammeConfiguration = .unmanaged
-    ) -> (profileID: String, rulesName: String, tracking: OpponentTrackingMode) {
+    ) -> LoadedDefaults {
         let defaults = UserDefaults.standard
         let profile =
             defaults.string(forKey: key("statProfile", teamID: teamID))
@@ -38,13 +46,30 @@ enum TeamMatchDefaults {
         return (profile, rules, tracking)
     }
 
+    /// Persists explicit user choices only. A field is stored only when it
+    /// differs from both what was loaded (untouched fallbacks are never
+    /// user choices) and the live managed suggestion (a managed value must
+    /// never be persisted as though the user picked it, so a later MDM
+    /// change still applies to values the user never overrode). Callers
+    /// pass back the snapshot they loaded alongside the current values.
     static func save(
-        teamID: TeamID, profileID: String, rulesName: String, tracking: OpponentTrackingMode
+        teamID: TeamID,
+        profileID: String,
+        rulesName: String,
+        tracking: OpponentTrackingMode,
+        loaded: LoadedDefaults,
+        managed: ManagedProgrammeConfiguration = .unmanaged
     ) {
         let defaults = UserDefaults.standard
-        defaults.set(profileID, forKey: key("statProfile", teamID: teamID))
-        defaults.set(rulesName, forKey: key("rulesPreset", teamID: teamID))
-        defaults.set(tracking.rawValue, forKey: key("opponentTracking", teamID: teamID))
+        if profileID != loaded.profileID {
+            defaults.set(profileID, forKey: key("statProfile", teamID: teamID))
+        }
+        if rulesName != loaded.rulesName, rulesName != managed.defaultRulesName {
+            defaults.set(rulesName, forKey: key("rulesPreset", teamID: teamID))
+        }
+        if tracking != loaded.tracking, tracking != managed.defaultTrackingMode {
+            defaults.set(tracking.rawValue, forKey: key("opponentTracking", teamID: teamID))
+        }
     }
 }
 
@@ -63,6 +88,11 @@ final class TeamWorkspace {
     var viewedStatsSeasonID: SeasonID?
 
     private static let selectedTeamKey = "programme.selectedTeamID"
+    /// True when the stored selection came from an explicit user choice
+    /// (tapping a team, creating one). An automatic fallback or MDM
+    /// suggestion persists its team ID with this false, so a later MDM
+    /// suggestion can still apply while a real user choice always wins.
+    private static let explicitSelectionKey = "programme.selectedTeamID.userChosen"
 
     var selectedTeam: TeamListItem? {
         guard let selectedTeamID else { return nil }
@@ -71,7 +101,11 @@ final class TeamWorkspace {
 
     var hasTeam: Bool { selectedTeamID != nil }
 
-    static func restoredSelection(from teams: [TeamListItem]) -> TeamID? {
+    /// The stored selection, but only when a user explicitly chose it.
+    /// Automatic fallbacks and applied MDM suggestions never count, so a
+    /// device with no real user selection stays eligible for suggestions.
+    static func restoredExplicitSelection(from teams: [TeamListItem]) -> TeamID? {
+        guard UserDefaults.standard.bool(forKey: explicitSelectionKey) else { return nil }
         guard
             let raw = UserDefaults.standard.string(forKey: selectedTeamKey),
             let uuid = UUID(uuidString: raw)
@@ -80,12 +114,21 @@ final class TeamWorkspace {
         return teams.contains(where: { $0.id == id }) ? id : nil
     }
 
-    func persistSelection() {
+    /// Whether `teamID` is the explicitly user-chosen selection.
+    static func isExplicitSelection(_ teamID: TeamID) -> Bool {
+        guard UserDefaults.standard.bool(forKey: explicitSelectionKey) else { return false }
+        let raw = UserDefaults.standard.string(forKey: selectedTeamKey)
+        return raw == teamID.rawValue.uuidString
+    }
+
+    func persistSelection(explicit: Bool) {
         if let selectedTeamID {
             UserDefaults.standard.set(
                 selectedTeamID.rawValue.uuidString, forKey: Self.selectedTeamKey)
+            UserDefaults.standard.set(explicit, forKey: Self.explicitSelectionKey)
         } else {
             UserDefaults.standard.removeObject(forKey: Self.selectedTeamKey)
+            UserDefaults.standard.removeObject(forKey: Self.explicitSelectionKey)
         }
     }
 }
@@ -129,6 +172,9 @@ final class AppModel {
     /// Optional MDM-delivered suggestions and policy. Unmanaged devices
     /// rest at `.unmanaged`: no suggestions, everything allowed.
     let managed = ManagedConfigurationService()
+    /// Real CloudKit account state from `accountStatus()`, observed for
+    /// runtime changes. Starts unknown; launch and scoring never wait on it.
+    let cloudAccount = CloudKitAccountMonitor()
     /// Nearby read-only scoreboard. Lives for the app lifetime so the
     /// scoreboard window can display while no local session exists.
     let nearby = NearbyScoreboardService()
@@ -157,15 +203,47 @@ final class AppModel {
     /// (`.existing`); otherwise the item's prepare handler creates and saves
     /// it on demand. Throws a human-readable error when iCloud is
     /// unavailable or the library is not ready.
+    /// Whether this device owns the team (private database, may invite and
+    /// manage) or participates in someone else's share (shared database,
+    /// system UI only). Resolved from the shared-zone owner list the sync
+    /// layer already tracks — never by guessing, and never by treating a
+    /// team as unshared merely because its share isn't in our private
+    /// database.
+    func shareScope(teamID: TeamID) async -> TeamShareScope {
+        guard let service = try? syncing() else { return .owned }
+        let owners = await service.sharedZoneOwners()
+        guard let owner = owners[teamID] else { return .owned }
+        return .shared(ownerName: owner)
+    }
+
     func teamShareItem(teamID: TeamID) async throws -> TeamShareItem {
-        guard ShareAvailability.isICloudAvailable else { throw TeamShareError.iCloudUnavailable }
+        // Collaboration policy is enforced here, below the UI: when
+        // management disables collaboration no share surface can load, so
+        // no new CKShare can be created from ShareLink or the system UI.
+        // Private same-user CloudKit sync is unaffected — see
+        // docs/MANAGED_CONFIGURATION.md for the exact policy.
+        guard managed.configuration.isCollaborationAllowed else {
+            throw TeamShareError.collaborationDisabled
+        }
+        guard cloudAccount.state.isUsable else { throw TeamShareError.iCloudUnavailable }
         guard let store else { throw TeamShareError.noLibrary }
         let details = try await store.teamDetails(teamID: teamID)
         let coordinator = try sharing()
-        let prepared = await coordinator.existingShare(teamID: teamID)
+        let scope = await shareScope(teamID: teamID)
+        let prepared: CKShare?
+        switch await coordinator.lookupShare(teamID: teamID, scope: scope) {
+        case .shared(let share):
+            prepared = share
+        case .notShared:
+            prepared = nil
+        case .unavailable:
+            // A failed lookup is not proof the team is unshared: surface a
+            // retryable error instead of a "Share Team…" button.
+            throw TeamShareError.shareLookupFailed
+        }
         return TeamShareItem(
             teamID: teamID, teamName: details.name, prepared: prepared,
-            coordinator: coordinator
+            scope: scope, coordinator: coordinator
         ) {
             CKContainer.default()
         }
@@ -175,7 +253,7 @@ final class AppModel {
     /// not shared. Display only — edits happen in the system share sheet.
     func teamParticipants(teamID: TeamID) async -> [ShareParticipant] {
         guard let coordinator = try? sharing() else { return [] }
-        return await coordinator.participants(teamID: teamID)
+        return await coordinator.participants(teamID: teamID, scope: shareScope(teamID: teamID))
     }
 
     /// Revokes the team's share for everyone. Local truth is untouched.
@@ -211,7 +289,16 @@ final class AppModel {
     func syncState(teamID: TeamID) async -> TeamSyncState {
         let reviewCount = await syncConflicts(teamID: teamID).count
         if reviewCount > 0 { return .needsReview(reviewCount) }
-        guard ShareAvailability.isICloudAvailable else { return .unavailable }
+        switch cloudAccount.state {
+        case .available:
+            break
+        case .unknown:
+            // Account state not yet resolved: frame as local-safe offline,
+            // never as proof iCloud is missing.
+            return .offline
+        case .noAccount, .restricted, .temporarilyUnavailable:
+            return .unavailable
+        }
         guard let service = try? syncing() else { return .offline }
         switch await service.engineStatus() {
         case .idle: return .synced
@@ -224,7 +311,12 @@ final class AppModel {
     /// materializes here: shared content still lands through the applier, so
     /// review-gating applies unchanged.
     func acceptShare(_ metadata: CKShare.Metadata) async {
-        if ShareAvailability.isICloudAvailable, let service = try? syncing() {
+        // Invitations are refused while collaboration is disabled. The
+        // metadata is dropped but the invitation itself stays valid in
+        // CloudKit, so it can be accepted after the policy lifts. Local
+        // data is untouched either way.
+        guard managed.configuration.isCollaborationAllowed else { return }
+        if cloudAccount.state.isUsable, let service = try? syncing() {
             try? await service.accept(metadata)
         } else if let coordinator = try? sharing() {
             try? await coordinator.accept(metadata)
@@ -256,7 +348,7 @@ final class AppModel {
     /// never waits on this: the service is inert until started, and every
     /// sync failure leaves local truth untouched.
     func startSyncIfAvailable() async {
-        guard ShareAvailability.isICloudAvailable else { return }
+        guard cloudAccount.state.isUsable else { return }
         guard let service = try? syncing() else { return }
         await store?.setMutationHandler { [weak self] mutation in
             Task { await self?.stageForSync(mutation) }
@@ -368,7 +460,8 @@ final class AppModel {
     /// application context. No per-second streaming: the Watch renders
     /// its clock locally from the anchor.
     private func pushWatchSnapshot(
-        teamName: String, teamShort: String, recordText: String, matches: [MatchListItem]
+        teamID: TeamID, teamName: String, teamShort: String, recordText: String,
+        matches: [MatchListItem], reviewCount: Int
     ) {
         let refs = matches.map {
             WatchMatchRef(
@@ -389,18 +482,39 @@ final class AppModel {
                 needsReviewCount: session.snapshot.needsReviewCount,
                 lastEventText: session.lastEventDescription?.oneLine)
         }
-        let review = (live?.needsReviewCount ?? 0)
         watchBridge.push(
             WatchSnapshot(
                 teamName: teamName, teamShortName: teamShort, recordText: recordText,
-                live: live, upcoming: upcoming, recent: recent, reviewCount: review))
+                live: live, upcoming: upcoming, recent: recent, reviewCount: reviewCount))
     }
 
     func bootstrap() async {
         guard !isReady else { return }
         defer { isReady = true }
         guard let container, let store else { return }
-        managed.start()
+        // Resolve the initial MDM configuration before the first automatic
+        // team selection, so an MDM suggestion wins over the plain
+        // first-team fallback. Apple documents the initial value as
+        // yielding immediately, so this does not stall launch.
+        await managed.startAndAwaitInitialConfiguration()
+        // Apply later MDM suggestions only while the device still has no
+        // explicit user selection. Never resets navigation or seasons, and
+        // never overrides a user choice.
+        Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(
+                named: .managedConfigurationChanged)
+            {
+                await self?.applyManagedSuggestionIfNeeded()
+            }
+        }
+        // CloudKit account state resolves in the background; launch and
+        // scoring never wait on it.
+        cloudAccount.start()
+        // Invitations that launched the app before the acceptance closure
+        // was installed are drained here, exactly once.
+        for metadata in ShareAcceptanceDelegate.drainPending() {
+            await acceptShare(metadata)
+        }
 
         // Keep pending reminder notifications in sync with kickoff changes
         // and deletions, whoever initiates them.
@@ -441,28 +555,62 @@ final class AppModel {
             workspace.selectedTeamID = nil
             workspace.currentSeasonID = nil
             workspace.viewedStatsSeasonID = nil
-            workspace.persistSelection()
+            workspace.persistSelection(explicit: false)
             return
         }
         let restored: TeamID?
+        let explicit: Bool
         if let preferred, teams.contains(where: { $0.id == preferred }) {
+            // Created or explicitly passed in: a real user choice.
             restored = preferred
+            explicit = true
+        } else if let current = workspace.selectedTeamID,
+            teams.contains(where: { $0.id == current })
+        {
+            // Keep the current selection with its provenance intact. An
+            // automatic fallback stays automatic so a later MDM suggestion
+            // can still apply; an explicit choice stays explicit.
+            restored = current
+            explicit = TeamWorkspace.isExplicitSelection(current)
         } else {
-            // An MDM suggestion only fills in for a device with no stored
-            // selection; it never overrides an explicit choice.
+            // An MDM suggestion only fills in for a device with no explicit
+            // user selection; it never overrides one. The plain first-team
+            // fallback is automatic too, never persisted as a user choice.
             let ids = teams.map(\.id)
+            let stored = TeamWorkspace.restoredExplicitSelection(from: teams)
             restored =
-                TeamWorkspace.restoredSelection(from: teams)
-                ?? managed.configuration.suggestedTeam(from: ids) ?? teams.first?.id
+                stored ?? managed.configuration.suggestedTeam(from: ids) ?? teams.first?.id
+            explicit = stored != nil
         }
         workspace.selectedTeamID = restored
-        workspace.persistSelection()
+        workspace.persistSelection(explicit: explicit)
         if let selected = restored {
             workspace.currentSeasonID = try? await store.currentSeasonID(teamID: selected)
             workspace.viewedStatsSeasonID = workspace.currentSeasonID
         }
         navigation.section = .home
         navigation.clearTeamScopedPaths()
+        await refreshWidgetSnapshot()
+    }
+
+    /// Applies a newly arrived MDM team suggestion, but only while the
+    /// device still has no explicit user selection. Deliberately narrow:
+    /// no team-list refetch, no navigation reset, no season changes beyond
+    /// resolving the newly suggested team's current season. A user choice
+    /// always wins and is never disturbed.
+    func applyManagedSuggestionIfNeeded() async {
+        guard let store else { return }
+        guard TeamWorkspace.restoredExplicitSelection(from: workspace.teams) == nil else {
+            return
+        }
+        let ids = workspace.teams.map(\.id)
+        guard let suggestion = managed.configuration.suggestedTeam(from: ids),
+            suggestion != workspace.selectedTeamID
+        else { return }
+        workspace.selectedTeamID = suggestion
+        workspace.persistSelection(explicit: false)
+        workspace.currentSeasonID = try? await store.currentSeasonID(teamID: suggestion)
+        workspace.viewedStatsSeasonID = workspace.currentSeasonID
         await refreshWidgetSnapshot()
     }
 
@@ -474,7 +622,7 @@ final class AppModel {
         guard workspace.teams.contains(where: { $0.id == teamID }) else { return }
         guard workspace.selectedTeamID != teamID else { return }
         workspace.selectedTeamID = teamID
-        workspace.persistSelection()
+        workspace.persistSelection(explicit: true)
         workspace.currentSeasonID = try? await store.currentSeasonID(teamID: teamID)
         workspace.viewedStatsSeasonID = workspace.currentSeasonID
         navigation.clearTeamScopedPaths()
@@ -771,9 +919,16 @@ final class AppModel {
                     scoreOpponent: $0.score.opponent, kickoff: $0.kickoff)
             }
 
+        // Team-wide review count: live-match attribution items plus every
+        // unresolved sync contradiction on the team. Cheap here — conflicts
+        // are local records and the live count is already derived.
+        let reviewCount =
+            (liveSession?.snapshot.needsReviewCount ?? 0)
+            + (await syncConflicts(teamID: selectedTeamID).count)
         pushWatchSnapshot(
-            teamName: teamName, teamShort: teamShort, recordText: season?.recordText ?? "0-0-0",
-            matches: matches)
+            teamID: selectedTeamID, teamName: teamName, teamShort: teamShort,
+            recordText: season?.recordText ?? "0-0-0", matches: matches,
+            reviewCount: reviewCount)
 
         Task { await intentProvider?.reindexSpotlight() }
         ProgrammeSharedContainer.write(

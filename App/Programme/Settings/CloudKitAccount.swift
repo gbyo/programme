@@ -1,0 +1,95 @@
+import CloudKit
+import Foundation
+import Observation
+
+/// Programme's CloudKit availability, derived from Apple's account state —
+/// never from `ubiquityIdentityToken`, which answers a different question
+/// (ubiquity container access) than "is the private CloudKit database
+/// usable". Unknown until the first check completes; launch and scoring
+/// never wait on it.
+enum CloudKitAccountState: Hashable, Sendable {
+    case unknown
+    case available
+    case noAccount
+    case restricted
+    case temporarilyUnavailable
+
+    /// Pure seam over `CKAccountStatus` so the mapping stays testable
+    /// without signing into iCloud.
+    static func map(_ status: CKAccountStatus) -> Self {
+        switch status {
+        case .available: return .available
+        case .noAccount: return .noAccount
+        case .restricted: return .restricted
+        case .temporarilyUnavailable, .couldNotDetermine: return .temporarilyUnavailable
+        @unknown default: return .temporarilyUnavailable
+        }
+    }
+
+    /// Whether private-database CloudKit work (sharing, replication) may
+    /// start. Everything else — scoring, recovery, browsing — runs
+    /// regardless.
+    var isUsable: Bool { self == .available }
+}
+
+/// Observes `CKContainer.accountStatus()` and re-checks whenever the
+/// system posts account-change notifications while Programme runs.
+@MainActor
+@Observable
+final class CloudKitAccountMonitor {
+    var state: CloudKitAccountState = .unknown
+
+    private let makeContainer: @Sendable () -> CKContainer
+    private var started = false
+    private var observer: NSObjectProtocol?
+
+    init(makeContainer: @escaping @Sendable () -> CKContainer = { CKContainer.default() }) {
+        self.makeContainer = makeContainer
+    }
+
+    /// Begins observation. Fire-and-forget: callers must never await CloudKit
+    /// readiness on launch or scoring paths.
+    func start() {
+        guard !started else { return }
+        started = true
+        Task { await refresh() }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.CKAccountChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.refresh() }
+        }
+    }
+
+    func refresh() async {
+        do {
+            state = CloudKitAccountState.map(try await makeContainer().accountStatus())
+        } catch {
+            state = .temporarilyUnavailable
+        }
+    }
+}
+
+/// Buffers share-invitation metadata that arrives before the app is ready
+/// to accept it. `userDidAcceptCloudKitShareWith` can fire at launch,
+/// before SwiftUI installs the acceptance closure — without a buffer that
+/// invitation is silently dropped.
+final class InvitationBuffer<Element>: @unchecked Sendable {
+    private var items: [Element] = []
+    private let lock = NSLock()
+
+    func stage(_ element: Element) {
+        lock.withLock { items.append(element) }
+    }
+
+    /// Drains everything staged so far, exactly once per call.
+    func drain() -> [Element] {
+        lock.withLock {
+            defer { items.removeAll() }
+            return items
+        }
+    }
+
+    var isEmpty: Bool {
+        lock.withLock { items.isEmpty }
+    }
+}

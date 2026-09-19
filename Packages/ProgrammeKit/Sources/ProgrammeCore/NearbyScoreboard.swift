@@ -15,6 +15,11 @@ import Foundation
 public struct ScoreboardSnapshot: Codable, Hashable, Sendable {
     public static let protocolVersion = 1
 
+    /// Seconds without a received frame before a live display reads stale.
+    /// Shared by the wire-age check and receiver-local link freshness so
+    /// both agree on what "recent" means.
+    public static let staleAfter: TimeInterval = 15
+
     public var version: Int
     public var matchID: MatchID
     public var teamShortName: String
@@ -74,7 +79,19 @@ public struct ScoreboardSnapshot: Codable, Hashable, Sendable {
     /// scoring state — a broken display connection has zero effect on the
     /// scorer.
     public func isStale(at date: Date = Date()) -> Bool {
-        !finalized && sentAt.addingTimeInterval(15) < date
+        !finalized && sentAt.addingTimeInterval(Self.staleAfter) < date
+    }
+
+    /// Receiver-local link freshness: the display stamps each valid frame
+    /// with its own receipt time. Sender wall-clock timestamps are the
+    /// wrong freshness source because the two devices' clocks may differ;
+    /// the wire `sentAt` stays as semantic snapshot age only. A healthy
+    /// heartbeat — even one resending unchanged bytes — keeps the link
+    /// fresh; only a real gap goes stale. No frame yet means "waiting",
+    /// not "reconnecting"; final scores never go stale.
+    public func isLinkStale(lastReceivedAt: Date?, now: Date = Date()) -> Bool {
+        guard !finalized, let last = lastReceivedAt else { return false }
+        return last.addingTimeInterval(Self.staleAfter) < now
     }
 }
 
@@ -82,12 +99,21 @@ public struct ScoreboardSnapshot: Codable, Hashable, Sendable {
 /// followed by one JSON snapshot. The incremental decoder tolerates TCP
 /// segmentation; anything that is not exactly one well-formed current
 /// snapshot is dropped, never partially applied.
+/// Wire failures for the nearby display path. Encoding failures are values
+/// the caller handles (usually by skipping one optional broadcast) — an
+/// oversized presentation snapshot must never terminate scoring.
+public enum ScoreboardWireError: Error, Hashable, Sendable {
+    case frameTooLarge(Int)
+}
+
 public enum ScoreboardWire {
     public static let maxFrameBytes = 64 * 1024
 
     public static func encode(_ snapshot: ScoreboardSnapshot) throws -> Data {
         let payload = try JSONEncoder().encode(snapshot)
-        precondition(payload.count <= maxFrameBytes, "Scoreboard snapshot exceeds frame budget")
+        guard payload.count <= maxFrameBytes else {
+            throw ScoreboardWireError.frameTooLarge(payload.count)
+        }
         var frame = Data()
         var length = UInt32(payload.count).bigEndian
         withUnsafeBytes(of: &length) { frame.append(contentsOf: $0) }

@@ -98,6 +98,20 @@ public struct WatchSnapshot: Codable, Hashable, Sendable {
         self.reviewCount = reviewCount
         self.updatedAt = updatedAt
     }
+
+    /// Seconds without a fresh snapshot before a live Watch presentation
+    /// reads stale. Pushes happen on session changes and workspace reloads,
+    /// not on a timer, so the window is generous: brief event gaps stay
+    /// LIVE, a truly silent phone does not.
+    public static let liveStaleAfter: TimeInterval = 120
+
+    /// Whether a live presentation built from this snapshot is too old to
+    /// present as unquestionably current. Recent and upcoming sections are
+    /// timeless; only the ticking live clock can lie.
+    public func isLiveStale(now: Date = Date()) -> Bool {
+        guard live != nil else { return false }
+        return updatedAt.addingTimeInterval(Self.liveStaleAfter) < now
+    }
 }
 
 /// Minimal match facts for glanceable selection. The app maps its list

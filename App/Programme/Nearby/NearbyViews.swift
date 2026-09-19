@@ -10,6 +10,9 @@ import SwiftUI
 /// disconnects never affect scoring (there is no path back).
 struct NearbyDisplayView: View {
     let snapshot: ScoreboardSnapshot
+    /// Receiver-local receipt time of the last valid frame. The stale
+    /// banner keys off this, never the wire `sentAt`.
+    let lastFrameReceivedAt: Date?
     @State private var clock = MatchClockModel()
 
     var body: some View {
@@ -38,10 +41,18 @@ struct NearbyDisplayView: View {
             if snapshot.finalized {
                 Text("Final")
                     .font(.headline.weight(.semibold))
-            } else if snapshot.isStale() {
-                Label("Reconnecting…", systemImage: "wifi.slash")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            } else {
+                // Timeline-driven so the banner actually appears when the
+                // threshold passes: body evaluation alone would never
+                // re-fire with no new frames and no extra traffic.
+                TimelineView(.periodic(from: Date(), by: 5)) { _ in
+                    if snapshot.isLinkStale(lastReceivedAt: lastFrameReceivedAt) {
+                        Label("Reconnecting…", systemImage: "wifi.slash")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("nearby.stale")
+                    }
+                }
             }
         }
         .padding(48)
@@ -95,6 +106,23 @@ struct NearbyAdvertiseSheet: View {
                         systemImage: "checkmark.wifi",
                         description: Text("Displays mirror the score and clock read-only."))
                 }
+                // Apple's intended discoverability affordance: the system
+                // pairing surface for this match, driven by the same
+                // provider the listener advertises. Opening this sheet is
+                // still the user-initiated act that starts advertising —
+                // nothing is exposed on the LAN silently.
+                DevicePairingView(
+                    NearbyScoreboardService.pairingProvider,
+                    label: {
+                        Label("Discoverable as This Match", systemImage: "wifi")
+                    },
+                    fallback: {
+                        Text("System pairing is unavailable on this device.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                )
+                .accessibilityIdentifier("nearby.pairing")
                 if nearby.advertising != .off {
                     Button("Stop Advertising", systemImage: "wifi.slash", role: .destructive) {
                         nearby.stopAdvertising()

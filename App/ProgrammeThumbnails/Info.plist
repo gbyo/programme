@@ -24,14 +24,15 @@
         <string>com.apple.quicklook.thumbnail</string>
         <key>NSExtensionPrincipalClass</key>
         <string>$(PRODUCT_MODULE_NAME).ArchiveThumbnailProvider</string>
+        <key>NSExtensionAttributes</key>
+        <dict>
+            <key>QLSupportedContentTypes</key>
+            <array>
+                <string>org.programme.archive</string>
+            </array>
+            <key>QLThumbnailMinimumDimension</key>
+            <integer>0</integer>
+        </dict>
     </dict>
-    <key>QLSupportedContentTypes</key>
-    <array>
-        <string>org.programme.archive</string>
-    </array>
-    <key>QLThumbnailMinimumSize</key>
-    <integer>100</integer>
-    <key>QLThumbnailMaximumSize</key>
-    <integer>1024</integer>
 </dict>
 </plist>

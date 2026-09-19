@@ -29,6 +29,10 @@ struct NewMatchView: View {
     @State private var rulesPresetName = MatchRules.highSchool.name
     @State private var profileID = StatProfile.maxPreps.id
     @State private var tracking: OpponentTrackingMode = .ourTeam
+    /// What the form was loaded from. Creating a match persists only
+    /// explicit user changes against this — untouched managed suggestions
+    /// are never written into the team's stored defaults.
+    @State private var loadedDefaults: TeamMatchDefaults.LoadedDefaults?
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -131,6 +135,7 @@ struct NewMatchView: View {
         rulesPresetName = saved.rulesName
         profileID = saved.profileID
         tracking = saved.tracking
+        loadedDefaults = saved
     }
 
     private func create(openingScorer: Bool) async {
@@ -170,9 +175,18 @@ struct NewMatchView: View {
                 location: location,
                 roster: roster)
 
-            // What was just used becomes this team's default for the next match.
-            TeamMatchDefaults.save(
-                teamID: teamID, profileID: profileID, rulesName: rulesPresetName, tracking: tracking)
+            // What the user explicitly chose becomes this team's default for
+            // the next match. Untouched managed suggestions are not
+            // persisted: they re-derive from the live MDM configuration.
+            if let loadedDefaults {
+                TeamMatchDefaults.save(
+                    teamID: teamID,
+                    profileID: profileID,
+                    rulesName: rulesPresetName,
+                    tracking: tracking,
+                    loaded: loadedDefaults,
+                    managed: appModel.managed.configuration)
+            }
 
             await appModel.refreshWidgetSnapshot()
             dismiss()
