@@ -1,3 +1,4 @@
+import MapKit
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
@@ -15,6 +16,7 @@ struct MatchDetailView: View {
     @State private var issues: [ValidationIssue] = []
     @State private var isExporting = false
     @State private var loadFailed = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Group {
@@ -98,6 +100,16 @@ struct MatchDetailView: View {
                     .padding(.vertical, 8)
             }
 
+            if let location = context.descriptor.location {
+                Section("Location") {
+                    LabeledContent(location.name, value: location.address ?? "")
+                    Button("Open in Maps", systemImage: "map") {
+                        openInMaps(location)
+                    }
+                    .accessibilityIdentifier("matchDetail.openInMaps")
+                }
+            }
+
             if context.phase != .finalized {
                 Section {
                     EmptyHint(
@@ -126,6 +138,7 @@ struct MatchDetailView: View {
             Section("Box Score") {
                 BoxScoreTable(context: context, snapshot: snapshot)
                     .padding(.vertical, 6)
+                    .accessibilityIdentifier("section.Box Score")
             }
 
             if context.profile.tracks(.goalkeeping) {
@@ -161,6 +174,7 @@ struct MatchDetailView: View {
                 }
             } header: {
                 Text("Stat Completeness")
+                    .accessibilityIdentifier("section.Stat Completeness")
             } footer: {
                 Text("A dash in an export means the category was not tracked. It is unknown, not zero.")
             }
@@ -213,6 +227,20 @@ struct MatchDetailView: View {
             .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func openInMaps(_ location: MatchLocation) {
+        if let latitude = location.latitude, let longitude = location.longitude {
+            let item = MKMapItem(
+                location: CLLocation(latitude: latitude, longitude: longitude), address: nil)
+            item.name = location.name
+            item.openInMaps()
+        } else if let query = (location.address ?? location.name)
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+            let url = URL(string: "https://maps.apple.com/?q=" + query)
+        {
+            openURL(url)
+        }
     }
 
     private func statusTitle(_ phase: MatchPhase) -> String {

@@ -23,6 +23,7 @@ public enum MatchMapper {
             opponentShortName: model.opponentShortName,
             kickoff: model.kickoff,
             venue: model.venue,
+            location: model.location,
             rules: rules,
             statProfile: profile,
             tracking: model.tracking,
@@ -61,6 +62,7 @@ public enum MatchMapper {
         model.opponentShortName = context.descriptor.opponentShortName
         model.kickoff = context.descriptor.kickoff
         model.venueRaw = context.descriptor.venue.rawValue
+        model.location = context.descriptor.location
         model.competition = context.descriptor.competition
         model.trackingRaw = context.descriptor.tracking.rawValue
         model.rulesData = try ProgrammeCoding.encoder.encode(context.rules)

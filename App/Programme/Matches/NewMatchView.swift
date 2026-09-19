@@ -24,6 +24,7 @@ struct NewMatchView: View {
     @State private var opponentShort = ""
     @State private var kickoff = Date().addingTimeInterval(3_600)
     @State private var venue: Venue = .home
+    @State private var location: MatchLocation?
     @State private var competition = ""
     @State private var rulesPresetName = MatchRules.highSchool.name
     @State private var profileID = StatProfile.maxPreps.id
@@ -57,6 +58,7 @@ struct NewMatchView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    LocationSearchField(selection: $location)
                 }
 
                 Section("Kickoff") {
@@ -164,6 +166,7 @@ struct NewMatchView: View {
                 statProfile: profile,
                 tracking: tracking,
                 competition: competition.isEmpty ? nil : competition,
+                location: location,
                 roster: roster)
 
             // What was just used becomes this team's default for the next match.

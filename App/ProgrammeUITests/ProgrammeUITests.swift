@@ -775,13 +775,55 @@ final class ProgrammeUITests: XCTestCase {
             "The scoring summary does not state the configuration: \(scoring.label)")
     }
 
+    func testNewMatchLocationIsOptionalAndOfflineSafe() {
+        let app = launch()
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
+
+        app.buttons["New Match"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["New Match"].waitForExistence(timeout: 5))
+
+        // The venue search row is present but a match is complete without one:
+        // offline scoring must never wait on a place lookup.
+        XCTAssertTrue(
+            element(app, "matchLocation.search").waitForExistence(timeout: 5),
+            "The optional location search row is missing from New Match")
+    }
+
+    func testMatchDetailWithoutLocationOffersNoMapsAction() {
+        let app = launch()
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
+
+        // The fixture match has no location, so Match Detail must not offer
+        // an Open in Maps action for it. Home shows only the three most
+        // recent results, so reach the older Dixie fixture via Matches.
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
+        element(app, "match.Dixie").tap()
+        XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
+        XCTAssertFalse(
+            element(app, "matchDetail.openInMaps").exists,
+            "Open in Maps must not appear for a match with no location")
+    }
+
     func testMatchDetailDistinguishesNotTrackedFromZero() {
         let app = launch()
         XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
 
+        // Home shows only the three most recent results; the older Dixie
+        // fixture lives under Matches.
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
         element(app, "match.Dixie").tap()
         XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
-        XCTAssertTrue(element(app, "section.Stat Completeness").exists)
+        // The completeness section sits below several tables, so bring it
+        // into view before asserting on it.
+        let completenessSection = element(app, "section.Stat Completeness")
+        var attempts = 0
+        while !completenessSection.exists && attempts < 8 {
+            app.swipeUp()
+            attempts += 1
+        }
+        XCTAssertTrue(completenessSection.exists)
 
         // The MaxPreps profile does not track offsides, so it has to read as
         // unknown rather than as a zero.
