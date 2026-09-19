@@ -145,10 +145,9 @@ struct SeasonStatsView: View {
     }
 
     private func header(_ season: SeasonStats) -> some View {
+        // Team identity lives in the navigation bar (title, subtitle, team
+        // menu); this section carries only season information.
         VStack(alignment: .leading, spacing: 12) {
-            Text(teamDetails?.name ?? "")
-                .font(.largeTitle.weight(.semibold))
-
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 16)], spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(season.recordText)
@@ -375,7 +374,7 @@ private struct SeasonPlayerSortComparator: SortComparator {
             return .orderedDescending
         case (.some, nil):
             return .orderedAscending
-        case let (.some(lhs), .some(rhs)):
+        case (.some(let lhs), .some(let rhs)):
             return compareKnown(lhs, rhs)
         }
     }
