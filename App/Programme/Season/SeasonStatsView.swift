@@ -1,4 +1,5 @@
 import Charts
+import Foundation
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
@@ -219,51 +220,217 @@ private struct SeasonPlayerTableRow: Identifiable {
     var gamesPlayed: Int { stats.matchesPlayed }
     var starts: Int { stats.starts }
     var minutes: Int { stats.minutesPlayed }
-    var goals: Int { stats.value(.goals, \.goals).countValue ?? Int.min }
-    var assists: Int { stats.value(.assists, \.assists).countValue ?? Int.min }
-    var points: Int { stats.value(.goals, \.points).countValue ?? Int.min }
-    var shots: Int { stats.value(.shots, \.shots).countValue ?? Int.min }
-    var shotsOnGoal: Int { stats.value(.shots, \.shotsOnGoal).countValue ?? Int.min }
+    var goals: Int? { stats.value(.goals, \.goals).countValue }
+    var assists: Int? { stats.value(.assists, \.assists).countValue }
+    var points: Int? { stats.value(.goals, \.points).countValue }
+    var shots: Int? { stats.value(.shots, \.shots).countValue }
+    var shotsOnGoal: Int? { stats.value(.shots, \.shotsOnGoal).countValue }
+}
+
+/// A table sort that preserves Programme's "untracked is not zero" invariant.
+///
+/// Unknown / not-applicable values always sort after real values, regardless of
+/// whether the user asks for ascending or descending order. A player with a
+/// tracked zero therefore remains meaningfully different from a player whose
+/// category was never tracked.
+private struct SeasonPlayerSortComparator: SortComparator {
+    enum Field: String, CaseIterable, Identifiable, Sendable {
+        case name
+        case gamesPlayed
+        case starts
+        case minutes
+        case goals
+        case assists
+        case points
+        case shots
+        case shotsOnGoal
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .name: "Player"
+            case .gamesPlayed: "Games Played"
+            case .starts: "Starts"
+            case .minutes: "Minutes"
+            case .goals: "Goals"
+            case .assists: "Assists"
+            case .points: "Points"
+            case .shots: "Shots"
+            case .shotsOnGoal: "Shots on Goal"
+            }
+        }
+
+        static let compactChoices: [Self] = [.points, .goals, .assists, .minutes]
+    }
+
+    typealias Compared = SeasonPlayerTableRow
+
+    var field: Field
+    var order: SortOrder = .forward
+
+    func compare(_ lhs: SeasonPlayerTableRow, _ rhs: SeasonPlayerTableRow) -> ComparisonResult {
+        switch field {
+        case .name:
+            return applyOrder(lhs.name.localizedStandardCompare(rhs.name))
+        case .gamesPlayed:
+            return compareKnown(lhs.gamesPlayed, rhs.gamesPlayed)
+        case .starts:
+            return compareKnown(lhs.starts, rhs.starts)
+        case .minutes:
+            return compareKnown(lhs.minutes, rhs.minutes)
+        case .goals:
+            return compareOptional(lhs.goals, rhs.goals)
+        case .assists:
+            return compareOptional(lhs.assists, rhs.assists)
+        case .points:
+            return compareOptional(lhs.points, rhs.points)
+        case .shots:
+            return compareOptional(lhs.shots, rhs.shots)
+        case .shotsOnGoal:
+            return compareOptional(lhs.shotsOnGoal, rhs.shotsOnGoal)
+        }
+    }
+
+    private func compareKnown<T: Comparable>(_ lhs: T, _ rhs: T) -> ComparisonResult {
+        let result: ComparisonResult =
+            if lhs < rhs {
+                .orderedAscending
+            } else if lhs > rhs {
+                .orderedDescending
+            } else {
+                .orderedSame
+            }
+        return applyOrder(result)
+    }
+
+    private func compareOptional(_ lhs: Int?, _ rhs: Int?) -> ComparisonResult {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return .orderedSame
+        case (nil, .some):
+            return .orderedDescending
+        case (.some, nil):
+            return .orderedAscending
+        case let (.some(lhs), .some(rhs)):
+            return compareKnown(lhs, rhs)
+        }
+    }
+
+    private func applyOrder(_ result: ComparisonResult) -> ComparisonResult {
+        guard order == .reverse else { return result }
+        switch result {
+        case .orderedAscending: return .orderedDescending
+        case .orderedSame: return .orderedSame
+        case .orderedDescending: return .orderedAscending
+        }
+    }
 }
 
 private struct SeasonPlayersTableView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var rows: [SeasonPlayerTableRow]
     @State private var selection: PlayerID?
-    @State private var sortOrder = [KeyPathComparator(\SeasonPlayerTableRow.points, order: .reverse)]
+    @State private var sortOrder = [
+        SeasonPlayerSortComparator(field: .points, order: .reverse)
+    ]
+    @State private var compactSortField = SeasonPlayerSortComparator.Field.points
 
     init(season: SeasonStats, roster: RosterSnapshot) {
         let rows = season.players.values.map {
             SeasonPlayerTableRow(stats: $0, player: roster[$0.playerID])
         }
-        _rows = State(initialValue: rows.sorted { $0.points > $1.points })
+        let initialOrder = [
+            SeasonPlayerSortComparator(field: .points, order: .reverse),
+            SeasonPlayerSortComparator(field: .name),
+        ]
+        _rows = State(initialValue: rows.sorted(using: initialOrder))
     }
 
     var body: some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("Player", value: \.name) { row in
+            TableColumn("Player", sortUsing: SeasonPlayerSortComparator(field: .name)) { row in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.name).font(.body.weight(.medium))
                     if horizontalSizeClass == .compact {
                         Text("\(row.gamesPlayed) GP · \(row.starts) GS · \(row.minutes) MIN")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text(compactProduction(row)).font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(compactProduction(row))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            TableColumn("GP", value: \.gamesPlayed) { Text("\($0.gamesPlayed)").monospacedDigit() }
-            TableColumn("GS", value: \.starts) { Text("\($0.starts)").monospacedDigit() }
-            TableColumn("MIN", value: \.minutes) { Text("\($0.minutes)").monospacedDigit() }
-            TableColumn("G", value: \.goals) { StatValueText($0.stats.value(.goals, \.goals)) }
-            TableColumn("A", value: \.assists) { StatValueText($0.stats.value(.assists, \.assists)) }
-            TableColumn("PTS", value: \.points) { StatValueText($0.stats.value(.goals, \.points)) }
-            TableColumn("SH", value: \.shots) { StatValueText($0.stats.value(.shots, \.shots)) }
-            TableColumn("SOG", value: \.shotsOnGoal) { StatValueText($0.stats.value(.shots, \.shotsOnGoal)) }
+            TableColumn("GP", sortUsing: SeasonPlayerSortComparator(field: .gamesPlayed)) {
+                Text("\($0.gamesPlayed)").monospacedDigit()
+            }
+            TableColumn("GS", sortUsing: SeasonPlayerSortComparator(field: .starts)) {
+                Text("\($0.starts)").monospacedDigit()
+            }
+            TableColumn("MIN", sortUsing: SeasonPlayerSortComparator(field: .minutes)) {
+                Text("\($0.minutes)").monospacedDigit()
+            }
+            TableColumn("G", sortUsing: SeasonPlayerSortComparator(field: .goals)) {
+                StatValueText($0.stats.value(.goals, \.goals))
+            }
+            TableColumn("A", sortUsing: SeasonPlayerSortComparator(field: .assists)) {
+                StatValueText($0.stats.value(.assists, \.assists))
+            }
+            TableColumn("PTS", sortUsing: SeasonPlayerSortComparator(field: .points)) {
+                StatValueText($0.stats.value(.goals, \.points))
+            }
+            TableColumn("SH", sortUsing: SeasonPlayerSortComparator(field: .shots)) {
+                StatValueText($0.stats.value(.shots, \.shots))
+            }
+            TableColumn("SOG", sortUsing: SeasonPlayerSortComparator(field: .shotsOnGoal)) {
+                StatValueText($0.stats.value(.shots, \.shotsOnGoal))
+            }
         }
-        .onChange(of: sortOrder) { _, order in rows.sort(using: order) }
+        .onChange(of: sortOrder) { _, order in
+            sortRows(using: order)
+        }
+        .onChange(of: compactSortField) { _, field in
+            guard horizontalSizeClass == .compact else { return }
+            sortOrder = [SeasonPlayerSortComparator(field: field, order: .reverse)]
+        }
+        .onChange(of: horizontalSizeClass) { _, sizeClass in
+            guard sizeClass == .compact else { return }
+            let current = sortOrder.first?.field
+            compactSortField =
+                SeasonPlayerSortComparator.Field.compactChoices.contains(current ?? .points)
+                ? (current ?? .points)
+                : .points
+            sortOrder = [
+                SeasonPlayerSortComparator(field: compactSortField, order: .reverse)
+            ]
+        }
         .navigationTitle("Player Statistics")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selection) { PlayerDetailView(playerID: $0) }
+        .toolbar {
+            if horizontalSizeClass == .compact {
+                ToolbarItem(placement: .secondaryAction) {
+                    Picker("Sort", selection: $compactSortField) {
+                        ForEach(SeasonPlayerSortComparator.Field.compactChoices) { field in
+                            Text(field.title).tag(field)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+    }
+
+    private func sortRows(using order: [SeasonPlayerSortComparator]) {
+        var effectiveOrder =
+            order.isEmpty
+            ? [SeasonPlayerSortComparator(field: .points, order: .reverse)]
+            : order
+        if effectiveOrder.first?.field != .name {
+            effectiveOrder.append(SeasonPlayerSortComparator(field: .name))
+        }
+        rows.sort(using: effectiveOrder)
     }
 
     private func compactProduction(_ row: SeasonPlayerTableRow) -> String {
