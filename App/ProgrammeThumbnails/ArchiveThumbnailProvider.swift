@@ -63,6 +63,8 @@ final class ArchiveThumbnailProvider: QLThumbnailProvider {
         decoder.dateDecodingStrategy = .iso8601
         let file = try decoder.decode(ManifestFile.self, from: data)
         guard let manifest = file.manifest,
+            // The manifest marker is a stable file-format identifier and intentionally
+            // remains org.programme.archive for backward compatibility.
             manifest.format == "org.programme.archive",
             let teamName = manifest.teamName, !teamName.isEmpty
         else {
