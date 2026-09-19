@@ -12,9 +12,11 @@ struct MultiSubstitutionTip: Tip {
 
     var title: Text { Text("Make several substitutions at once") }
     var message: Text? {
-        Text("Tap every player coming off, then every player coming on, and commit them together. They are all recorded at the same match time.")
+        Text(
+            "Pair each player coming off with the player replacing them, then start the next pair. Record commits them all at the same match time."
+        )
     }
-    var image: Image? { Image(systemName: "arrow.left.arrow.right") }
+    var image: Image? { Image(systemName: "person.2.arrow.trianglehead.counterclockwise") }
 
     var rules: [Rule] {
         #Rule(Self.didOpenSubstitution) { $0.donations.count >= 2 }
@@ -28,7 +30,9 @@ struct CorrectEventTimeTip: Tip {
 
     var title: Text { Text("Got the time wrong?") }
     var message: Text? {
-        Text("Tap any event in the log to change its time. Programme recalculates every player's minutes from the corrected time — you never repair totals by hand.")
+        Text(
+            "Tap any event in the log to change its time. Programme recalculates every player's minutes from the corrected time — you never repair totals by hand."
+        )
     }
     var image: Image? { Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90") }
 
@@ -41,7 +45,9 @@ struct CorrectEventTimeTip: Tip {
 struct CompletenessTip: Tip {
     var title: Text { Text("Not tracked is not zero") }
     var message: Text? {
-        Text("Categories this match wasn't recording stay unknown in season totals and exports, instead of being published as zeros.")
+        Text(
+            "Categories this match wasn't recording stay unknown in season totals and exports, instead of being published as zeros."
+        )
     }
     var image: Image? { Image(systemName: "minus.circle") }
 }
@@ -50,7 +56,9 @@ struct CompletenessTip: Tip {
 struct UnknownPlayerTip: Tip {
     var title: Text { Text("Don't know the number?") }
     var message: Text? {
-        Text("Choose “Player Unknown”. The event is recorded straight away and collected under Review, so you can keep watching play and settle it at halftime.")
+        Text(
+            "Choose “Player Unknown”. The event is recorded straight away and collected under Review, so you can keep watching play and settle it at halftime."
+        )
     }
     var image: Image? { Image(systemName: "questionmark.circle") }
 }

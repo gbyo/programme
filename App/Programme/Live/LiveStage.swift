@@ -46,6 +46,16 @@ enum ComposerStep: Equatable {
         }
     }
 
+    /// Whether this step supplies its own `NavigationStack` and navigation
+    /// chrome. A step that is a multi-screen flow does; a step that is a single
+    /// question takes the composer sheet's.
+    var providesOwnNavigation: Bool {
+        switch self {
+        case .substitution: true
+        default: false
+        }
+    }
+
     /// What the compact sheet calls itself at this step.
     var title: String {
         switch self {

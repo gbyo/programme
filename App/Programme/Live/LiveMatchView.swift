@@ -33,6 +33,10 @@ struct LiveMatchView: View {
     @State private var note = ""
 
     enum LiveSheet: Identifiable, Equatable {
+        /// The Event Composer itself. Its *content* lives in `composer`; this
+        /// case only says that a compact window presents it as a sheet, so
+        /// Programme still has exactly one presentation owner.
+        case composer
         case eventLog
         case review
         case options
@@ -44,6 +48,10 @@ struct LiveMatchView: View {
 
         var id: String {
             switch self {
+            // Deliberately stable across composer steps: "Who scored? → Who
+            // assisted? → Where?" changes the content inside one sheet rather
+            // than dismissing and presenting three.
+            case .composer: "composer"
             case .eventLog: "log"
             case .review: "review"
             case .options: "options"
@@ -82,8 +90,9 @@ struct LiveMatchView: View {
         static let lineupMaximum: CGFloat = 320
         static let recordMinimum: CGFloat = 340
         static let recordMaximum: CGFloat = 380
-        /// What the workspace needs to hold the substitution grid's two columns
-        /// side by side without scrolling — the roomiest thing it ever shows.
+        /// What the workspace needs to hold Substitution's two lists —
+        /// Coming Off beside Coming On — side by side with a name and a jersey
+        /// number legible in each. The roomiest thing it ever shows.
         static let workspaceComfortable: CGFloat = 560
         /// What it needs to ask a single question: a player grid four tiles
         /// across, or an assist picker.
@@ -101,9 +110,20 @@ struct LiveMatchView: View {
     }
 
     /// Whether the composer takes over the screen in a sheet rather than living
-    /// in a column. This is the platform's compact environment — iPhone, and an
-    /// iPad window narrow enough that the system itself says one pane at a time.
-    private var composerUsesSheet: Bool { horizontalSizeClass == .compact }
+    /// in a column.
+    ///
+    /// The product rule comes first and the layout rule second. A phone always
+    /// uses the sheet, because the substitution flow there is a pushed
+    /// navigation stack and falling back to the iPad columns because of an
+    /// unexpected size class would be a broken screen rather than a compromise.
+    /// A narrow iPad window — Stage Manager, Split View — reaches the same
+    /// behaviour through the platform's own compact environment.
+    private var composerUsesSheet: Bool {
+        #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .phone { return true }
+        #endif
+        return horizontalSizeClass == .compact
+    }
 
     var body: some View {
         NavigationStack {
@@ -156,17 +176,12 @@ struct LiveMatchView: View {
             }
             .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
         }
-        // One composer sheet, not one sheet per question. The step changes inside
-        // it, so "Who scored? → Who assisted? → Where?" is a transition rather
-        // than a dismiss and a re-present.
-        .sheet(isPresented: composerSheetBinding) {
-            ComposerSheet(title: composer.step?.title ?? "") {
-                composerContent
-            } onDismiss: {
-                abandonComposer()
-            }
-        }
-        .sheet(item: $activeSheet) { sheet in
+        // Exactly one `.sheet` in the whole workspace. The composer is a route
+        // through the same router as everything else, so two presentations can
+        // never race each other, and moving between composer questions is a
+        // content change inside one sheet rather than a dismiss and a
+        // re-present.
+        .sheet(item: presentedSheet) { sheet in
             sheetContent(sheet)
         }
         .alert("Add a note", isPresented: $isAddingNote) {
@@ -182,6 +197,9 @@ struct LiveMatchView: View {
         .onChange(of: session.phase) { _, phase in
             switch phase {
             case .periodBreak, .awaitingFinalization:
+                // The composer owns the sheet while it has a question, so a
+                // period ending has to put it away before asking for one.
+                abandonComposer()
                 activeSheet = .periodBreak
             case .inPeriod:
                 if activeSheet == .periodBreak { activeSheet = nil }
@@ -199,19 +217,41 @@ struct LiveMatchView: View {
         }
     }
 
-    /// Presented only where the composer uses a sheet, and closed by finishing
-    /// the step. Dismissing by gesture runs the same path.
-    private var composerSheetBinding: Binding<Bool> {
+    /// The single source of "what is presented".
+    ///
+    /// The composer wins while it has a question, because in a compact window it
+    /// is the thing the scorer is looking at; everything else is reached from a
+    /// toolbar that is behind it. Anything that needs to interrupt the composer
+    /// — a period ending — abandons it first, so this never hides a request.
+    private var presentedSheet: Binding<LiveSheet?> {
         Binding(
-            get: { composerUsesSheet && composer.isComposing },
-            set: { isPresented in
-                if !isPresented { abandonComposer() }
+            get: {
+                if composerUsesSheet && composer.isComposing { return .composer }
+                return activeSheet
+            },
+            set: { sheet in
+                guard sheet == nil else {
+                    activeSheet = sheet
+                    return
+                }
+                if composerUsesSheet && composer.isComposing {
+                    abandonComposer()
+                } else {
+                    activeSheet = nil
+                }
             })
     }
 
     @ViewBuilder
     private func sheetContent(_ sheet: LiveSheet) -> some View {
         switch sheet {
+        case .composer:
+            ComposerSheet(step: composer.step) {
+                composerContent
+            } onDismiss: {
+                abandonComposer()
+            }
+
         case .eventLog:
             NavigationStack {
                 EventLogView(session: session) { event in
@@ -445,6 +485,7 @@ struct LiveMatchView: View {
         case .substitution:
             SubstitutionStage(
                 session: session,
+                presentation: composerUsesSheet ? .navigation : .columns,
                 onCommit: { out, incoming, keeper in
                     session.substitute(out: out, in: incoming, goalkeeperAfter: keeper)
                     composer.finish()
@@ -729,28 +770,41 @@ struct LiveMatchView: View {
 /// answering "who scored, who assisted, where" should see one surface that
 /// changes, not three that stack.
 struct ComposerSheet<Content: View>: View {
-    let title: String
+    let step: ComposerStep?
     @ViewBuilder var content: Content
     var onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { onDismiss() }
-                            .accessibilityIdentifier("composer.done")
-                    }
+        Group {
+            if step?.providesOwnNavigation == true {
+                // A step that is a flow rather than a question brings its own
+                // `NavigationStack`, title, subtitle and actions. Wrapping it in
+                // a second stack here would nest one inside the other and turn
+                // its pushes into a broken back stack.
+                content
+            } else {
+                NavigationStack {
+                    content
+                        .navigationTitle(step?.title ?? "")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { onDismiss() }
+                                    .accessibilityIdentifier("composer.done")
+                            }
+                        }
                 }
+            }
         }
-        .presentationDetents([.large])
+        // A real system page presentation rather than a panel floating in the
+        // middle of the screen. On a phone `.page` is the full-width, full-height
+        // sheet; on a regular-width window the system still insets it sensibly.
+        .presentationSizing(.page)
         .presentationDragIndicator(.visible)
         .accessibilityIdentifier("composer.sheet")
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: title)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: step)
     }
 }
 
