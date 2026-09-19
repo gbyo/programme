@@ -28,7 +28,7 @@
         <dict>
             <key>QLSupportedContentTypes</key>
             <array>
-                <string>org.programme.archive</string>
+                <string>com.gbyo.programme.archive</string>
             </array>
             <key>QLThumbnailMinimumDimension</key>
             <integer>16</integer>
