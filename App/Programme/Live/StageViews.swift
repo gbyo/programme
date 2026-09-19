@@ -116,9 +116,10 @@ struct PlayerPickerStage: View {
                 }
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: 60)
+            .frame(minHeight: 60)
         }
         .programmeTile(tint: tint, shape: .roundedRectangle(radius: Programme.Metrics.cornerRadius))
+        .buttonSizing(.flexible)
         .accessibilityIdentifier("pick.wide.\(title)")
         .accessibilityLabel("\(title). \(subtitle)")
     }
@@ -169,9 +170,10 @@ struct AssistPickerStage: View {
             } label: {
                 Label("Unassisted", systemImage: "circle.slash")
                     .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: unassistedHeight)
+                    .frame(minHeight: unassistedHeight)
             }
             .programmePrimaryAction()
+            .buttonSizing(.flexible)
             .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
             .accessibilityIdentifier("assist.unassisted")
             .keyboardShortcut(.return, modifiers: [])
@@ -208,9 +210,10 @@ struct AssistPickerStage: View {
             } label: {
                 Label("Assist Unknown", systemImage: "questionmark.circle")
                     .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .frame(minHeight: 46)
             }
             .buttonStyle(.bordered)
+            .buttonSizing(.flexible)
             .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
             .tint(.secondary)
             .accessibilityIdentifier("assist.unknown")

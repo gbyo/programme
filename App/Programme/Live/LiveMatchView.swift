@@ -164,7 +164,8 @@ struct LiveMatchView: View {
                 .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
                 .animation(
                     reduceMotion ? nil : .snappy(duration: 0.22),
-                    value: compactLastEventID)
+                    value: compactLastEventID
+                )
                 .sensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
                 .navigationBarTitleDisplayMode(.inline)
@@ -301,9 +302,7 @@ struct LiveMatchView: View {
 
         case .eventLog:
             NavigationStack {
-                EventLogView(session: session) { event in
-                    activeSheet = .editEvent(event.id)
-                }
+                EventLogView(session: session)
             }
 
         case .review:
@@ -982,8 +981,9 @@ struct PenaltyOutcomeStage: View {
         } label: {
             Label(title, systemImage: symbol)
                 .font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 66)
+                .frame(minHeight: 66)
         }
+        .buttonSizing(.flexible)
         .accessibilityIdentifier("penalty.\(outcome.rawValue)")
 
         if isGoal {
