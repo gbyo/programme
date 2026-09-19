@@ -77,6 +77,18 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
+      - name: Restore Mint packages
+        uses: actions/cache@v6
+        with:
+          # Mint 0.18 keeps built packages (including the compiled XcodeGen
+          # release) under ~/.mint. A hit skips recompiling XcodeGen from
+          # source; a miss falls back to `mint bootstrap`, which is still
+          # correct. The key pins the Mint inputs; runs-on pins the Xcode
+          # image, so no separate toolchain component is needed.
+          path: ~/.mint
+          key: mint-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Mintfile', 'Brewfile') }}
+          restore-keys: |
+            mint-${{ runner.os }}-${{ runner.arch }}-
       - name: Install pinned developer tools
         run: |
           brew bundle --file Brewfile
@@ -100,6 +112,17 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
+      - name: Restore Mint packages
+        uses: actions/cache@v6
+        with:
+          # Same cache as the build job: Mint 0.18 keeps built packages
+          # (including the compiled XcodeGen release) under ~/.mint. A hit
+          # skips recompiling XcodeGen from source; a miss falls back to
+          # `mint bootstrap`, which is still correct.
+          path: ~/.mint
+          key: mint-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Mintfile', 'Brewfile') }}
+          restore-keys: |
+            mint-${{ runner.os }}-${{ runner.arch }}-
       - name: Install pinned developer tools
         run: |
           brew bundle --file Brewfile
@@ -107,6 +130,11 @@ jobs:
       - name: Run UI tests
         env:
           PROGRAMME_XCRESULT_PATH: ${{ runner.temp }}/ProgrammeUITests.xcresult
+          # CI defaults in scripts/test-ui.sh: diagnostics never (avoids the
+          # ~600s post-suite simulator sysdiagnose stall), 3 parallel
+          # workers (bounded for hosted-runner CPU/memory), iPad scope
+          # (excludes the phone-only CompactScorerUITests class).
+          PROGRAMME_CI: 1
         run: bash scripts/test-ui.sh
       - name: Upload test result on failure
         if: failure()

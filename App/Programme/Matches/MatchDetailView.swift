@@ -123,9 +123,12 @@ struct MatchDetailView: View {
                     .padding(.vertical, 6)
             }
 
-            Section("Box Score") {
+            Section {
                 BoxScoreTable(context: context, snapshot: snapshot)
                     .padding(.vertical, 6)
+            } header: {
+                // Plain header carrying the identifier its coverage asks for.
+                Text("Box Score").accessibilityIdentifier("section.Box Score")
             }
 
             if context.profile.tracks(.goalkeeping) {
@@ -160,7 +163,8 @@ struct MatchDetailView: View {
                     CompletenessRow(stat: stat, state: snapshot.completeness(stat))
                 }
             } header: {
-                Text("Stat Completeness")
+                // Plain header carrying the identifier its coverage asks for.
+                Text("Stat Completeness").accessibilityIdentifier("section.Stat Completeness")
             } footer: {
                 Text("A dash in an export means the category was not tracked. It is unknown, not zero.")
             }
