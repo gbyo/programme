@@ -307,11 +307,23 @@ struct BoxScoreTable: View {
     let context: MatchContext
     let snapshot: MatchSnapshot
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private var players: [PlayerSnapshot] {
         context.roster.sortedByNumber.filter { snapshot.player($0.id).appeared }
     }
 
     var body: some View {
+        Group {
+            if horizontalSizeClass == .compact {
+                compactRows
+            } else {
+                regularGrid
+            }
+        }
+    }
+
+    private var regularGrid: some View {
         Grid(horizontalSpacing: 12, verticalSpacing: 0) {
             headerRow
             ForEach(players) { player in
@@ -333,27 +345,14 @@ struct BoxScoreTable: View {
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 16)
         .padding(.bottom, 6)
     }
 
     private func playerRow(_ player: PlayerSnapshot) -> some View {
         let line = snapshot.player(player.id)
         return GridRow {
-            HStack(spacing: 6) {
-                Text(player.shortLabel).font(.subheadline)
-                if line.started {
-                    Text("GS")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                if line.gameWinningGoals > 0 {
-                    Text("GWG")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            playerIdentity(player, line: line)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Text("\(line.minutesPlayed)")
             StatValueText(context.profile.value(.goals, line.goals))
@@ -367,11 +366,79 @@ struct BoxScoreTable: View {
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
+
+    private var compactRows: some View {
+        VStack(spacing: 0) {
+            ForEach(players) { player in
+                if player.id != players.first?.id {
+                    Divider()
+                }
+                compactPlayerRow(player)
+            }
+        }
+    }
+
+    private func compactPlayerRow(_ player: PlayerSnapshot) -> some View {
+        let line = snapshot.player(player.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                playerIdentity(player, line: line)
+                Spacer(minLength: 8)
+                Text("\(line.minutesPlayed) min")
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 48), spacing: 12)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                compactStat("G", context.profile.value(.goals, line.goals))
+                compactStat("A", context.profile.value(.assists, line.assists))
+                compactStat("PTS", context.profile.value(.goals, line.points))
+                compactStat("SH", context.profile.value(.shots, line.shots))
+                compactStat("SOG", context.profile.value(.shots, line.shotsOnGoal))
+            }
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func playerIdentity(_ player: PlayerSnapshot, line: PlayerStatLine) -> some View {
+        HStack(spacing: 6) {
+            Text(player.shortLabel).font(.subheadline)
+            if line.started {
+                Text("GS")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            if line.gameWinningGoals > 0 {
+                Text("GWG")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    private func compactStat(_ label: String, _ value: StatValue) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            StatValueText(value)
+                .font(.subheadline.weight(.semibold))
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .monospacedDigit()
+    }
 }
 
 struct KeeperTable: View {
     let context: MatchContext
     let snapshot: MatchSnapshot
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var keepers: [KeeperStatLine] {
         snapshot.keepers.values
@@ -380,54 +447,142 @@ struct KeeperTable: View {
     }
 
     var body: some View {
-        Grid(horizontalSpacing: 12, verticalSpacing: 0) {
-            GridRow {
-                Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading).gridColumnAlignment(.leading)
-                Text("MIN").gridColumnAlignment(.trailing)
-                Text("SOGA").gridColumnAlignment(.trailing)
-                Text("SV").gridColumnAlignment(.trailing)
-                Text("GA").gridColumnAlignment(.trailing)
-                Text("SV%").gridColumnAlignment(.trailing)
-                Text("GAA").gridColumnAlignment(.trailing)
+        Group {
+            if horizontalSizeClass == .compact {
+                compactRows
+            } else {
+                regularGrid
             }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
+        }
+    }
 
+    private var regularGrid: some View {
+        Grid(horizontalSpacing: 12, verticalSpacing: 0) {
+            headerRow
             ForEach(keepers, id: \.playerID) { keeper in
                 Divider().gridCellColumns(7)
-                GridRow {
-                    HStack(spacing: 6) {
-                        Text(context.roster[keeper.playerID]?.shortLabel ?? "Goalkeeper")
-                            .font(.subheadline)
-                        if keeper.shutouts > 0 {
-                            Text("SHO").font(.caption2.weight(.semibold)).foregroundStyle(Color.accentColor)
-                        } else if keeper.sharedShutouts > 0 {
-                            Text("SHO (shared)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                keeperRow(keeper)
+            }
+        }
+    }
 
-                    Text("\(keeper.minutesPlayed)")
-                    Text("\(keeper.shotsOnGoalFaced)")
-                    Text("\(keeper.saves)")
-                    Text("\(keeper.goalsAllowed)")
+    private var headerRow: some View {
+        GridRow {
+            Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading).gridColumnAlignment(.leading)
+            Text("MIN").gridColumnAlignment(.trailing)
+            Text("SOGA").gridColumnAlignment(.trailing)
+            Text("SV").gridColumnAlignment(.trailing)
+            Text("GA").gridColumnAlignment(.trailing)
+            Text("SV%").gridColumnAlignment(.trailing)
+            Text("GAA").gridColumnAlignment(.trailing)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.bottom, 6)
+    }
+
+    private func keeperRow(_ keeper: KeeperStatLine) -> some View {
+        GridRow {
+            keeperIdentity(keeper)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(keeper.minutesPlayed)")
+            Text("\(keeper.shotsOnGoalFaced)")
+            Text("\(keeper.saves)")
+            Text("\(keeper.goalsAllowed)")
+            StatValueText(
+                keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable,
+                style: .percent
+            )
+            StatValueText(
+                keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
+                    .map { StatValue.rate($0) } ?? .notApplicable,
+                style: .decimal
+            )
+        }
+        .font(.subheadline)
+        .monospacedDigit()
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var compactRows: some View {
+        VStack(spacing: 0) {
+            ForEach(keepers, id: \.playerID) { keeper in
+                if keeper.playerID != keepers.first?.playerID {
+                    Divider()
+                }
+                compactKeeperRow(keeper)
+            }
+        }
+    }
+
+    private func compactKeeperRow(_ keeper: KeeperStatLine) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            keeperIdentity(keeper)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 54), spacing: 12)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                compactStat("MIN") {
+                    Text("\(keeper.minutesPlayed)").monospacedDigit()
+                }
+                compactStat("SOGA") {
+                    Text("\(keeper.shotsOnGoalFaced)").monospacedDigit()
+                }
+                compactStat("SV") {
+                    Text("\(keeper.saves)").monospacedDigit()
+                }
+                compactStat("GA") {
+                    Text("\(keeper.goalsAllowed)").monospacedDigit()
+                }
+                compactStat("SV%") {
                     StatValueText(
-                        keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable, style: .percent
-                    )
-                    StatValueText(
-                        keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
-                            .map { StatValue.rate($0) } ?? .notApplicable, style: .decimal
+                        keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable,
+                        style: .percent
                     )
                 }
-                .font(.subheadline)
-                .monospacedDigit()
-                .padding(.vertical, 8)
-                .accessibilityElement(children: .combine)
+                compactStat("GAA") {
+                    StatValueText(
+                        keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
+                            .map { StatValue.rate($0) } ?? .notApplicable,
+                        style: .decimal
+                    )
+                }
             }
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func keeperIdentity(_ keeper: KeeperStatLine) -> some View {
+        HStack(spacing: 6) {
+            Text(context.roster[keeper.playerID]?.shortLabel ?? "Goalkeeper")
+                .font(.subheadline)
+            if keeper.shutouts > 0 {
+                Text("SHO")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            } else if keeper.sharedShutouts > 0 {
+                Text("SHO (shared)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func compactStat<Content: View>(
+        _ label: String,
+        @ViewBuilder value: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            value()
+                .font(.subheadline.weight(.semibold))
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
         }
     }
 }
