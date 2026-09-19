@@ -132,11 +132,15 @@ One composer, three presentations, chosen by what the environment can hold:
 | --- | --- | --- |
 | Wide iPad | Lineup / Workspace / Record, all permanent | the middle column |
 | iPad mini, constrained landscape, iPad portrait | Lineup / Record | takes the lineup's side while it has a question, and gives it straight back |
-| Compact (iPhone, narrow Stage Manager) | Record / Lineup as tabs | one `.sheet`, which transitions internally between questions |
+| Compact (iPhone, narrow Stage Manager) | Record / Lineup as tabs | a sheet, which transitions internally between questions |
 
 Record never moves in any of them — that is the position muscle memory depends on.
 
-The compact sheet is **one** sheet. "Who scored? → Who assisted? → Where?" changes the content inside it rather than presenting three sheets in a stack. Popovers are never used for Goal/Shot/Assist. Substitution is inline where there is room and uses the same sheet in compact, because it genuinely needs focused space.
+The whole workspace has **exactly one `.sheet`**. The composer is a route through the same `LiveSheet` router as the event log, the lineup editor and finalization, so two presentations can never race each other and the router is the single unambiguous presentation owner. Within it, "Who scored? → Who assisted? → Where?" changes content rather than presenting three sheets in a stack; the sheet's identity is stable across composer steps for exactly that reason. Popovers are never used for Goal/Shot/Assist. Substitution is inline where there is room and uses the same sheet in compact, because it genuinely needs focused space.
+
+The composer sheet uses `.presentationSizing(.page)` rather than a detent, which on a phone is the system's full-width, full-height page presentation instead of a panel floating in the middle of the screen. A step that is a multi-screen flow rather than a single question — substitution — brings its own `NavigationStack` and chrome, and the sheet does not wrap it in a second one.
+
+Whether the composer is a sheet is a **product** rule before it is a layout rule: a phone always gets the sheet, and a narrow iPad window reaches the same behaviour through the platform's compact environment. An iPhone must never fall back to the iPad columns because of an unexpected size class.
 
 In compact, tapping a player in Lineup switches back to Record automatically: having said *who*, the scorer's next tap is always *what*.
 
@@ -180,17 +184,55 @@ At halftime or full time, the scorer can resolve the existing event. Resolving a
 
 ## Substitutions
 
-Substitution entry is a dedicated high-speed mode with current players and bench players clearly separated.
+**A substitution is a pair, not two selections.** One player comes off and one specific player comes on *for them*. The draft is a list of those pairs — `SubstitutionPlan` in ProgrammeCore — and every candidate list is derived from it, so a player already spoken for on either side disappears from the choices rather than being rejected later.
 
 Normal flow:
 
 ```text
-OUT → IN → commit at current match time
+Substitution → Smith off → Jones on → Record
 ```
 
-Support multiple substitutions at one timestamp. Re-entry is represented as another playing interval when the rules allow it.
+Two changes at once need no "add another" tap, because a completed pair puts the scorer straight back where the next one starts:
 
-If a recorded substitution time is corrected later, the event changes and Programme derives a new lineup timeline; the user never manually repairs minute totals.
+```text
+Substitution → Smith → Jones → Brown → Davis → Record
+```
+
+The whole batch is still **one event at one match time**. At commit the pairs flatten in order:
+
+```swift
+playersOut = plan.pairs.map(\.playerOut)
+playersIn  = plan.pairs.map(\.playerIn)
+```
+
+so `playersOut[n]` is the player `playersIn[n]` replaced. The stored schema is unchanged; the relationship is carried by the array order, which is what lets a multi-substitution narrate as `#13 Ferrer for #11 Trotter; #14 Hollis for #6 Kinard` rather than two lists the reader has to pair up.
+
+`MatchEngine.validateSubstitution` still permits unequal counts, and it should: a side may legitimately play short, and the engine is also the gate for imports and edits. The *normal* interface simply never produces one. Narration handles the unequal case honestly (`… ; #6 Kinard off`) instead of forcing a pair.
+
+Candidates always come from live lineup state rather than from the roster, so under unlimited re-entry a player who came off ten minutes ago is offered again from the bench. Re-entry is represented as another playing interval when the rules allow it.
+
+Nothing about the lineup moves while a draft is being assembled, so Cancel discards it completely and Undo reverses the whole batch as one event. If a recorded substitution time is corrected later, the event changes and Programme derives a new lineup timeline; the user never manually repairs minute totals.
+
+### Two presentations of one draft
+
+| Environment | Shape |
+| --- | --- |
+| iPhone, and any compact window | A pushed `NavigationStack` inside the composer sheet: **Who is coming off?** → **Coming On** → back to the root, ready for the next pair |
+| Regular-width iPad | **Coming Off** beside **Coming On**, where the right column only ever answers *for whom* |
+
+On the phone the flow uses real navigation chrome, not a hand-built header: the title is `Substitution`, the navigation subtitle is the period and clock (`1st · 24:18`), Cancel is the leading action, and the trailing confirmation (`Record`, `Record 2`) appears only once at least one complete pair exists. The Coming On screen's subtitle is the relationship itself — `For #11 Trotter` — so it cannot be answered without knowing who it is for. Completed pairs sit in a **Ready** section above the remaining outgoing players and are removed with a native destructive `swipeActions`, or corrected by tapping the row.
+
+On iPad the two columns keep the advantage of seeing the field and the bench at once, but the interaction is still pair-aware: tapping a player on the left makes them the active outgoing selection, the right column says `Coming on for #11 Trotter`, and tapping there forms the pair and clears the selection for the next one. The right column is secondary until it has a question to answer. There is no large `arrow.left.arrow.right`, no selectable tile grid, and no horizontal goalkeeper carousel.
+
+Both presentations are `List`, `Section` and navigation destinations — system components, system separators, system swipe actions. The jersey number is the fastest identifier, so it is monospaced and given a stable width for names to align against. Programme's accent is used for selection and confirmation only.
+
+### Goalkeeper replacement
+
+Replacing the goalkeeper is a first-class exceptional step, not another picker stuffed under the main interface. If the batch takes the current goalkeeper off, it **cannot** commit until Programme is told who is in goal afterwards, because every later save is attributed from that answer.
+
+Candidates are the players who will actually be on the field once every pending pair is applied — whoever stays on, plus whoever comes on. Recognised goalkeepers sort first and are marked, but Programme never assumes the incoming player takes the gloves because of a roster position. If a later pair invalidates the choice, it is cleared and asked again.
+
+On the phone the question is pushed the moment the relevant pair completes, and answering it returns to the root. On iPad it takes over the right-hand column, in the same place the question would otherwise be answered.
 
 ## Recent event and correction
 

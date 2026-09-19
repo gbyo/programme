@@ -45,6 +45,25 @@ final class ProgrammeUITests: XCTestCase {
         return target
     }
 
+    /// The Coming Off column can be taller than the workspace it sits in, so a
+    /// row may need scrolling into reach — down for a player further into the
+    /// squad, back up for the Ready section above them.
+    @discardableResult
+    private func revealInSubstitution(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+        let target = element(app, identifier)
+        if target.waitForExistence(timeout: 2), target.isHittable { return target }
+        for attempt in 0..<8 {
+            if target.exists && target.isHittable { return target }
+            if attempt < 4 {
+                element(app, "sub.comingOff").swipeUp()
+            } else {
+                element(app, "sub.comingOff").swipeDown()
+            }
+        }
+        XCTAssertTrue(target.exists, "\(identifier) is not reachable")
+        return target
+    }
+
     private func lastEventLabel(_ app: XCUIApplication) -> String {
         let strip = element(app, "scoring.lastEvent")
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
@@ -372,25 +391,104 @@ final class ProgrammeUITests: XCTestCase {
         wait(for: [expectation], timeout: 5)
     }
 
-    func testSubstitutionModeCommitsSeveralPlayersAtOneTimestamp() {
+    /// On an iPad the field and the bench are visible at once, but the right
+    /// column is never an independent second list: it only ever answers *who
+    /// comes on for the player just chosen*.
+    func testSubstitutionOnIPadPairsEachPlayerWithTheirReplacement() {
         let app = launch(["-programme-open-live"])
         waitForScorer(app)
 
         element(app, "scoring.substitution").tap()
-        XCTAssertTrue(element(app, "sub.out.11").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "sub.comingOff").waitForExistence(timeout: 5))
 
-        element(app, "sub.out.11").tap()
-        element(app, "sub.out.6").tap()
+        // The columns, not the phone's pushed flow.
+        revealInSubstitution(app, "sub.out.11")
+        XCTAssertTrue(
+            element(app, "sub.comingOn.idle").exists,
+            "The bench is offered before anyone has been chosen to come off")
+        XCTAssertFalse(
+            app.navigationBars["Substitution"].exists,
+            "The iPad fell back to the phone navigation layout")
+
+        revealInSubstitution(app, "sub.out.11").tap()
+        let comingOnHeader = element(app, "sub.comingOn.header")
+        XCTAssertTrue(
+            comingOnHeader.waitForExistence(timeout: 5),
+            "The right column does not say who it is choosing for")
+        XCTAssertTrue(
+            comingOnHeader.label.contains("Trotter"),
+            "The right column names the wrong player: \(comingOnHeader.label)")
         element(app, "sub.in.13").tap()
+
+        // The pair is formed and both players leave the choices.
+        XCTAssertTrue(revealInSubstitution(app, "sub.pair.11").exists)
+        XCTAssertFalse(element(app, "sub.out.11").exists)
+        XCTAssertTrue(
+            element(app, "sub.comingOn.idle").exists,
+            "The active outgoing selection was not cleared for the next pair")
+
+        revealInSubstitution(app, "sub.out.6").tap()
         element(app, "sub.in.14").tap()
-        attachScreenshot(named: "Substitution mode")
+        XCTAssertTrue(revealInSubstitution(app, "sub.pair.6").exists)
+        attachScreenshot(named: "Substitution, two pairs on iPad")
 
         let commit = element(app, "sub.commit")
         XCTAssertTrue(commit.isEnabled)
         XCTAssertTrue(commit.label.contains("2"), "Multiple substitutions were not batched")
         commit.tap()
 
-        XCTAssertTrue(lastEventLabel(app).contains("Substitution"))
+        let summary = lastEventLabel(app)
+        XCTAssertTrue(summary.contains("Substitution"))
+        XCTAssertTrue(
+            summary.contains("Ferrer") && summary.contains("Hollis"),
+            "Both changes were not recorded together: \(summary)")
+    }
+
+    func testSubstitutionOnIPadRemovesAPendingPairWithASwipe() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "scoring.substitution").tap()
+        XCTAssertTrue(element(app, "sub.comingOff").waitForExistence(timeout: 5))
+        revealInSubstitution(app, "sub.out.11").tap()
+        element(app, "sub.in.13").tap()
+        let pending = revealInSubstitution(app, "sub.pair.11")
+        XCTAssertTrue(pending.exists)
+
+        pending.swipeLeft()
+        let remove = element(app, "sub.remove.11")
+        XCTAssertTrue(remove.waitForExistence(timeout: 5), "No native swipe action to remove")
+        remove.tap()
+
+        XCTAssertFalse(element(app, "sub.pair.11").waitForExistence(timeout: 2))
+        XCTAssertTrue(element(app, "sub.out.11").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "sub.commit").isEnabled, "Record survived an empty draft")
+    }
+
+    func testSubstitutingTheGoalkeeperOnIPadAsksWhoIsInGoal() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "scoring.substitution").tap()
+        XCTAssertTrue(element(app, "sub.comingOff").waitForExistence(timeout: 5))
+        revealInSubstitution(app, "sub.out.1").tap()
+        element(app, "sub.in.22").tap()
+
+        XCTAssertTrue(
+            element(app, "sub.goalkeeperChoice").waitForExistence(timeout: 5),
+            "Taking the goalkeeper off did not ask who is in goal")
+        XCTAssertFalse(
+            element(app, "sub.commit").isEnabled,
+            "The batch could be recorded without a goalkeeper")
+        XCTAssertFalse(
+            element(app, "sub.goalkeeper.1").exists, "The departing goalkeeper was offered")
+        attachScreenshot(named: "Goalkeeper substitution on iPad")
+
+        element(app, "sub.goalkeeper.22").tap()
+        XCTAssertTrue(element(app, "sub.commit").isEnabled)
+        element(app, "sub.commit").tap()
+
+        XCTAssertTrue(lastEventLabel(app).contains("Brannon"))
     }
 
     func testMatchStatsCanBeClosed() {

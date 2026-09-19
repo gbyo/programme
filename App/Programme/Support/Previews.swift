@@ -107,9 +107,70 @@
         }
     }
 
-    #Preview("Substitution mode", traits: .landscapeLeft) {
+    // MARK: - Substitution
+    //
+    // Two presentations of one draft. The phone previews exercise the pushed
+    // flow; the iPad previews exercise the pair-aware columns, including the
+    // narrowest regular-width window Programme supports.
+
+    #Preview("Substitution · iPhone portrait") {
         if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
-            SubstitutionStage(session: session, onCommit: { _, _, _ in }, onCancel: {})
+            SubstitutionStage(
+                session: session, presentation: .navigation, onCommit: { _, _, _ in }, onCancel: {})
+        }
+    }
+
+    #Preview("Substitution · iPhone landscape", traits: .landscapeLeft) {
+        if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
+            SubstitutionStage(
+                session: session, presentation: .navigation, onCommit: { _, _, _ in }, onCancel: {})
+        }
+    }
+
+    #Preview("Substitution · iPhone large text") {
+        if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
+            SubstitutionStage(
+                session: session, presentation: .navigation, onCommit: { _, _, _ in }, onCancel: {}
+            )
+            .environment(\.dynamicTypeSize, .accessibility2)
+        }
+    }
+
+    /// iPad mini portrait: the narrowest window that still gets the columns.
+    #Preview("Substitution · iPad mini portrait") {
+        if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
+            SubstitutionStage(
+                session: session, presentation: .columns, onCommit: { _, _, _ in }, onCancel: {}
+            )
+            .frame(width: 744, height: 1_133)
+        }
+    }
+
+    #Preview("Substitution · iPad mini landscape", traits: .landscapeLeft) {
+        if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
+            SubstitutionStage(
+                session: session, presentation: .columns, onCommit: { _, _, _ in }, onCancel: {}
+            )
+            .frame(width: 1_133, height: 744)
+        }
+    }
+
+    /// A large iPad landscape workspace, at the width the centre column actually
+    /// gets in the three-column layout.
+    #Preview("Substitution · large iPad workspace", traits: .landscapeLeft) {
+        if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
+            SubstitutionStage(
+                session: session, presentation: .columns, onCommit: { _, _, _ in }, onCancel: {}
+            )
+            .frame(width: 700, height: 1_000)
+        }
+    }
+
+    /// The whole scorer on a phone, which is where the composer is a sheet.
+    #Preview("Live · iPhone portrait") {
+        if let session = PreviewSupport.session(ProgrammeSample.liveFirstHalfContext()) {
+            LiveMatchView(session: session)
+                .environment(PreviewSupport.appModel)
         }
     }
 

@@ -117,7 +117,8 @@ public enum MatchNarrator {
 
         case .corner(let action):
             title = "Corner"
-            detail = action.player == .untracked
+            detail =
+                action.player == .untracked
                 ? context.descriptor.shortName(for: action.side) : name(action.player, side: action.side)
 
         case .steal(let action):
@@ -140,12 +141,9 @@ public enum MatchNarrator {
 
         case .substitution(let sub):
             title = "Substitution"
-            let roster = context.roster(for: sub.side)
-            let outNames = sub.playersOut.map { roster[$0]?.shortLabel ?? "Unknown" }.joined(separator: ", ")
-            let inNames = sub.playersIn.map { roster[$0]?.shortLabel ?? "Unknown" }.joined(separator: ", ")
-            detail = "\(inNames) for \(outNames)"
+            detail = substitutionDetail(sub, context: context)
             if let keeper = sub.goalkeeperAfter {
-                secondary = "\(roster[keeper]?.shortLabel ?? "Unknown") in goal"
+                secondary = "\(context.roster(for: sub.side)[keeper]?.shortLabel ?? "Unknown") in goal"
             }
 
         case .goalkeeperChanged(let side, let keeper):
@@ -218,5 +216,28 @@ public enum MatchNarrator {
             wasEdited: event.revision > 1,
             accessibilityLabel: accessibility
         )
+    }
+
+    /// A batched substitution reads as the relationships it actually is —
+    /// "#13 Ferrer for #11 Trotter; #14 Hollis for #6 Kinard" — rather than two
+    /// unrelated lists. `playersOut[n]` is replaced by `playersIn[n]`, so the
+    /// pairing is recoverable from the stored event without a schema change.
+    ///
+    /// Unequal counts remain legal: the engine allows a side to play short, and
+    /// the leftovers are narrated as plain arrivals or departures rather than
+    /// being forced into a pair they do not belong to.
+    static func substitutionDetail(_ sub: SubstitutionEvent, context: MatchContext) -> String {
+        let roster = context.roster(for: sub.side)
+        func label(_ id: PlayerID) -> String { roster[id]?.shortLabel ?? "Unknown" }
+
+        let paired = min(sub.playersOut.count, sub.playersIn.count)
+        var clauses = (0..<paired).map { "\(label(sub.playersIn[$0])) for \(label(sub.playersOut[$0]))" }
+        if sub.playersOut.count > paired {
+            clauses.append(sub.playersOut[paired...].map(label).joined(separator: ", ") + " off")
+        }
+        if sub.playersIn.count > paired {
+            clauses.append(sub.playersIn[paired...].map(label).joined(separator: ", ") + " on")
+        }
+        return clauses.joined(separator: "; ")
     }
 }
