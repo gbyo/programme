@@ -95,7 +95,7 @@ struct RosterImportView: View {
                     }
                     .disabled(rawText.isEmpty || isInterpreting)
                 }
-                if appModel.managed.configuration.isRosterRecognitionAllowed {
+                if appModel.managed.configuration.isAutomatedRosterExtractionAllowed {
                     if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                         Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
                             isShowingScanner = true

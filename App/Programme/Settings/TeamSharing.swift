@@ -115,6 +115,7 @@ enum TeamShareError: LocalizedError {
     case iCloudUnavailable
     case noLibrary
     case shareLookupFailed
+    case collaborationDisabled
 
     var errorDescription: String? {
         switch self {
@@ -124,6 +125,8 @@ enum TeamShareError: LocalizedError {
             return "The library is not ready yet. Try again in a moment."
         case .shareLookupFailed:
             return "Programme couldn't reach iCloud to check sharing. Nothing was changed. Try again."
+        case .collaborationDisabled:
+            return "Team sharing is disabled by this device's management."
         }
     }
 }

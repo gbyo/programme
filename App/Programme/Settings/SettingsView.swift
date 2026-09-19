@@ -19,6 +19,10 @@ struct SettingsView: View {
     @State private var defaultRulesName = MatchRules.highSchool.name
     @State private var defaultTrackingID = OpponentTrackingMode.ourTeam.rawValue
     @State private var isResettingTips = false
+    /// Snapshot of what the pickers were loaded from. Saves persist only
+    /// deltas against this, so merely opening Settings never writes a
+    /// managed suggestion into the team's stored defaults.
+    @State private var loadedDefaults: TeamMatchDefaults.LoadedDefaults?
 
     private var selectedTeamID: TeamID? { appModel.workspace.selectedTeamID }
     private var selectedTeamName: String {
@@ -124,8 +128,17 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .task(id: selectedTeamID) { loadTeamDefaults() }
+            // Reloads when the team changes and when the MDM configuration
+            // changes: a new managed suggestion appears here unless the user
+            // overrode that value (stored user values win in
+            // TeamMatchDefaults.load). Picker interaction is atomic on the
+            // main actor, so a reload cannot clobber an in-flight user edit.
+            .task(id: defaultsReloadKey) { loadTeamDefaults() }
         }
+    }
+
+    private var defaultsReloadKey: String {
+        "\(selectedTeamID?.rawValue.uuidString ?? "none")#\(appModel.managed.configuration.hashValue)"
     }
 
     private func loadTeamDefaults() {
@@ -135,15 +148,18 @@ struct SettingsView: View {
         defaultProfileID = saved.profileID
         defaultRulesName = saved.rulesName
         defaultTrackingID = saved.tracking.rawValue
+        loadedDefaults = saved
     }
 
     private func saveTeamDefaults() {
-        guard let selectedTeamID else { return }
+        guard let selectedTeamID, let loadedDefaults else { return }
         TeamMatchDefaults.save(
             teamID: selectedTeamID,
             profileID: defaultProfileID,
             rulesName: defaultRulesName,
-            tracking: OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam)
+            tracking: OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam,
+            loaded: loadedDefaults,
+            managed: appModel.managed.configuration)
     }
 
     private var appVersion: String {

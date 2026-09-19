@@ -325,7 +325,9 @@ struct TeamDetailView: View {
                 }
             }
         }
-        .task(id: teamID) {
+        // Reloads when the collaboration policy flips, so disabling or
+        // re-enabling sharing applies immediately without reopening the view.
+        .task(id: teamShareReloadKey) {
             await load()
             await loadShareItem()
         }
@@ -347,12 +349,22 @@ struct TeamDetailView: View {
     /// team presents its live share, otherwise the item prepares the share
     /// on first use. Failures (e.g. iCloud signed out) surface here, never
     /// as a dead Share button.
+    private var teamShareReloadKey: String {
+        "\(teamID.rawValue.uuidString)#\(appModel.managed.configuration.hashValue)"
+    }
+
     private func loadShareItem() async {
         conflicts = await appModel.syncConflicts(teamID: teamID)
         syncState = await appModel.syncState(teamID: teamID)
         do {
             shareItem = try await appModel.teamShareItem(teamID: teamID)
             participants = await appModel.teamParticipants(teamID: teamID)
+            errorMessage = nil
+        } catch TeamShareError.collaborationDisabled {
+            // The management restriction label in the Sharing section
+            // already says this; no error banner on top of it.
+            shareItem = nil
+            participants = []
             errorMessage = nil
         } catch {
             errorMessage =
