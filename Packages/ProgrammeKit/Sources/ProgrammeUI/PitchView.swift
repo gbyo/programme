@@ -49,6 +49,8 @@ public struct PitchView: View {
     public var pendingLocation: PitchPoint?
     public var isPlacementActive: Bool
     public var onPlace: ((PitchPoint) -> Void)?
+    public var onClearPendingLocation: (() -> Void)?
+    public var onConfirmPendingLocation: (() -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
@@ -59,12 +61,16 @@ public struct PitchView: View {
         markers: [ShotMarker] = [],
         pendingLocation: PitchPoint? = nil,
         isPlacementActive: Bool = false,
-        onPlace: ((PitchPoint) -> Void)? = nil
+        onPlace: ((PitchPoint) -> Void)? = nil,
+        onClearPendingLocation: (() -> Void)? = nil,
+        onConfirmPendingLocation: (() -> Void)? = nil
     ) {
         self.markers = markers
         self.pendingLocation = pendingLocation
         self.isPlacementActive = isPlacementActive
         self.onPlace = onPlace
+        self.onClearPendingLocation = onClearPendingLocation
+        self.onConfirmPendingLocation = onConfirmPendingLocation
     }
 
     /// A real pitch is about 105 by 68 metres.
@@ -99,6 +105,21 @@ public struct PitchView: View {
             .onTapGesture { location in
                 guard isPlacementActive, let onPlace else { return }
                 onPlace(normalized(location, in: rect))
+            }
+            // Apple Pencil double-tap clears the proposed point. Programme has
+            // no drawing tools, so the system double-tap preference (which
+            // governs tool switching) has nothing to switch between; the fixed
+            // mapping is clear, matching the on-screen Clear affordance.
+            .onPencilDoubleTap { _ in
+                guard isPlacementActive else { return }
+                onClearPendingLocation?()
+            }
+            // Apple Pencil Pro squeeze confirms, mirroring the Record button.
+            // Only the release phase commits, so previewing the squeeze does
+            // nothing; with no pending point it is a no-op.
+            .onPencilSqueeze { phase in
+                guard isPlacementActive, case .ended = phase else { return }
+                onConfirmPendingLocation?()
             }
             .onContinuousHover { phase in
                 guard isPlacementActive else {
@@ -251,7 +272,8 @@ public struct PitchView: View {
     private func drawMarkers(in rect: CGRect, context: inout GraphicsContext) {
         for marker in markers {
             // Opponent shots attack the other way, so they mirror.
-            let point = marker.side == .us
+            let point =
+                marker.side == .us
                 ? marker.point
                 : PitchPoint(x: 1 - marker.point.x, y: 1 - marker.point.y)
             let position = pointFor(point, in: rect)

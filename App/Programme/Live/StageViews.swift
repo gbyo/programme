@@ -246,6 +246,12 @@ struct ShotLocationStage: View {
                         .foregroundStyle(Programme.Palette.confirmed)
                 }
                 Spacer()
+                if location != nil {
+                    Button("Clear") { location = nil }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("shotLocation.clear")
+                        .accessibilityHint("Clears the proposed shot location. Apple Pencil double-tap does the same.")
+                }
                 Button("Skip") { onCommit(nil) }
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.escape, modifiers: [])
@@ -261,6 +267,16 @@ struct ShotLocationStage: View {
                 isPlacementActive: true,
                 onPlace: { point in
                     location = point
+                },
+                onClearPendingLocation: {
+                    location = nil
+                },
+                onConfirmPendingLocation: {
+                    // Mirrors the Record button, which stays disabled with no
+                    // pending point, so squeeze with nothing proposed is quiet.
+                    if location != nil {
+                        onCommit(location)
+                    }
                 }
             )
         }
