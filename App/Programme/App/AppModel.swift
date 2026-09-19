@@ -160,6 +160,18 @@ final class AppModel {
         }
     }
 
+    /// Who currently has access to a shared team. Empty when the team is
+    /// not shared. Display only — edits happen in the system share sheet.
+    func teamParticipants(teamID: TeamID) async -> [ShareParticipant] {
+        guard let coordinator = try? sharing() else { return [] }
+        return await coordinator.participants(teamID: teamID)
+    }
+
+    /// Revokes the team's share for everyone. Local truth is untouched.
+    func stopSharing(teamID: TeamID) async throws {
+        try await sharing().stopSharing(teamID: teamID)
+    }
+
     /// Accepts an invitation, then reloads the workspace. Nothing
     /// materializes here: shared content still lands through the applier, so
     /// review-gating applies unchanged.

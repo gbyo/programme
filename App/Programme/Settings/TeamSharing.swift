@@ -32,6 +32,18 @@ struct TeamShareItem: Transferable, Sendable {
     }
 }
 
+/// Display labels for participant roles. Kept in the UI layer: roles are
+/// display-only and never persisted.
+extension ShareParticipant {
+    var roleLabel: String {
+        switch role {
+        case .owner: return "Owner"
+        case .collaborator: return "Can make changes"
+        case .viewer: return "Can view"
+        }
+    }
+}
+
 /// Human-readable sharing failures for the Share surface.
 enum TeamShareError: LocalizedError {
     case iCloudUnavailable

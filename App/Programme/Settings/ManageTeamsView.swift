@@ -1,3 +1,4 @@
+import ProgrammeCollaboration
 import ProgrammeCore
 import ProgrammePersistence
 import ProgrammeUI
@@ -80,6 +81,8 @@ struct TeamDetailView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var shareItem: TeamShareItem?
+    @State private var participants: [ShareParticipant] = []
+    @State private var isConfirmingStopSharing = false
     @State private var isAddingSeason = false
     @State private var newSeasonName = ""
     @State private var newSeasonMakeCurrent = true
@@ -160,11 +163,37 @@ struct TeamDetailView: View {
                     }
                     .accessibilityIdentifier("teamDetail.share.loading")
                 }
+                if !participants.isEmpty {
+                    ForEach(participants, id: \.displayName) { participant in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(
+                                    participant.displayName
+                                        + (participant.isCurrentUser ? " (You)" : "")
+                                )
+                                .font(.body)
+                                Text(
+                                    participant.roleLabel
+                                        + (participant.accepted ? "" : " · Invited")
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                if shareItem?.prepared != nil {
+                    Button("Stop Sharing…", systemImage: "person.2.slash", role: .destructive) {
+                        isConfirmingStopSharing = true
+                    }
+                    .accessibilityIdentifier("teamDetail.stopSharing")
+                }
             } header: {
                 Text("Sharing")
             } footer: {
                 Text(
-                    "Shares the whole team workspace by invitation only — there is no public link. Shared changes still need review when they contradict local scoring, and statistics always re-derive on this device."
+                    "Shares the whole team workspace by invitation only — there is no public link. Adding people and changing permissions happens in the system share sheet. Shared changes still need review when they contradict local scoring, and statistics always re-derive on this device."
                 )
             }
 
@@ -213,6 +242,18 @@ struct TeamDetailView: View {
             await load()
             await loadShareItem()
         }
+        .confirmationDialog(
+            "Stop sharing this team?",
+            isPresented: $isConfirmingStopSharing,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Sharing", role: .destructive) { Task { await stopSharing() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Everyone loses access. Matches already on their devices stay there, but nothing new syncs."
+            )
+        }
     }
 
     /// Resolves the share item without creating anything: an already-shared
@@ -222,11 +263,22 @@ struct TeamDetailView: View {
     private func loadShareItem() async {
         do {
             shareItem = try await appModel.teamShareItem(teamID: teamID)
+            participants = await appModel.teamParticipants(teamID: teamID)
             errorMessage = nil
         } catch {
             errorMessage =
                 (error as? LocalizedError)?.errorDescription
                 ?? "Programme couldn't prepare that share. Nothing was changed. Try again."
+        }
+    }
+
+    private func stopSharing() async {
+        do {
+            try await appModel.stopSharing(teamID: teamID)
+            participants = []
+            await loadShareItem()
+        } catch {
+            errorMessage = "Programme couldn't stop sharing. Nothing was changed. Try again."
         }
     }
 

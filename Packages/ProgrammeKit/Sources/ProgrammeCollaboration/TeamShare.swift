@@ -88,6 +88,64 @@ public actor TeamShareCoordinator: Sendable {
         return share
     }
 
+    /// Participants the current user is allowed to see (at minimum the owner
+    /// and the current user). Display only: Apple designates the system
+    /// share sheet for adding participants and changing permissions, so
+    /// Programme never builds a parallel editor — this list answers "who
+    /// has access" and nothing more.
+    public func participants(teamID: TeamID) async -> [ShareParticipant] {
+        guard let share = await existingShare(teamID: teamID) else { return [] }
+        return Self.participants(of: share)
+    }
+
+    /// Maps a live share's participants to display values. Pure so the
+    /// mapping stays obvious; untested because `CKShare.Participant` has no
+    /// public initializer — participants only ever come from the server.
+    public nonisolated static func participants(of share: CKShare) -> [ShareParticipant] {
+        share.participants.map { participant in
+            let name =
+                participant.userIdentity.nameComponents
+                .flatMap { PersonNameComponentsFormatter.localizedString(from: $0, style: .medium) }
+                ?? "Invited collaborator"
+            let role: ShareParticipant.Role
+            if Self.isSameParticipant(participant, share.owner) {
+                role = .owner
+            } else if participant.permission == .readWrite {
+                role = .collaborator
+            } else {
+                role = .viewer
+            }
+            let isCurrent =
+                share.currentUserParticipant.map { Self.isSameParticipant(participant, $0) } ?? false
+            return ShareParticipant(
+                displayName: name, role: role, isCurrentUser: isCurrent,
+                accepted: participant.acceptanceStatus == .accepted)
+        }
+        .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Participant identity is the iCloud user record, never object
+    /// identity: fetched share graphs hand out distinct instances.
+    private nonisolated static func isSameParticipant(
+        _ lhs: CKShare.Participant, _ rhs: CKShare.Participant
+    ) -> Bool {
+        guard let lhsID = lhs.userIdentity.userRecordID,
+            let rhsID = rhs.userIdentity.userRecordID
+        else { return false }
+        return lhsID == rhsID
+    }
+
+    /// Revokes the team's share for everyone (owner only). Deletes the
+    /// well-known share record and drops the local pointer. Local event
+    /// truth is untouched — every device keeps what it already has; it
+    /// simply stops receiving anything new.
+    public func stopSharing(teamID: TeamID) async throws {
+        let database = makeContainer().privateCloudDatabase
+        _ = try await database.modifyRecords(
+            saving: [], deleting: [Self.shareID(for: teamID)])
+        await sharedZones.forget(teamID: teamID)
+    }
+
     /// Accepts an invitation the system delivered (via the app delegate's
     /// CloudKit-share entry point). After acceptance the shared-database
     /// sync engine picks the zone up; nothing materializes here, so
@@ -124,6 +182,28 @@ public struct SharedZoneInfo: Codable, Hashable, Sendable {
     public init(teamID: TeamID, sharedAt: Date) {
         self.teamID = teamID
         self.sharedAt = sharedAt
+    }
+}
+
+/// Who has access to a shared team, for display. Role derives from the
+/// live participant list; nothing here is persisted or editable.
+public struct ShareParticipant: Hashable, Sendable {
+    public enum Role: String, Hashable, Sendable {
+        case owner
+        case collaborator
+        case viewer
+    }
+
+    public var displayName: String
+    public var role: Role
+    public var isCurrentUser: Bool
+    public var accepted: Bool
+
+    public init(displayName: String, role: Role, isCurrentUser: Bool, accepted: Bool) {
+        self.displayName = displayName
+        self.role = role
+        self.isCurrentUser = isCurrentUser
+        self.accepted = accepted
     }
 }
 
