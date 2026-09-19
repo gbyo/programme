@@ -88,19 +88,28 @@ struct RosterImportView: View {
                     rawText = text
                     analyze()
                 }
-                if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
-                    Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
-                        isShowingScanner = true
+                if appModel.managed.configuration.isRosterRecognitionAllowed {
+                    if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                        Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
+                            isShowingScanner = true
+                        }
                     }
+                    PhotosPicker(
+                        selection: $photoItem,
+                        matching: .images,
+                        photoLibrary: .shared()
+                    ) {
+                        Label("Choose Photo or Screenshot…", systemImage: "photo")
+                    }
+                    .disabled(isRecognizingPhoto)
+                } else {
+                    Label(
+                        "Camera and photo import are disabled by this device's management. File and paste still work.",
+                        systemImage: "lock.circle"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
-                PhotosPicker(
-                    selection: $photoItem,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Label("Choose Photo or Screenshot…", systemImage: "photo")
-                }
-                .disabled(isRecognizingPhoto)
                 if isRecognizingPhoto {
                     HStack {
                         ProgressView()

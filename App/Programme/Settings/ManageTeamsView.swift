@@ -151,7 +151,16 @@ struct TeamDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("teamDetail.syncState")
-                if let shareItem {
+                if !appModel.managed.configuration.isCollaborationAllowed {
+                    Label(
+                        "Team sharing is disabled by this device's management.",
+                        systemImage: "lock.circle"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("teamDetail.share.disabled")
+                }
+                if appModel.managed.configuration.isCollaborationAllowed, let shareItem {
                     if let prepared = shareItem.prepared {
                         CollaborationView(
                             share: prepared, container: shareItem.container(),
@@ -200,7 +209,9 @@ struct TeamDetailView: View {
                         }
                     }
                 }
-                if shareItem?.prepared != nil {
+                if appModel.managed.configuration.isCollaborationAllowed,
+                    shareItem?.prepared != nil
+                {
                     Button("Stop Sharing…", systemImage: "person.2.slash", role: .destructive) {
                         isConfirmingStopSharing = true
                     }
