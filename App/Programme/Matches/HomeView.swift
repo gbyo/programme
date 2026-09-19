@@ -399,83 +399,38 @@ struct FirstRunView: View {
     @State private var isLoadingSample = false
 
     var body: some View {
-        ZStack {
-            Programme.Palette.brand
-                .ignoresSafeArea()
-
-            ScrollView {
-                VStack(spacing: 32) {
-                    Spacer(minLength: 36)
-
-                    VStack(spacing: 22) {
-                        Image(systemName: "soccerball")
-                            .font(.system(size: 72, weight: .semibold))
-                            .symbolRenderingMode(.hierarchical)
-                            .accessibilityHidden(true)
-
-                        VStack(spacing: 12) {
-                            Text("Welcome to Programme")
-                                .font(.largeTitle.weight(.bold))
-
-                            Text("Keep your team, score matches, and track the season — all in one place.")
-                                .font(.title3)
-                                .multilineTextAlignment(.center)
-                                .foregroundStyle(Programme.Palette.onBrand.opacity(0.78))
-                        }
-
-                        Label(
-                            "Your data stays on your device. No account or internet connection required.",
-                            systemImage: "lock.fill"
-                        )
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(Programme.Palette.onBrand.opacity(0.72))
-                    }
-                    .foregroundStyle(Programme.Palette.onBrand)
-                    .frame(maxWidth: 620)
-
-                    Spacer(minLength: 28)
-
-                    VStack(spacing: 12) {
-                        Button("Create Your First Team") {
-                            isCreatingTeam = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Programme.Palette.onBrand)
-                        .foregroundStyle(Programme.Palette.brand)
-                        .controlSize(.large)
-
-                        Button {
-                            isLoadingSample = true
-                            Task {
-                                await appModel.loadSampleData()
-                                isLoadingSample = false
-                            }
-                        } label: {
-                            if isLoadingSample {
-                                HStack {
-                                    ProgressView()
-                                    Text("Loading Sample Team…")
-                                }
-                            } else {
-                                Text("Explore a Sample Team")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Programme.Palette.onBrand)
-                        .controlSize(.large)
-                        .disabled(isLoadingSample)
-                    }
-                    .frame(maxWidth: 420)
-                    .foregroundStyle(Programme.Palette.onBrand)
-
-                    Spacer(minLength: 36)
-                }
-                .padding(.horizontal, 24)
-                .containerRelativeFrame(.vertical)
-                .frame(maxWidth: .infinity)
+        ContentUnavailableView {
+            Label("Welcome to Programme", systemImage: "soccerball")
+        } description: {
+            Text(
+                "Keep your team, score matches, and track the season — all in one place. Your data stays on your device, with no account or internet connection required."
+            )
+        } actions: {
+            Button("Create Your First Team") {
+                isCreatingTeam = true
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .programmePrimaryAction(in: .control)
+            .controlSize(.large)
+
+            Button {
+                isLoadingSample = true
+                Task {
+                    await appModel.loadSampleData()
+                    isLoadingSample = false
+                }
+            } label: {
+                if isLoadingSample {
+                    HStack {
+                        ProgressView()
+                        Text("Loading Sample Team…")
+                    }
+                } else {
+                    Text("Explore a Sample Team")
+                }
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .disabled(isLoadingSample)
         }
     }
 }
