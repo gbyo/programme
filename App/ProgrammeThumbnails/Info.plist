@@ -31,7 +31,7 @@
                 <string>org.programme.archive</string>
             </array>
             <key>QLThumbnailMinimumDimension</key>
-            <integer>0</integer>
+            <integer>16</integer>
         </dict>
     </dict>
 </dict>

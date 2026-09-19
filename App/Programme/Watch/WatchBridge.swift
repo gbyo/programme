@@ -19,19 +19,25 @@ struct WatchPushPolicy {
 
     /// Records the snapshot, delivering it only when the session may
     /// legally send. Returns the payload to deliver now, if any.
-    /// Latest wins: an older pending snapshot is simply replaced.
+    /// Latest wins: an older pending snapshot is simply replaced. The
+    /// snapshot stays pending until the caller acknowledges successful
+    /// delivery, so a failed send is retried instead of lost.
     mutating func push(_ data: Data, canDeliver: Bool) -> Data? {
         pending = data
         guard canDeliver else { return nil }
-        pending = nil
         return data
     }
 
-    /// Flushes the latest pending snapshot on activation (and
-    /// re-activation). Nothing pending means nothing to send.
+    /// Takes the latest pending snapshot for an activation flush without
+    /// clearing it; `acknowledge()` clears it after delivery succeeds.
     mutating func activated() -> Data? {
-        defer { pending = nil }
-        return pending
+        pending
+    }
+
+    /// Clears the pending snapshot after `updateApplicationContext`
+    /// succeeds. Never called on failure, so the next attempt retries.
+    mutating func acknowledge() {
+        pending = nil
     }
 }
 
@@ -58,7 +64,13 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     func push(_ snapshot: WatchSnapshot) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         guard let payload = policy.push(data, canDeliver: Self.canDeliver()) else { return }
-        try? WCSession.default.updateApplicationContext([Self.snapshotKey: payload])
+        do {
+            try WCSession.default.updateApplicationContext([Self.snapshotKey: payload])
+            policy.acknowledge()
+        } catch {
+            // Delivery failed; the snapshot stays pending so the next
+            // push or activation flush retries it.
+        }
     }
 
     private nonisolated static func canDeliver() -> Bool {
@@ -70,7 +82,12 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
     private func flushPending() {
         guard let payload = policy.activated(), Self.canDeliver() else { return }
-        try? WCSession.default.updateApplicationContext([Self.snapshotKey: payload])
+        do {
+            try WCSession.default.updateApplicationContext([Self.snapshotKey: payload])
+            policy.acknowledge()
+        } catch {
+            // Stays pending for the next activation or push.
+        }
     }
 
     // MARK: - WCSessionDelegate

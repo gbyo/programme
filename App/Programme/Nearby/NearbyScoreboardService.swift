@@ -191,15 +191,18 @@ final class NearbyScoreboardService {
         var decoder = decoder
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
             MainActor.assumeIsolated {
+                // A replaced connection's late frames must neither revive
+                // its snapshots nor disconnect the current link: only the
+                // live connection may mutate receive state.
+                guard let self, connection === self.displayConnection else { return }
                 if let data, !data.isEmpty {
                     for snapshot in decoder.append(data) {
-                        self?.received = snapshot
-                        self?.lastFrameReceivedAt = Date()
-                        self?.displayLink = .live
+                        self.received = snapshot
+                        self.lastFrameReceivedAt = Date()
+                        self.displayLink = .live
                     }
                 }
-                guard let self else { return }
-                if error == nil, connection === self.displayConnection {
+                if error == nil {
                     self.receiveLoop(connection, decoder: decoder)
                 } else {
                     self.displayLink = .disconnected
