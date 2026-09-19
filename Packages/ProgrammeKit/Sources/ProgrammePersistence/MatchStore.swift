@@ -328,6 +328,7 @@ public actor MatchStore {
         statProfile: StatProfile,
         tracking: OpponentTrackingMode,
         competition: String?,
+        location: MatchLocation? = nil,
         roster: RosterSnapshot,
         opponentRoster: RosterSnapshot = .empty
     ) throws -> MatchID {
@@ -338,6 +339,7 @@ public actor MatchStore {
             opponentShortName: opponentShortName,
             kickoff: kickoff,
             venue: venue,
+            location: location,
             competition: competition,
             tracking: tracking
         )
@@ -401,7 +403,8 @@ public actor MatchStore {
     public func updateConfiguration(
         matchID: MatchID, rules: MatchRules, statProfile: StatProfile,
         tracking: OpponentTrackingMode, kickoff: Date, venue: Venue,
-        opponentName: String, opponentShortName: String, competition: String?
+        opponentName: String, opponentShortName: String, competition: String?,
+        location: MatchLocation? = nil
     ) throws {
         guard let model = try match(matchID) else { throw StoreError.matchNotFound }
         model.rulesData = try ProgrammeCoding.encoder.encode(rules)
@@ -412,6 +415,7 @@ public actor MatchStore {
         model.opponentName = opponentName
         model.opponentShortName = opponentShortName
         model.competition = competition
+        model.location = location
         model.updatedAt = Date()
         try modelContext.save()
     }

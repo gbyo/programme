@@ -150,6 +150,9 @@ public final class MatchModel {
     public var kickoff: Date = Date()
     public var venueRaw: String = Venue.home.rawValue
     public var competition: String?
+    /// Optional geographic location as JSON. Nil for every match created
+    /// before locations existed, which is exactly what a V1 store migrates to.
+    public var locationData: Data?
     public var trackingRaw: String = OpponentTrackingMode.ourTeam.rawValue
     public var phaseRaw: String = MatchPhase.scheduled.rawValue
     public var finalizedAt: Date?
@@ -191,6 +194,7 @@ public final class MatchModel {
         opponentShortName: String? = nil,
         kickoff: Date,
         venue: Venue = .home,
+        location: MatchLocation? = nil,
         competition: String? = nil,
         tracking: OpponentTrackingMode = .ourTeam
     ) {
@@ -200,10 +204,21 @@ public final class MatchModel {
         self.opponentShortName = opponentShortName ?? opponentName
         self.kickoff = kickoff
         self.venueRaw = venue.rawValue
+        self.locationData = location.flatMap { try? ProgrammeCoding.encoder.encode($0) }
         self.competition = competition
         self.trackingRaw = tracking.rawValue
         self.createdAt = Date()
         self.updatedAt = Date()
+    }
+
+    /// The geographic location, if one was chosen. Never throws: corrupt data
+    /// reads as "no location" rather than breaking the match.
+    public var location: MatchLocation? {
+        get {
+            guard let locationData else { return nil }
+            return try? ProgrammeCoding.decoder.decode(MatchLocation.self, from: locationData)
+        }
+        set { locationData = try? ProgrammeCoding.encoder.encode(newValue) }
     }
 
     public var matchID: MatchID { MatchID(identifier) }
