@@ -6,10 +6,11 @@ import SwiftUI
 /// away.
 ///
 /// This view owns the score, the clock, the period and the period progress, and
-/// nothing else. Match management — pause, end the period, start the next one,
-/// the options menu — lives in the navigation bar as real toolbar items, because
-/// those are ordinary iPad controls and should be drawn by the system rather
-/// than approximated here. See `MatchControlsToolbar`.
+/// nothing else. Leaving the workspace and match management — pause, end the
+/// period, start the next one, the options menu — live in the navigation bar as
+/// real toolbar items, because those are ordinary iPad controls and should be
+/// drawn by the system rather than approximated here. See
+/// `MatchControlsToolbar`.
 struct LiveHeader: View {
     let session: LiveMatchSession
 
@@ -146,20 +147,24 @@ struct LiveHeader: View {
 
 /// Match management, as real navigation-bar items.
 ///
-/// Pause, End <period>, Start <period> and the options menu are ordinary iPad
-/// controls, so they are ordinary `ToolbarItem`s. Nothing here sets a button
-/// style, a border shape or a control size: the system already knows how big a
-/// navigation-bar control is, what it looks like when pressed, how it responds
-/// to the pointer, and how it behaves when the window gets too narrow to show
-/// everything. The one exception is Start, which uses Programme's primary-action
-/// style because starting the match is the single prominent action on this
-/// screen — and that is still a stock system style, not drawn chrome.
-///
-/// They sit in one trailing group so the bar stays a single row beside the
-/// scoreboard rather than becoming a second strip of its own.
+/// Close, Pause, End <period>, Start <period> and the options menu are ordinary
+/// iPad controls, so they are ordinary `ToolbarItem`s. Fixed `ToolbarSpacer`s
+/// tell SwiftUI which controls do different jobs; the resulting separate Liquid
+/// Glass groups, sizing, pointer behaviour and narrow-window adaptation all stay
+/// system-owned. The one exception is Start, which uses Programme's
+/// primary-action style because starting the match is the single prominent
+/// action on this screen — and that is still a stock system style, not drawn
+/// chrome.
 struct MatchControlsToolbar: ToolbarContent {
     let session: LiveMatchSession
-    var onMenu: () -> Void
+    var onClose: () -> Void
+    var onShowStats: () -> Void
+    var onEditLineup: () -> Void
+    var onEditOpponentRoster: () -> Void
+    var onAdjustClock: () -> Void
+    var onOpenScoreboard: () -> Void
+    var onShootout: () -> Void
+    var onFinalize: () -> Void
     var onToggleClock: () -> Void
     var onEndPeriod: () -> Void
     var onStartPeriod: () -> Void
@@ -169,16 +174,25 @@ struct MatchControlsToolbar: ToolbarContent {
     }
 
     var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            switch session.phase {
-            case .scheduled, .periodBreak:
+        ToolbarItem(placement: .topBarLeading) {
+            CloseScorerButton(session: session, onClose: onClose)
+        }
+        .liveVisibilityPriority(.high)
+
+        if session.phase == .scheduled || session.phase == .periodBreak {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button(startTitle, systemImage: "play.fill") { onStartPeriod() }
                     .programmePrimaryAction(in: .control)
                     .disabled(!session.canStartNextPeriod || !session.hasStartingLineup)
                     .accessibilityIdentifier("live.startPeriod")
                     .accessibilityLabel(startTitle)
+            }
+            .liveVisibilityPriority(.high)
 
-            case .inPeriod:
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+        } else if session.phase == .inPeriod {
+            ToolbarItem(placement: .topBarTrailing) {
                 // Icon-only, because the clock beside it already says whether it
                 // is running and a word here would only repeat it.
                 Button(
@@ -189,17 +203,126 @@ struct MatchControlsToolbar: ToolbarContent {
                 }
                 .labelStyle(.iconOnly)
                 .accessibilityIdentifier("live.toggleClock")
+            }
+            .liveVisibilityPriority(.high)
 
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+            ToolbarItem(placement: .topBarTrailing) {
                 Button("End \(session.clock.periodShortLabel)") { onEndPeriod() }
                     .accessibilityIdentifier("live.endPeriod")
-
-            case .awaitingFinalization, .finalized:
-                EmptyView()
             }
+            .liveVisibilityPriority(.high)
 
-            Button("Match options", systemImage: "ellipsis") { onMenu() }
-                .labelStyle(.iconOnly)
-                .accessibilityIdentifier("live.options")
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+        }
+
+        ToolbarItem(placement: .topBarTrailing) {
+            MatchManagementMenu(
+                session: session,
+                onShowStats: onShowStats,
+                onEditLineup: onEditLineup,
+                onEditOpponentRoster: onEditOpponentRoster,
+                onAdjustClock: onAdjustClock,
+                onOpenScoreboard: onOpenScoreboard,
+                onShootout: onShootout,
+                onFinalize: onFinalize,
+                onClose: onClose)
+        }
+        .liveVisibilityPriority(.high)
+    }
+}
+
+private struct CloseScorerButton: View {
+    let session: LiveMatchSession
+    var onClose: () -> Void
+
+    @State private var isConfirmingClose = false
+
+    var body: some View {
+        Button("Close Scorer", systemImage: "xmark") {
+            requestClose()
+        }
+        .labelStyle(.iconOnly)
+        .accessibilityIdentifier("live.closeScorer")
+        .confirmationDialog(
+            "Leave this match running?", isPresented: $isConfirmingClose,
+            titleVisibility: .visible
+        ) {
+            Button("Close Scorer", action: onClose)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The match stays live and every event is saved. Programme will offer to resume it.")
+        }
+    }
+
+    private func requestClose() {
+        if session.phase.isLive {
+            isConfirmingClose = true
+        } else {
+            onClose()
+        }
+    }
+}
+
+private struct MatchManagementMenu: View {
+    let session: LiveMatchSession
+    var onShowStats: () -> Void
+    var onEditLineup: () -> Void
+    var onEditOpponentRoster: () -> Void
+    var onAdjustClock: () -> Void
+    var onOpenScoreboard: () -> Void
+    var onShootout: () -> Void
+    var onFinalize: () -> Void
+    var onClose: () -> Void
+
+    @State private var isConfirmingClose = false
+
+    var body: some View {
+        Menu {
+            Button("Match Stats", systemImage: "chart.bar", action: onShowStats)
+            Button("Edit Lineup", systemImage: "person.3", action: onEditLineup)
+            if session.descriptor.tracking == .bothTeams {
+                Button(
+                    "Opponent Roster", systemImage: "person.2", action: onEditOpponentRoster)
+            }
+            Button(
+                "Adjust Clock", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                action: onAdjustClock)
+            Button(
+                "Open Scoreboard Window", systemImage: "rectangle.on.rectangle",
+                action: onOpenScoreboard)
+
+            Divider()
+
+            if session.rules.shootoutAvailable {
+                Button("Shootout", systemImage: "circle.bottomhalf.filled", action: onShootout)
+            }
+            Button("Finalize Match…", systemImage: "flag.checkered", action: onFinalize)
+
+            Divider()
+
+            Button("Close Scorer…", systemImage: "xmark.circle") {
+                if session.phase.isLive {
+                    isConfirmingClose = true
+                } else {
+                    onClose()
+                }
+            }
+        } label: {
+            Label("Match options", systemImage: "ellipsis")
+        }
+        .labelStyle(.iconOnly)
+        .accessibilityIdentifier("live.options")
+        .confirmationDialog(
+            "Leave this match running?", isPresented: $isConfirmingClose,
+            titleVisibility: .visible
+        ) {
+            Button("Close Scorer", action: onClose)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The match stays live and every event is saved. Programme will offer to resume it.")
         }
     }
 }

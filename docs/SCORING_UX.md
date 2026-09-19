@@ -53,12 +53,15 @@ Palette and toolbar controls are stock system button styles (`.bordered`, `.bord
 
 Programme has exactly two bars, and both are real `ToolbarContent`:
 
-- **Navigation bar, `.topBarTrailing`** — match management: Pause/Resume (icon only), End <period>, Start Match / Start <period>, and the options ellipsis. `MatchControlsToolbar` owns them.
+- **Navigation bar, `.topBarLeading`** — Close Scorer, an icon-only `xmark` that leaves the scoring workspace without implying backwards navigation or finalizing the match.
+- **Navigation bar, `.topBarTrailing`** — match management: Pause/Resume (icon only), End <period>, Start Match / Start <period>, and the options ellipsis. Pause, the period transition, and the menu are separate semantic toolbar groups; fixed `ToolbarSpacer`s tell SwiftUI where unrelated jobs separate so the system owns their Liquid Glass grouping. `MatchControlsToolbar` owns them.
 - **Bottom bar** — the scoring controls. `ScoringToolbar` owns them.
 
 Neither sets a button style, a border shape or a control size. The system decides how large a navigation-bar control is, how it looks pressed, how it tracks the pointer and what it does when the window is too narrow for all of it. The single exception is Start, which uses Programme's primary-action style because starting the match is the one prominent action on the screen — and that is still a stock system style.
 
-The scoreboard is *not* a toolbar. Team names, score, clock, period text and the progress rule are genuinely custom bar content in `LiveHeader`, presented with `safeAreaBar(edge: .top)`; it is far taller than a navigation bar and must never be squeezed into a title. `LiveHeader` owns no controls and takes no action callbacks. The navigation bar carries no title and no back button, and its background is hidden so the controls read as part of the scoreboard region instead of a second slab of material stacked above it.
+The ellipsis is a native `Menu`, not a button that opens an intermediate match-management sheet. It exposes secondary commands and routes commands that need a workspace — lineup, opponent roster, clock adjustment, shootout, finalization — through the scorer's single `LiveSheet` presentation owner. The visible End/Start period action remains authoritative and is not duplicated in the menu.
+
+The scoreboard is *not* a toolbar. Team names, score, clock, period text and the progress rule are genuinely custom bar content in `LiveHeader`, presented with `safeAreaBar(edge: .top)`; it is far taller than a navigation bar and must never be squeezed into a title. `LiveHeader` owns no controls and takes no action callbacks. The navigation bar carries no title and no fake back button. Its leading Close Scorer action is the navigation escape for this replacement workspace, and its background is hidden so the controls read as part of the scoreboard region instead of a second slab of material stacked above it.
 
 Critical actions must not be:
 

@@ -86,6 +86,36 @@ final class ProgrammeUITests: XCTestCase {
         attachScreenshot(named: "Live scoring workspace")
     }
 
+    func testLiveToolbarKeepsPrimaryControlsSeparateAndTogglesTheClock() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        XCTAssertTrue(element(app, "live.closeScorer").exists)
+        XCTAssertTrue(element(app, "live.toggleClock").exists)
+        XCTAssertTrue(element(app, "live.endPeriod").exists)
+        XCTAssertTrue(element(app, "live.options").exists)
+
+        let clockControl = element(app, "live.toggleClock")
+        let originalLabel = clockControl.label
+        clockControl.tap()
+        XCTAssertNotEqual(
+            clockControl.label, originalLabel,
+            "The toolbar control did not reflect the clock's new running state")
+        clockControl.tap()
+    }
+
+    func testClosingALiveScorerRequiresNondestructiveConfirmation() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "live.closeScorer").tap()
+        XCTAssertTrue(app.staticTexts["Leave this match running?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Close Scorer"].exists)
+        app.buttons["Cancel"].tap()
+
+        XCTAssertTrue(element(app, "live.score").waitForExistence(timeout: 5))
+    }
+
     func testRecordingAGoalByArmingAPlayerThenTappingTheAction() {
         let app = launch(["-programme-open-live"])
         waitForScorer(app)
@@ -627,14 +657,25 @@ final class ProgrammeUITests: XCTestCase {
         let app = launch(["-programme-open-live"])
         waitForScorer(app)
 
-        app.buttons["Match options"].tap()
-        XCTAssertTrue(app.navigationBars["Match"].waitForExistence(timeout: 5))
+        element(app, "live.options").tap()
+        XCTAssertFalse(app.navigationBars["Match"].exists, "The obsolete Match sheet was presented")
         app.buttons["Edit Lineup"].tap()
 
         XCTAssertTrue(app.navigationBars["Starting Lineup"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["11 of 11 selected"].exists)
         XCTAssertTrue(element(app, "lineup.goalkeeper").exists)
         XCTAssertTrue(element(app, "lineup.confirm").isEnabled)
+    }
+
+    func testMatchMenuRoutesDirectlyToClockAdjustment() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "live.options").tap()
+        XCTAssertTrue(app.buttons["Adjust Clock"].waitForExistence(timeout: 5))
+        app.buttons["Adjust Clock"].tap()
+
+        XCTAssertTrue(app.navigationBars["Adjust Clock"].waitForExistence(timeout: 5))
     }
 
     func testNewMatchRemembersTheScoringConfiguration() {
