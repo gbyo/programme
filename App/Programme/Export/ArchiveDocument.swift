@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 extension UTType {
     /// Declared in Programme's Info.plist as an exported type.
-    static let programmeArchive = UTType(exportedAs: "org.programme.archive")
+    static let programmeArchive = UTType(exportedAs: "com.gbyo.programme.archive")
 }
 
 /// Programme's portable archive as a Transferable value.
