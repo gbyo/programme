@@ -1,6 +1,10 @@
 name: Programme
 options:
   bundleIdPrefix: com.gbyo.Programme
+  # Keep the generated project's upgrade marker aligned with the Xcode version
+  # Programme is developed with so Xcode doesn't repeatedly offer generated
+  # "recommended settings" changes that can't be committed.
+  xcodeVersion: "27.1"
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "26.0"
@@ -17,6 +21,11 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
+    # Automatic signing must remain profile-agnostic. Explicitly blank both
+    # manual profile selectors so a regenerated project cannot retain a local
+    # .mobileprovision UUID or path from Xcode user state.
+    PROVISIONING_PROFILE: ""
+    PROVISIONING_PROFILE_SPECIFIER: ""
     # Programme is owned and signed by the gbyo Apple Developer team.
     # Keeping this in the XcodeGen source of truth prevents regenerated
     # projects from losing the team selection before physical-device runs.
