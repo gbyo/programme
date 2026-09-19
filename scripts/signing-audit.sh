@@ -52,6 +52,11 @@ icloud_container="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.iclou
 if [[ -d Programme.xcodeproj ]]; then
     settings="$(xcodebuild -project Programme.xcodeproj -scheme Programme -showBuildSettings -destination 'generic/platform=iOS Simulator' 2>/dev/null)"
     grep -Fq "DEVELOPMENT_TEAM = $TEAM_ID" <<< "$settings" || fail "generated project lost DEVELOPMENT_TEAM"
+    grep -Fq "CODE_SIGN_STYLE = Automatic" <<< "$settings" || fail "generated project is not using automatic signing"
+    if grep -Eq 'PROVISIONING_PROFILE(_SPECIFIER)? = .+' <<< "$settings"; then
+        grep -E 'PROVISIONING_PROFILE(_SPECIFIER)? = .+' <<< "$settings" >&2
+        fail "generated project contains a manual provisioning-profile selection"
+    fi
     for identifier in "$APP_ID" "$WIDGET_ID" "$WATCH_ID" "$THUMBNAIL_ID"; do
         grep -Fq "PRODUCT_BUNDLE_IDENTIFIER = $identifier" <<< "$settings" || fail "generated project lost bundle ID $identifier"
     done
