@@ -37,11 +37,15 @@ extension View {
     }
 
     /// A toolbar confirmation action that actually commits something, as opposed
-    /// to a `Done` that only dismisses. The system decides the shape; Programme
-    /// only says that this is the brand's primary action.
+    /// to a `Done` that only dismisses. The system decides the shape and label
+    /// colour; Programme only supplies its brand tint.
+    ///
+    /// Do not force `onBrand` here. Unlike Programme's prominent buttons, a
+    /// toolbar confirmation action is not guaranteed to draw a filled brand
+    /// surface, so the near-black on-brand label can disappear against a dark
+    /// toolbar. SwiftUI must resolve the foreground for the current presentation.
     func programmeConfirmationTint() -> some View {
         tint(Programme.Palette.brand)
-            .foregroundStyle(Programme.Palette.onBrand)
     }
 }
 

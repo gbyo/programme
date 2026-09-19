@@ -34,19 +34,21 @@ struct MatchDetailView: View {
         .toolbar {
             if let context {
                 ToolbarItem(placement: .primaryAction) {
-                    Menu("Actions", systemImage: "ellipsis.circle") {
-                        if context.phase != .finalized {
-                            Button("Score This Match", systemImage: "play.fill") {
-                                Task { await appModel.openLiveSession(matchID: matchID) }
-                            }
-                        } else {
-                            Button("Reopen for Corrections", systemImage: "lock.open") {
-                                Task { await appModel.openLiveSession(matchID: matchID) }
-                            }
-                        }
-                        Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
-                        Button("Event Log", systemImage: "list.bullet") {
-                            Task { await appModel.open(.eventLog(matchID)) }
+                    Button(
+                        context.phase == .finalized ? "Reopen for Corrections" : "Score This Match",
+                        systemImage: context.phase == .finalized ? "lock.open" : "play.fill"
+                    ) {
+                        Task { await appModel.openLiveSession(matchID: matchID) }
+                    }
+                }
+                if #available(iOS 27.0, *) {
+                    ToolbarOverflowMenu {
+                        secondaryActions
+                    }
+                } else {
+                    ToolbarItem(placement: .secondaryAction) {
+                        Menu("More", systemImage: "ellipsis.circle") {
+                            secondaryActions
                         }
                     }
                 }
@@ -67,6 +69,14 @@ struct MatchDetailView: View {
         .task(id: matchID) { await load() }
     }
 
+    @ViewBuilder
+    private var secondaryActions: some View {
+        Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
+        NavigationLink(value: AppRoute.eventLog(matchID)) {
+            Label("Event Log", systemImage: "list.bullet")
+        }
+    }
+
     private func load() async {
         guard let store = appModel.store else { return }
         do {
@@ -82,11 +92,14 @@ struct MatchDetailView: View {
 
     @ViewBuilder
     private func content(context: MatchContext, snapshot: MatchSnapshot) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+        List {
+            Section {
                 scoreHeader(context: context, snapshot: snapshot)
+                    .padding(.vertical, 8)
+            }
 
-                if context.phase != .finalized {
+            if context.phase != .finalized {
+                Section {
                     EmptyHint(
                         title: statusTitle(context.phase),
                         message: statusMessage(context.phase),
@@ -94,96 +107,78 @@ struct MatchDetailView: View {
                     ) {
                         Task { await appModel.openLiveSession(matchID: matchID) }
                     }
-                    .background(
-                        Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                 }
+            }
 
-                if !issues.needingReview.isEmpty {
-                    SectionBox(title: "Needs Attention") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(issues.needingReview) { issue in
-                                IssueRow(issue: issue) {}
-                            }
-                        }
-                        .padding(16)
-                    }
-                }
-
-                SectionBox(title: "Team") {
-                    TeamComparisonTable(context: context, snapshot: snapshot)
-                        .padding(16)
-                }
-
-                SectionBox(title: "Box Score") {
-                    BoxScoreTable(context: context, snapshot: snapshot)
-                        .padding(.vertical, 6)
-                }
-
-                if context.profile.tracks(.goalkeeping) {
-                    SectionBox(title: "Goalkeeping") {
-                        KeeperTable(context: context, snapshot: snapshot)
-                            .padding(.vertical, 6)
-                    }
-                }
-
-                if !shotMarkers(context).isEmpty {
-                    SectionBox(title: "Shot Map") {
-                        PitchView(markers: shotMarkers(context))
-                            .frame(height: 300)
-                            .padding(14)
-                    }
-                } else if context.profile.tracks(.shotLocations) {
-                    SectionBox(title: "Shot Map") {
-                        EmptyHint(
-                            title: "No shot locations recorded",
-                            message: "Shots were counted, but none were placed on the pitch for this match.")
-                    }
-                }
-
-                SectionBox(title: "Timeline") {
-                    VStack(spacing: 0) {
-                        ForEach(MatchNarrator.describeAll(context: context).reversed()) { description in
-                            EventLogRow(description: description)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 6)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
-
-                SectionBox(title: "Stat Completeness") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(TrackedStat.allCases.sorted { $0.label < $1.label }) { stat in
-                            CompletenessRow(stat: stat, state: snapshot.completeness(stat))
-                        }
-                        Text("A dash in an export means the category was not tracked. It is unknown, not zero.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                    }
-                    .padding(16)
-                }
-
-                if !revisions(context).isEmpty {
-                    SectionBox(title: "Revision History") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(revisions(context), id: \.id) { revision in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(revision.summary).font(.subheadline)
-                                    Text(revision.at.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(16)
+            if !issues.needingReview.isEmpty {
+                Section("Needs Attention") {
+                    ForEach(issues.needingReview) { issue in
+                        IssueRow(issue: issue)
                     }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 900, alignment: .leading)
-            .frame(maxWidth: .infinity)
+
+            Section("Team") {
+                TeamComparisonTable(context: context, snapshot: snapshot)
+                    .padding(.vertical, 6)
+            }
+
+            Section("Box Score") {
+                BoxScoreTable(context: context, snapshot: snapshot)
+                    .padding(.vertical, 6)
+            }
+
+            if context.profile.tracks(.goalkeeping) {
+                Section("Goalkeeping") {
+                    KeeperTable(context: context, snapshot: snapshot)
+                        .padding(.vertical, 6)
+                }
+            }
+
+            if !shotMarkers(context).isEmpty {
+                Section("Shot Map") {
+                    PitchView(markers: shotMarkers(context))
+                        .frame(height: 300)
+                        .padding(.vertical, 6)
+                }
+            } else if context.profile.tracks(.shotLocations) {
+                Section("Shot Map") {
+                    EmptyHint(
+                        title: "No shot locations recorded",
+                        message: "Shots were counted, but none were placed on the pitch for this match.")
+                }
+            }
+
+            Section("Timeline") {
+                ForEach(MatchNarrator.describeAll(context: context).reversed()) { description in
+                    EventLogRow(description: description)
+                }
+            }
+
+            Section {
+                ForEach(TrackedStat.allCases.sorted { $0.label < $1.label }) { stat in
+                    CompletenessRow(stat: stat, state: snapshot.completeness(stat))
+                }
+            } header: {
+                Text("Stat Completeness")
+            } footer: {
+                Text("A dash in an export means the category was not tracked. It is unknown, not zero.")
+            }
+
+            if !revisions(context).isEmpty {
+                Section("Revision History") {
+                    ForEach(revisions(context), id: \.id) { revision in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(revision.summary).font(.subheadline)
+                            Text(revision.at.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
         }
+        .listStyle(.insetGrouped)
     }
 
     private func scoreHeader(context: MatchContext, snapshot: MatchSnapshot) -> some View {
@@ -261,15 +256,16 @@ struct TeamComparisonTable: View {
     let snapshot: MatchSnapshot
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
+        Grid(horizontalSpacing: 16, verticalSpacing: 0) {
+            GridRow {
                 Text(context.descriptor.teamShortName)
                     .font(.caption.weight(.semibold))
-                    .frame(width: 60, alignment: .leading)
-                Spacer()
+                    .gridColumnAlignment(.trailing)
+                Text("")
+                    .frame(maxWidth: .infinity)
                 Text(context.descriptor.opponentShortName)
                     .font(.caption.weight(.semibold))
-                    .frame(width: 60, alignment: .trailing)
+                    .gridColumnAlignment(.trailing)
             }
             .foregroundStyle(.secondary)
             .padding(.bottom, 8)
@@ -287,16 +283,17 @@ struct TeamComparisonTable: View {
     }
 
     private func row(_ label: String, _ stat: TrackedStat, _ us: Int, _ them: Int) -> some View {
-        HStack {
+        GridRow {
             StatValueText(context.profile.value(stat, us))
                 .font(.body.weight(.medium))
-                .frame(width: 60, alignment: .leading)
-            Spacer()
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
-            Spacer()
+                .gridColumnAlignment(.trailing)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
             StatValueText(context.profile.value(stat, them))
                 .font(.body.weight(.medium))
-                .frame(width: 60, alignment: .trailing)
+                .gridColumnAlignment(.trailing)
         }
         .padding(.vertical, 7)
         .accessibilityElement(children: .ignore)
@@ -315,24 +312,24 @@ struct BoxScoreTable: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        Grid(horizontalSpacing: 12, verticalSpacing: 0) {
             headerRow
             ForEach(players) { player in
-                Divider()
+                Divider().gridCellColumns(7)
                 playerRow(player)
             }
         }
     }
 
     private var headerRow: some View {
-        HStack(spacing: 0) {
-            Text("PLAYER").frame(maxWidth: .infinity, alignment: .leading)
-            Text("MIN").frame(width: 44, alignment: .trailing)
-            Text("G").frame(width: 34, alignment: .trailing)
-            Text("A").frame(width: 34, alignment: .trailing)
-            Text("PTS").frame(width: 40, alignment: .trailing)
-            Text("SH").frame(width: 38, alignment: .trailing)
-            Text("SOG").frame(width: 42, alignment: .trailing)
+        GridRow {
+            Text("PLAYER").frame(maxWidth: .infinity, alignment: .leading).gridColumnAlignment(.leading)
+            Text("MIN").gridColumnAlignment(.trailing)
+            Text("G").gridColumnAlignment(.trailing)
+            Text("A").gridColumnAlignment(.trailing)
+            Text("PTS").gridColumnAlignment(.trailing)
+            Text("SH").gridColumnAlignment(.trailing)
+            Text("SOG").gridColumnAlignment(.trailing)
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -342,7 +339,7 @@ struct BoxScoreTable: View {
 
     private func playerRow(_ player: PlayerSnapshot) -> some View {
         let line = snapshot.player(player.id)
-        return HStack(spacing: 0) {
+        return GridRow {
             HStack(spacing: 6) {
                 Text(player.shortLabel).font(.subheadline)
                 if line.started {
@@ -358,16 +355,15 @@ struct BoxScoreTable: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("\(line.minutesPlayed)").frame(width: 44, alignment: .trailing)
-            StatValueText(context.profile.value(.goals, line.goals)).frame(width: 34, alignment: .trailing)
-            StatValueText(context.profile.value(.assists, line.assists)).frame(width: 34, alignment: .trailing)
-            StatValueText(context.profile.value(.goals, line.points)).frame(width: 40, alignment: .trailing)
-            StatValueText(context.profile.value(.shots, line.shots)).frame(width: 38, alignment: .trailing)
-            StatValueText(context.profile.value(.shots, line.shotsOnGoal)).frame(width: 42, alignment: .trailing)
+            Text("\(line.minutesPlayed)")
+            StatValueText(context.profile.value(.goals, line.goals))
+            StatValueText(context.profile.value(.assists, line.assists))
+            StatValueText(context.profile.value(.goals, line.points))
+            StatValueText(context.profile.value(.shots, line.shots))
+            StatValueText(context.profile.value(.shots, line.shotsOnGoal))
         }
         .font(.subheadline)
         .monospacedDigit()
-        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
@@ -384,15 +380,15 @@ struct KeeperTable: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading)
-                Text("MIN").frame(width: 44, alignment: .trailing)
-                Text("SOGA").frame(width: 50, alignment: .trailing)
-                Text("SV").frame(width: 36, alignment: .trailing)
-                Text("GA").frame(width: 36, alignment: .trailing)
-                Text("SV%").frame(width: 56, alignment: .trailing)
-                Text("GAA").frame(width: 52, alignment: .trailing)
+        Grid(horizontalSpacing: 12, verticalSpacing: 0) {
+            GridRow {
+                Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading).gridColumnAlignment(.leading)
+                Text("MIN").gridColumnAlignment(.trailing)
+                Text("SOGA").gridColumnAlignment(.trailing)
+                Text("SV").gridColumnAlignment(.trailing)
+                Text("GA").gridColumnAlignment(.trailing)
+                Text("SV%").gridColumnAlignment(.trailing)
+                Text("GAA").gridColumnAlignment(.trailing)
             }
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -400,8 +396,8 @@ struct KeeperTable: View {
             .padding(.bottom, 6)
 
             ForEach(keepers, id: \.playerID) { keeper in
-                Divider()
-                HStack(spacing: 0) {
+                Divider().gridCellColumns(7)
+                GridRow {
                     HStack(spacing: 6) {
                         Text(context.roster[keeper.playerID]?.shortLabel ?? "Goalkeeper")
                             .font(.subheadline)
@@ -415,23 +411,20 @@ struct KeeperTable: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Text("\(keeper.minutesPlayed)").frame(width: 44, alignment: .trailing)
-                    Text("\(keeper.shotsOnGoalFaced)").frame(width: 50, alignment: .trailing)
-                    Text("\(keeper.saves)").frame(width: 36, alignment: .trailing)
-                    Text("\(keeper.goalsAllowed)").frame(width: 36, alignment: .trailing)
+                    Text("\(keeper.minutesPlayed)")
+                    Text("\(keeper.shotsOnGoalFaced)")
+                    Text("\(keeper.saves)")
+                    Text("\(keeper.goalsAllowed)")
                     StatValueText(
                         keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable, style: .percent
                     )
-                    .frame(width: 56, alignment: .trailing)
                     StatValueText(
                         keeper.goalsAgainstAverage(regulationSeconds: context.rules.regulationLength)
                             .map { StatValue.rate($0) } ?? .notApplicable, style: .decimal
                     )
-                    .frame(width: 52, alignment: .trailing)
                 }
                 .font(.subheadline)
                 .monospacedDigit()
-                .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .accessibilityElement(children: .combine)
             }

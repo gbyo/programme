@@ -11,16 +11,13 @@ struct ReviewView: View {
     let session: LiveMatchSession
 
     @Environment(\.dismiss) private var dismiss
-    @State private var resolving: MatchEvent?
 
     var body: some View {
         List {
             if !unattributed.isEmpty {
                 Section {
                     ForEach(unattributed, id: \.id) { event in
-                        Button {
-                            resolving = event
-                        } label: {
+                        NavigationLink(value: event) {
                             let description = MatchNarrator.describe(event, context: session.context)
                             HStack(spacing: 12) {
                                 Text(description.timeText)
@@ -35,13 +32,9 @@ struct ReviewView: View {
                                     }
                                 }
                                 Spacer()
-                                Text("Select player")
-                                    .font(.subheadline)
-                                    .foregroundStyle(Color.accentColor)
                             }
                             .padding(.vertical, 4)
                         }
-                        .buttonStyle(.plain)
                     }
                 } header: {
                     Text("Needs Attribution")
@@ -56,11 +49,14 @@ struct ReviewView: View {
             if !otherIssues.isEmpty {
                 Section("Checks") {
                     ForEach(otherIssues) { issue in
-                        IssueRow(issue: issue) {
-                            guard let eventID = issue.eventID,
-                                let event = session.context.events.first(where: { $0.id == eventID })
-                            else { return }
-                            resolving = event
+                        if let eventID = issue.eventID,
+                            let event = session.context.events.first(where: { $0.id == eventID })
+                        {
+                            NavigationLink(value: event) {
+                                IssueRow(issue: issue)
+                            }
+                        } else {
+                            IssueRow(issue: issue)
                         }
                     }
                 }
@@ -84,10 +80,8 @@ struct ReviewView: View {
                 Button("Done") { dismiss() }
             }
         }
-        .sheet(item: $resolving) { event in
-            NavigationStack {
-                AttributionResolverView(session: session, event: event)
-            }
+        .navigationDestination(for: MatchEvent.self) { event in
+            AttributionResolverView(session: session, event: event)
         }
     }
 
@@ -98,7 +92,6 @@ struct ReviewView: View {
 
 struct IssueRow: View {
     let issue: ValidationIssue
-    var onOpen: () -> Void
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
@@ -121,11 +114,6 @@ struct IssueRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if issue.eventID != nil {
-                Button("Open", action: onOpen)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)

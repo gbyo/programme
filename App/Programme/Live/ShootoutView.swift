@@ -29,82 +29,94 @@ struct ShootoutView: View {
 
     var body: some View {
         List {
-                Section {
-                    Picker("Taker", selection: $pendingSide) {
-                        Text(session.descriptor.teamShortName).tag(TeamSide.us)
-                        Text(session.descriptor.opponentShortName).tag(TeamSide.opponent)
-                    }
-                    .pickerStyle(.segmented)
+            Section {
+                Picker("Side", selection: $pendingSide) {
+                    Text(session.descriptor.teamShortName).tag(TeamSide.us)
+                    Text(session.descriptor.opponentShortName).tag(TeamSide.opponent)
+                }
+                .pickerStyle(.segmented)
 
-                    if pendingSide == .us {
-                        takerGrid
-                    }
-
-                    HStack(spacing: 12) {
-                        Button {
-                            record(scored: true)
-                        } label: {
-                            Label("Scored", systemImage: "checkmark.circle.fill")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, minHeight: 52)
+                if pendingSide == .us {
+                    Picker("Taker", selection: $pendingTaker) {
+                        Text("Choose Taker").tag(PlayerID?.none)
+                        ForEach(sortedPlayers) { player in
+                            Text(player.shortLabel).tag(PlayerID?.some(player.id))
                         }
-                        .programmePrimaryAction()
-                        .disabled(pendingSide == .us && pendingTaker == nil)
-
-                        Button {
-                            record(scored: false)
-                        } label: {
-                            Label("Missed", systemImage: "xmark.circle")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity, minHeight: 52)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(pendingSide == .us && pendingTaker == nil)
+                    } currentValueLabel: {
+                        Text(selectedTakerLabel)
                     }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("Kick \(nextOrder)")
-                } footer: {
-                    Text("Shootout kicks are recorded separately. They decide the result but never count toward the score or a player's goal total.")
+                    .pickerStyle(.navigationLink)
                 }
 
-                if !attempts.isEmpty {
-                    Section("Kicks") {
-                        ForEach(attempts, id: \.event.id) { attempt in
-                            HStack(spacing: 12) {
-                                Image(
-                                    systemName: attempt.payload.scored
-                                        ? "checkmark.circle.fill" : "xmark.circle"
-                                )
-                                .foregroundStyle(
-                                    attempt.payload.scored
-                                        ? AnyShapeStyle(Programme.Palette.confirmed)
-                                        : AnyShapeStyle(.tertiary))
-                                Text("\(attempt.payload.order)")
-                                    .font(.subheadline.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 22, alignment: .trailing)
-                                Text(session.descriptor.shortName(for: attempt.payload.side))
-                                    .font(.subheadline.weight(.medium))
-                                Text(
-                                    session.context.roster(for: attempt.payload.side)
-                                        .label(for: attempt.payload.taker)
-                                )
-                                .font(.subheadline)
+                HStack(spacing: 12) {
+                    Button {
+                        record(scored: true)
+                    } label: {
+                        Label("Scored", systemImage: "checkmark.circle.fill")
+                            .font(.headline)
+                            .frame(minHeight: 52)
+                    }
+                    .programmePrimaryAction()
+                    .buttonSizing(.flexible)
+                    .disabled(pendingSide == .us && pendingTaker == nil)
+
+                    Button {
+                        record(scored: false)
+                    } label: {
+                        Label("Missed", systemImage: "xmark.circle")
+                            .font(.headline)
+                            .frame(minHeight: 52)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonSizing(.flexible)
+                    .disabled(pendingSide == .us && pendingTaker == nil)
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Kick \(nextOrder)")
+            } footer: {
+                Text(
+                    "Shootout kicks are recorded separately. They decide the result but never count toward the score or a player's goal total."
+                )
+            }
+
+            if !attempts.isEmpty {
+                Section("Kicks") {
+                    ForEach(attempts, id: \.event.id) { attempt in
+                        HStack(spacing: 12) {
+                            Image(
+                                systemName: attempt.payload.scored
+                                    ? "checkmark.circle.fill" : "xmark.circle"
+                            )
+                            .foregroundStyle(
+                                attempt.payload.scored
+                                    ? AnyShapeStyle(Programme.Palette.confirmed)
+                                    : AnyShapeStyle(.tertiary))
+                            Text("\(attempt.payload.order)")
+                                .font(.subheadline.monospacedDigit())
                                 .foregroundStyle(.secondary)
-                                Spacer()
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    session.edit(.void(attempt.event.id), message: "Kick removed")
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+                                .frame(width: 22, alignment: .trailing)
+                            Text(session.descriptor.shortName(for: attempt.payload.side))
+                                .font(.subheadline.weight(.medium))
+                            Text(
+                                session.context.roster(for: attempt.payload.side)
+                                    .label(for: attempt.payload.taker)
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                session.edit(.void(attempt.event.id), message: "Kick removed")
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
                     }
                 }
             }
+        }
         .safeAreaBar(edge: .top) { scoreboard }
         .navigationTitle("Shootout")
         .navigationBarTitleDisplayMode(.inline)
@@ -115,6 +127,7 @@ struct ShootoutView: View {
             // Alternate sides by default, which is how a shootout is taken.
             pendingSide = attempts.count.isMultiple(of: 2) ? .us : .opponent
         }
+        .sensoryFeedback(.selection, trigger: pendingTaker)
     }
 
     private var scoreboard: some View {
@@ -134,33 +147,15 @@ struct ShootoutView: View {
         )
     }
 
-    private var takerGrid: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(session.roster.activeRoster) { player in
-                    Button {
-                        pendingTaker = player.id
-                        Haptics.selectionChanged()
-                    } label: {
-                        VStack(spacing: 1) {
-                            Text(player.jerseyNumber.map(String.init) ?? "–")
-                                .font(.system(size: 20, weight: .semibold).monospacedDigit())
-                            Text(player.displaySurname)
-                                .font(.caption2)
-                                .lineLimit(1)
-                        }
-                        .frame(width: 84, height: 58)
-                    }
-                    .programmeSelectable(
-                        isSelected: pendingTaker == player.id,
-                        shape: .roundedRectangle(radius: 10))
-                    .accessibilityLabel(player.accessibilityLabel)
-                    .accessibilityAddTraits(pendingTaker == player.id ? .isSelected : [])
-                }
-            }
-            .padding(.vertical, 4)
+    private var sortedPlayers: [PlayerSnapshot] {
+        session.roster.activeRoster.sorted {
+            ($0.jerseyNumber ?? Int.max, $0.displaySurname) < ($1.jerseyNumber ?? Int.max, $1.displaySurname)
         }
-        .scrollIndicators(.hidden)
+    }
+
+    private var selectedTakerLabel: String {
+        guard let pendingTaker, let player = session.roster[pendingTaker] else { return "Choose Taker" }
+        return player.shortLabel
     }
 
     private func record(scored: Bool) {

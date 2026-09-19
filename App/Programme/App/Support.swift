@@ -105,23 +105,14 @@ enum MaintenanceScheduler {
     #endif
 }
 
-extension DateFormatter {
-    static let matchDay: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, MMM d"
-        return formatter
-    }()
-
-    static let matchTimeOfDay: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter
-    }()
-}
-
 extension Date {
-    var matchDayText: String { DateFormatter.matchDay.string(from: self) }
-    var matchTimeText: String { DateFormatter.matchTimeOfDay.string(from: self) }
+    var matchDayText: String {
+        formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
+    var matchTimeText: String {
+        formatted(.dateTime.hour().minute())
+    }
 }
 
 /// Minutes rendered the way a coach reads them.

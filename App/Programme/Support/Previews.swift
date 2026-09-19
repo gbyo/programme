@@ -124,7 +124,7 @@
     #Preview("Event log") {
         if let session = PreviewSupport.session(ProgrammeSample.completedContext()) {
             NavigationStack {
-                EventLogView(session: session) { _ in }
+                EventLogView(session: session)
             }
         }
     }

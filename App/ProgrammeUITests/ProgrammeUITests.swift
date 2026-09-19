@@ -620,6 +620,7 @@ final class ProgrammeUITests: XCTestCase {
         XCTAssertFalse(app.tabBars.buttons["Exports"].exists)
         XCTAssertFalse(app.buttons["Exports"].exists)
         XCTAssertFalse(app.navigationBars["Exports"].exists)
+        attachScreenshot(named: "Top-level destinations")
     }
 
     func testStatsExportProducesFiles() {
@@ -803,7 +804,9 @@ final class ProgrammeUITests: XCTestCase {
         element(app, "match.Dixie").tap()
         XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
 
-        app.buttons["Actions"].tap()
+        // Match actions live in the toolbar overflow (native overflow on
+        // iOS 27+, a "More" menu below that).
+        app.buttons["More"].tap()
         app.buttons["Export…"].tap()
         XCTAssertTrue(app.navigationBars["Export"].waitForExistence(timeout: 5))
 

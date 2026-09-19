@@ -79,14 +79,19 @@ struct RosterImportView: View {
     private var inputStep: some View {
         Form {
             Section {
-                Button("Choose a CSV File…", systemImage: "folder") { isShowingFileImporter = true }
+                Button("Choose CSV or Text File…", systemImage: "folder") { isShowingFileImporter = true }
+                PasteButton(payloadType: String.self) { strings in
+                    guard let text = strings.first else { return }
+                    rawText = text
+                    analyze()
+                }
                 if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                     Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
                         isShowingScanner = true
                     }
                 }
             } header: {
-                Text("From a file")
+                Text("Import")
             }
 
             Section {
@@ -117,7 +122,7 @@ struct RosterImportView: View {
     }
 
     private func mappingStep(_ preview: RosterImportPreview) -> some View {
-        List {
+        List(selection: selectedRows) {
             Section {
                 ForEach(Array(preview.headers.enumerated()), id: \.offset) { index, header in
                     Picker(
@@ -134,6 +139,7 @@ struct RosterImportView: View {
                             Text(column.label).tag(column)
                         }
                     }
+                    .selectionDisabled()
                 }
             } header: {
                 Text("Columns")
@@ -147,13 +153,6 @@ struct RosterImportView: View {
             Section("Preview") {
                 ForEach(preview.rows) { row in
                     HStack(spacing: 12) {
-                        Image(
-                            systemName: row.isSelected
-                                ? "checkmark.circle.fill" : "circle"
-                        )
-                        .foregroundStyle(row.isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
-                        .onTapGesture { toggle(row) }
-
                         if let player = preview.player(from: row) {
                             Text(player.jerseyNumber.map { "#\($0)" } ?? "—")
                                 .font(.subheadline.weight(.medium))
@@ -175,22 +174,28 @@ struct RosterImportView: View {
                         }
                         Spacer()
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { toggle(row) }
+                    .tag(row.id)
                 }
             }
 
             Section {
                 Button("Start Over", role: .destructive) { self.preview = nil }
+                    .selectionDisabled()
             }
         }
+        .environment(\.editMode, .constant(.active))
     }
 
-    private func toggle(_ row: RosterImportRow) {
-        guard var preview else { return }
-        guard let index = preview.rows.firstIndex(where: { $0.id == row.id }) else { return }
-        preview.rows[index].isSelected.toggle()
-        self.preview = preview
+    private var selectedRows: Binding<Set<UUID>> {
+        Binding(
+            get: { Set(preview?.rows.filter(\.isSelected).map(\.id) ?? []) },
+            set: { selection in
+                guard var preview else { return }
+                for index in preview.rows.indices {
+                    preview.rows[index].isSelected = selection.contains(preview.rows[index].id)
+                }
+                self.preview = preview
+            })
     }
 
     private func analyze() {

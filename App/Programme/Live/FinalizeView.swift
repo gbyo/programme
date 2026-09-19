@@ -32,10 +32,12 @@ struct FinalizeView: View {
                         CompletenessRow(
                             stat: stat, state: session.snapshot.completeness(stat))
                     }
-                    Text("“Not tracked” means the category was never recorded for this match. It stays unknown in exports and season totals — it is never counted as zero.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
+                    Text(
+                        "“Not tracked” means the category was never recorded for this match. It stays unknown in exports and season totals — it is never counted as zero."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
                 }
 
                 section("Playing Time") {
@@ -86,9 +88,10 @@ struct FinalizeView: View {
                 } label: {
                     Label("Finalize Match", systemImage: "flag.checkered")
                         .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .frame(minHeight: 50)
                 }
                 .programmePrimaryAction(in: .control)
+                .buttonSizing(.flexible)
                 .disabled(!blockingIssues.isEmpty)
             }
         }
@@ -151,12 +154,16 @@ struct FinalizeView: View {
     }
 
     private var minutesExplanation: String {
-        let expected = session.rules.playersPerSide * publishedMinutes(
-            fromSeconds: session.snapshot.timeline.periods.totalSecondsPlayed)
+        let expected =
+            session.rules.playersPerSide
+            * publishedMinutes(
+                fromSeconds: session.snapshot.timeline.periods.totalSecondsPlayed)
         if abs(totalMinutes - expected) <= session.rules.playersPerSide {
-            return "Derived from lineup intervals. Consistent with \(session.rules.playersPerSide) players for the full match."
+            return
+                "Derived from lineup intervals. Consistent with \(session.rules.playersPerSide) players for the full match."
         }
-        return "Derived from lineup intervals. Expected roughly \(expected) minutes across \(session.rules.playersPerSide) positions — a substitution may be missing or mistimed."
+        return
+            "Derived from lineup intervals. Expected roughly \(expected) minutes across \(session.rules.playersPerSide) positions — a substitution may be missing or mistimed."
     }
 
     private var checks: [PeriodCheck] {
@@ -200,7 +207,8 @@ struct FinalizeView: View {
             result.append(
                 PeriodCheck(
                     state: .warning,
-                    title: "\(session.needsReviewCount) unresolved attribution\(session.needsReviewCount == 1 ? "" : "s")",
+                    title:
+                        "\(session.needsReviewCount) unresolved attribution\(session.needsReviewCount == 1 ? "" : "s")",
                     detail: "These count toward team totals but not toward any player."
                 ))
         }

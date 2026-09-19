@@ -6,11 +6,11 @@ import TipKit
 /// The chronological record, written to be read rather than to mirror a table.
 struct EventLogView: View {
     let session: LiveMatchSession
-    var onEdit: (MatchEvent) -> Void
-
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filter: LogFilter = .all
     @State private var showsVoided = false
+    @State private var editingEvent: MatchEvent?
     private let timeTip = CorrectEventTimeTip()
 
     enum LogFilter: String, CaseIterable, Identifiable {
@@ -29,30 +29,30 @@ struct EventLogView: View {
             ForEach(groupedByPeriod, id: \.period) { group in
                 Section(periodTitle(group.period)) {
                     ForEach(group.events, id: \.event.id) { pair in
-                        EventLogRow(description: pair.description)
-                            .contentShape(Rectangle())
-                            .onTapGesture { onEdit(pair.event) }
-                            .swipeActions(edge: .trailing) {
-                                if !pair.event.payload.isStructural {
-                                    Button(role: .destructive) {
-                                        session.edit(.void(pair.event.id), message: "Event deleted")
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
+                        NavigationLink(value: pair.event) {
+                            EventLogRow(description: pair.description, isEditable: true)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            if !pair.event.payload.isStructural {
+                                Button(role: .destructive) {
+                                    session.edit(.void(pair.event.id), message: "Event deleted")
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
                             }
-                            .contextMenu {
-                                Button("Edit Event", systemImage: "pencil") { onEdit(pair.event) }
-                                if pair.event.isVoided {
-                                    Button("Restore", systemImage: "arrow.uturn.backward") {
-                                        session.edit(.restore(pair.event.id), message: "Event restored")
-                                    }
-                                } else if !pair.event.payload.isStructural {
-                                    Button("Delete Event", systemImage: "trash", role: .destructive) {
-                                        session.edit(.void(pair.event.id), message: "Event deleted")
-                                    }
+                        }
+                        .contextMenu {
+                            Button("Edit Event", systemImage: "pencil") { editingEvent = pair.event }
+                            if pair.event.isVoided {
+                                Button("Restore", systemImage: "arrow.uturn.backward") {
+                                    session.edit(.restore(pair.event.id), message: "Event restored")
+                                }
+                            } else if !pair.event.payload.isStructural {
+                                Button("Delete Event", systemImage: "trash", role: .destructive) {
+                                    session.edit(.void(pair.event.id), message: "Event deleted")
                                 }
                             }
+                        }
                     }
                 }
             }
@@ -70,23 +70,25 @@ struct EventLogView: View {
         .navigationTitle("Event Log")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaBar(edge: .top) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(LogFilter.allCases) { option in
-                        FilterChip(
-                            title: option.rawValue,
-                            badge: option == .review && session.needsReviewCount > 0
-                                ? "\(session.needsReviewCount)" : nil,
-                            isSelected: filter == option
-                        ) {
-                            filter = option
+            if horizontalSizeClass != .compact {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(LogFilter.allCases) { option in
+                            FilterChip(
+                                title: option.rawValue,
+                                badge: option == .review && session.needsReviewCount > 0
+                                    ? "\(session.needsReviewCount)" : nil,
+                                isSelected: filter == option
+                            ) {
+                                filter = option
+                            }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 2)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .safeAreaBar(edge: .bottom) {
             TipView(timeTip)
@@ -103,6 +105,22 @@ struct EventLogView: View {
                     .labelStyle(.iconOnly)
                     .accessibilityLabel("Show deleted events")
             }
+            if horizontalSizeClass == .compact {
+                ToolbarItem(placement: .secondaryAction) {
+                    Picker("Filter", selection: $filter) {
+                        ForEach(LogFilter.allCases) { option in
+                            Text(filterTitle(option)).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+        .navigationDestination(for: MatchEvent.self) { event in
+            EventEditView(session: session, event: event)
+        }
+        .navigationDestination(item: $editingEvent) { event in
+            EventEditView(session: session, event: event)
         }
     }
 
@@ -142,10 +160,16 @@ struct EventLogView: View {
     private func periodTitle(_ period: Int) -> String {
         session.rules.period(at: period)?.longLabel ?? "Period \(period)"
     }
+
+    private func filterTitle(_ option: LogFilter) -> String {
+        guard option == .review, session.needsReviewCount > 0 else { return option.rawValue }
+        return "\(option.rawValue) (\(session.needsReviewCount))"
+    }
 }
 
 struct EventLogRow: View {
     let description: EventDescription
+    var isEditable = false
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
@@ -207,7 +231,7 @@ struct EventLogRow: View {
         .opacity(description.isVoided ? 0.5 : 1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(description.accessibilityLabel)
-        .accessibilityHint("Double tap to edit this event.")
+        .accessibilityHint(isEditable ? "Double tap to edit this event." : "")
     }
 }
 

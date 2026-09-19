@@ -15,6 +15,7 @@ final class MatchClockModel {
     private(set) var displayText = "0:00"
     private(set) var accessibilityText = ""
     private(set) var isRunning = false
+    private(set) var countsDown = true
     private(set) var periodShortLabel = ""
     private(set) var periodLongLabel = ""
     private(set) var matchTime = MatchTime.kickoff
@@ -61,6 +62,8 @@ final class MatchClockModel {
         if text != displayText { displayText = text }
         if time != matchTime { matchTime = time }
         if anchor.isRunning != isRunning { isRunning = anchor.isRunning }
+        let shouldCountDown = rules.clockDisplay == .countDownInPeriod
+        if shouldCountDown != countsDown { countsDown = shouldCountDown }
 
         let descriptor = rules.period(at: anchor.period)
         let short = descriptor?.shortLabel ?? ""
