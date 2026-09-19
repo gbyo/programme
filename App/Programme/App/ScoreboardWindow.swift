@@ -6,19 +6,44 @@ import SwiftUI
 struct ScoreboardWindow: View {
     @Environment(AppModel.self) private var appModel
 
+    @State private var isConnectingNearby = false
+
     var body: some View {
         Group {
             if let session = appModel.liveSession {
                 content(session: session)
+            } else if let received = appModel.nearby.received {
+                NearbyDisplayView(snapshot: received)
+                    .overlay(alignment: .topTrailing) {
+                        Button("Disconnect", systemImage: "wifi.slash") {
+                            appModel.nearby.disconnectDisplay()
+                        }
+                        .labelStyle(.iconOnly)
+                        .accessibilityIdentifier("scoreboard.disconnectNearby")
+                        .padding()
+                    }
             } else {
                 ContentUnavailableView(
                     "No Match Being Scored",
                     systemImage: "sportscourt",
-                    description: Text("Start scoring a match in Programme and it will appear here."))
+                    description: Text("Start scoring a match in Programme and it will appear here.")
+                )
+                .overlay(alignment: .bottom) {
+                    Button("Connect to Nearby Match…", systemImage: "wifi") {
+                        isConnectingNearby = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("scoreboard.connectNearby")
+                    .padding(.bottom, 48)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+        .sheet(isPresented: $isConnectingNearby) {
+            NearbyConnectSheet()
+                .environment(appModel.nearby)
+        }
     }
 
     private func content(session: LiveMatchSession) -> some View {

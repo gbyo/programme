@@ -40,6 +40,12 @@
     </array>
     <key>CKSharingSupported</key>
     <true/>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_programme-sb._tcp</string>
+    </array>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Programme looks for nearby matches to show a read-only scoreboard on this display. Scoring stays on the scorer's device.</string>
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>org.programme.maintenance</string>

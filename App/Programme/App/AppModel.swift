@@ -121,6 +121,9 @@ final class AppModel {
     /// Device-local kickoff reminders. Permission is requested only from the
     /// explicit Remind Me action, never at launch.
     let reminderCenter = MatchReminderCenter()
+    /// Nearby read-only scoreboard. Lives for the app lifetime so the
+    /// scoreboard window can display while no local session exists.
+    let nearby = NearbyScoreboardService()
 
     // MARK: - Team sharing
 
@@ -649,6 +652,7 @@ final class AppModel {
     func closeLiveSession() async {
         await liveSession?.flush()
         liveSession = nil
+        nearby.stopAdvertising()
         ProgrammeStateReporter.reportWorkflow(.browsing)
         navigation.isShowingLiveMatch = false
         await refreshWidgetSnapshot()
