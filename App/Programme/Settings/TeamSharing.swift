@@ -1,6 +1,7 @@
 import CloudKit
 import ProgrammeCollaboration
 import ProgrammeCore
+import SharedWithYou
 import SwiftUI
 
 /// Native SwiftUI share item for a team.
@@ -18,6 +19,10 @@ struct TeamShareItem: Transferable, Sendable {
     let prepared: CKShare?
     let coordinator: TeamShareCoordinator
     let containerFactory: @Sendable () -> CKContainer
+
+    /// The container for the collaboration view. Evaluated only when the
+    /// view actually presents sharing UI, never on launch paths.
+    func container() -> CKContainer { containerFactory() }
 
     static var transferRepresentation: some TransferRepresentation {
         CKShareTransferRepresentation<TeamShareItem> { item in
@@ -40,6 +45,59 @@ extension ShareParticipant {
         case .owner: return "Owner"
         case .collaborator: return "Can make changes"
         case .viewer: return "Can view"
+        }
+    }
+}
+
+/// Apple's native collaboration control for an already-shared team:
+/// participant faces, active count, and the system Manage Share flow
+/// (participants, permissions, settings, stop sharing). A narrow
+/// UIViewRepresentable because SwiftUI exposes no equivalent view.
+/// `ShareLink` remains the initial sharing path; this takes over once a
+/// share exists.
+struct CollaborationView: UIViewRepresentable {
+    let share: CKShare
+    let container: CKContainer
+    let teamName: String
+
+    func makeUIView(context: Context) -> SWCollaborationView {
+        let provider = NSItemProvider()
+        provider.registerCKShare(share, container: container)
+        let view = SWCollaborationView(itemProvider: provider)
+        view.headerTitle = teamName
+        return view
+    }
+
+    func updateUIView(_ view: SWCollaborationView, context: Context) {}
+}
+
+/// Concise sync state for team detail. Local scoring and recovery stay
+/// authoritative in every state — "offline" or "needs review" never means
+/// unsafe, only that shared copies may lag or need a human look.
+enum TeamSyncState: Hashable, Sendable {
+    case synced
+    case syncing
+    case offline
+    case unavailable
+    case needsReview(Int)
+
+    var label: String {
+        switch self {
+        case .synced: return "Synced"
+        case .syncing: return "Syncing…"
+        case .offline: return "Offline — changes saved locally"
+        case .unavailable: return "iCloud unavailable"
+        case .needsReview(let count): return "Needs Review (\(count))"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .synced: return "checkmark.icloud"
+        case .syncing: return "arrow.triangle.2.circlepath.icloud"
+        case .offline: return "icloud.slash"
+        case .unavailable: return "icloud.slash"
+        case .needsReview: return "exclamationmark.icloud"
         }
     }
 }

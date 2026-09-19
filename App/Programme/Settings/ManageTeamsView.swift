@@ -83,6 +83,7 @@ struct TeamDetailView: View {
     @State private var shareItem: TeamShareItem?
     @State private var participants: [ShareParticipant] = []
     @State private var conflicts: [(conflict: TeamConflict, matchName: String)] = []
+    @State private var syncState: TeamSyncState = .synced
     @State private var isConfirmingStopSharing = false
     @State private var isAddingSeason = false
     @State private var newSeasonName = ""
@@ -146,16 +147,31 @@ struct TeamDetailView: View {
             }
 
             Section {
+                Label(syncState.label, systemImage: syncState.systemImage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("teamDetail.syncState")
                 if let shareItem {
-                    ShareLink(
-                        item: shareItem,
-                        preview: SharePreview(
-                            Text("Share \(shareItem.teamName)"),
-                            image: Image(systemName: "person.2"))
-                    ) {
-                        Label("Share \(shareItem.teamName)…", systemImage: "square.and.arrow.up")
+                    if let prepared = shareItem.prepared {
+                        CollaborationView(
+                            share: prepared, container: shareItem.container(),
+                            teamName: shareItem.teamName
+                        )
+                        .frame(height: 48)
+                        .accessibilityIdentifier("teamDetail.collaboration")
+                    } else {
+                        ShareLink(
+                            item: shareItem,
+                            preview: SharePreview(
+                                Text("Share \(shareItem.teamName)"),
+                                image: Image(systemName: "person.2"))
+                        ) {
+                            Label(
+                                "Share \(shareItem.teamName)…",
+                                systemImage: "square.and.arrow.up")
+                        }
+                        .accessibilityIdentifier("teamDetail.share")
                     }
-                    .accessibilityIdentifier("teamDetail.share")
                 } else {
                     HStack {
                         Text("Preparing Share…")
@@ -291,6 +307,7 @@ struct TeamDetailView: View {
     /// as a dead Share button.
     private func loadShareItem() async {
         conflicts = await appModel.syncConflicts(teamID: teamID)
+        syncState = await appModel.syncState(teamID: teamID)
         do {
             shareItem = try await appModel.teamShareItem(teamID: teamID)
             participants = await appModel.teamParticipants(teamID: teamID)

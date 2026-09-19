@@ -31,11 +31,14 @@ targets:
       - package: ProgrammeKit
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI, ProgrammeCollaboration]
       - target: ProgrammeWidgets
-    # CloudKit container for team collaboration. Provisioning the
-    # iCloud.org.programme.Programme container in the Developer Portal and
-    # enabling the Xcode iCloud capability is still required before any
-    # device syncs; until then the coordinator reports unavailable and all
-    # local behavior is unchanged.
+    # CloudKit container for team collaboration, declared in
+    # App/Programme/Programme.entitlements. Still required as external
+    # steps before any device syncs: provision the
+    # iCloud.org.programme.Programme container in the Developer Portal,
+    # and enable the Xcode iCloud + Push Notifications capabilities
+    # (Xcode writes aps-environment itself at signing time; it is never
+    # hard-coded here). Until then sync reports unavailable and all local
+    # behavior is unchanged.
     entitlements:
       path: App/Programme/Programme.entitlements
     settings:

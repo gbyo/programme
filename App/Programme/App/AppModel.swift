@@ -194,6 +194,21 @@ final class AppModel {
         }
     }
 
+    /// Concise sync state for team detail. Review comes first (actionable),
+    /// then availability, then engine status. Every state leaves local
+    /// scoring and recovery authoritative.
+    func syncState(teamID: TeamID) async -> TeamSyncState {
+        let reviewCount = await syncConflicts(teamID: teamID).count
+        if reviewCount > 0 { return .needsReview(reviewCount) }
+        guard ShareAvailability.isICloudAvailable else { return .unavailable }
+        guard let service = try? syncing() else { return .offline }
+        switch await service.engineStatus() {
+        case .idle: return .synced
+        case .syncing: return .syncing
+        case .unavailable, .attentionNeeded: return .offline
+        }
+    }
+
     /// Accepts an invitation, then reloads the workspace. Nothing
     /// materializes here: shared content still lands through the applier, so
     /// review-gating applies unchanged.

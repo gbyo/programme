@@ -115,6 +115,13 @@ public actor TeamSyncService: Sendable {
         await refreshOwners()
     }
 
+    /// The engines' current status for lightweight UI state. `.idle` before
+    /// `start()` (sync is inert, local truth authoritative as always).
+    public func engineStatus() async -> TeamSyncCoordinator.Status {
+        guard started else { return .idle }
+        return await coordinator.status
+    }
+
     /// Unresolved same-revision contradictions for a team, oldest first.
     /// Readable offline: conflicts are local records, not CloudKit state.
     public func unresolvedConflicts(teamID: TeamID) async -> [TeamConflict] {
