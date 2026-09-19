@@ -1,9 +1,9 @@
 import Charts
+import Foundation
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
 import ProgrammeUI
-import SwiftData
 import SwiftUI
 
 /// Season statistics: a record book, not a dashboard.
@@ -21,15 +21,6 @@ struct SeasonStatsView: View {
     @State private var contexts: [MatchContext] = []
     @State private var seasons: [SeasonListItem] = []
     @State private var teamDetails: TeamDetails?
-    @State private var sortField: SortField = .points
-
-    enum SortField: String, CaseIterable, Identifiable {
-        case points = "Points"
-        case goals = "Goals"
-        case assists = "Assists"
-        case minutes = "Minutes"
-        var id: String { rawValue }
-    }
 
     private var viewedSeasonID: SeasonID? {
         seasonID ?? appModel.workspace.viewedStatsSeasonID
@@ -118,32 +109,55 @@ struct SeasonStatsView: View {
     }
 
     private func content(_ season: SeasonStats) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                header(season)
-                resultsChart(season)
-                leadersSection(season)
-                skatersTable(season)
-                if !season.sortedKeepers.isEmpty { keeperTable(season) }
-                completenessSection(season)
+        List {
+            Section {
+                header(season).padding(.vertical, 8)
             }
-            .padding(20)
-            .frame(maxWidth: 980, alignment: .leading)
-            .frame(maxWidth: .infinity)
+
+            resultsChart(season)
+            leadersSection(season)
+
+            Section("Statistics") {
+                NavigationLink {
+                    SeasonPlayersTableView(season: season, roster: roster)
+                } label: {
+                    statisticsLink(
+                        title: "Player Statistics",
+                        detail: "\(season.players.count) players · GP, MIN, G, A, PTS, SH, SOG",
+                        symbol: "person.3")
+                }
+
+                if !season.sortedKeepers.isEmpty {
+                    NavigationLink {
+                        SeasonKeepersTableView(season: season, roster: roster)
+                    } label: {
+                        statisticsLink(
+                            title: "Goalkeeping",
+                            detail: "\(season.sortedKeepers.count) keepers · MIN, SV, GA, SV%, GAA, SHO",
+                            symbol: "hand.raised")
+                    }
+                }
+            }
+
+            completenessSection(season)
         }
+        .listStyle(.insetGrouped)
     }
 
     private func header(_ season: SeasonStats) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(teamDetails?.name ?? "").font(.largeTitle.weight(.semibold))
-            HStack(spacing: 18) {
-                StatCell("Record", .count(season.wins), emphasis: true)
-                    .overlay(alignment: .topLeading) {
-                        Text(season.recordText)
-                            .font(.title2.weight(.semibold))
-                            .monospacedDigit()
-                            .background(Color(.systemBackground))
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            Text(teamDetails?.name ?? "")
+                .font(.largeTitle.weight(.semibold))
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 16)], spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(season.recordText)
+                        .font(.title2.weight(.semibold))
+                        .monospacedDigit()
+                    Text("Record")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 StatCell("Goals For", .count(season.goalsFor), emphasis: true)
                 StatCell("Goals Against", .count(season.goalsAgainst), emphasis: true)
                 StatCell("Shutouts", .count(season.teamShutouts), emphasis: true)
@@ -153,7 +167,7 @@ struct SeasonStatsView: View {
     }
 
     private func resultsChart(_ season: SeasonStats) -> some View {
-        SectionBox(title: "Goals by Match") {
+        Section("Goals by Match") {
             Chart {
                 ForEach(season.matches, id: \.matchID) { match in
                     BarMark(
@@ -174,186 +188,359 @@ struct SeasonStatsView: View {
             .chartYAxis { AxisMarks(position: .leading) }
             .chartLegend(position: .top, alignment: .leading)
             .frame(height: 230)
-            .padding(16)
+            .padding(.vertical, 8)
             .accessibilityLabel("Goals for and against, by match")
         }
     }
 
     private func leadersSection(_ season: SeasonStats) -> some View {
-        SectionBox(title: "Leaders") {
+        Section("Leaders") {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
-                leaderCard("Points", season.sortedPlayers.prefix(3).map { ($0.playerID, "\($0.points)") })
-                leaderCard(
+                leaderGroup("Points", season.sortedPlayers.prefix(3).map { ($0.playerID, "\($0.points)") })
+                leaderGroup(
                     "Goals",
                     season.players.values.sorted { $0.totals.goals > $1.totals.goals }.prefix(3).map {
                         ($0.playerID, "\($0.totals.goals)")
                     })
-                leaderCard(
+                leaderGroup(
                     "Assists",
                     season.players.values.sorted { $0.totals.assists > $1.totals.assists }.prefix(3).map {
                         ($0.playerID, "\($0.totals.assists)")
                     })
-                leaderCard(
+                leaderGroup(
                     "Minutes",
                     season.players.values.sorted { $0.secondsPlayed > $1.secondsPlayed }.prefix(3).map {
                         ($0.playerID, "\($0.minutesPlayed)")
                     })
             }
-            .padding(16)
+            .padding(.vertical, 8)
         }
     }
 
-    private func leaderCard(_ title: String, _ entries: [(PlayerID, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).programmeSectionHeader()
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-                HStack {
-                    Text(roster[entry.0]?.shortLabel ?? "—")
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    Spacer()
-                    Text(entry.1)
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                }
-            }
-            if entries.isEmpty {
-                Text("No data").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func skatersTable(_ season: SeasonStats) -> some View {
-        SectionBox(title: "Players") {
-            VStack(spacing: 0) {
-                Picker("Sort by", selection: $sortField) {
-                    ForEach(SortField.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(16)
-
-                HStack(spacing: 0) {
-                    Text("PLAYER").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("GP").frame(width: 34, alignment: .trailing)
-                    Text("GS").frame(width: 34, alignment: .trailing)
-                    Text("MIN").frame(width: 48, alignment: .trailing)
-                    Text("G").frame(width: 32, alignment: .trailing)
-                    Text("A").frame(width: 32, alignment: .trailing)
-                    Text("PTS").frame(width: 40, alignment: .trailing)
-                    Text("SH").frame(width: 38, alignment: .trailing)
-                    Text("SOG").frame(width: 42, alignment: .trailing)
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
-
-                ForEach(sortedPlayers(season)) { stats in
-                    Divider()
-                    Button {
-                        Task { await appModel.open(.player(stats.playerID)) }
-                    } label: {
-                        HStack(spacing: 0) {
-                            Text(roster[stats.playerID]?.shortLabel ?? "—")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("\(stats.matchesPlayed)").frame(width: 34, alignment: .trailing)
-                            Text("\(stats.starts)").frame(width: 34, alignment: .trailing)
-                            Text("\(stats.minutesPlayed)").frame(width: 48, alignment: .trailing)
-                            StatValueText(stats.value(.goals, \.goals)).frame(width: 32, alignment: .trailing)
-                            StatValueText(stats.value(.assists, \.assists)).frame(width: 32, alignment: .trailing)
-                            StatValueText(stats.value(.goals, \.points)).frame(width: 40, alignment: .trailing)
-                            StatValueText(stats.value(.shots, \.shots)).frame(width: 38, alignment: .trailing)
-                            StatValueText(stats.value(.shots, \.shotsOnGoal)).frame(width: 42, alignment: .trailing)
-                        }
-                        .font(.subheadline)
-                        .monospacedDigit()
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 9)
-                        .contentShape(Rectangle())
+    private func leaderGroup(_ title: String, _ entries: [(PlayerID, String)]) -> some View {
+        GroupBox {
+            VStack(spacing: 8) {
+                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    HStack {
+                        Text(roster[entry.0]?.shortLabel ?? "—")
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(entry.1)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
                     }
-                    .buttonStyle(.plain)
+                }
+                if entries.isEmpty {
+                    Text("No data")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(.bottom, 8)
+        } label: {
+            Text(title)
         }
     }
 
-    private func sortedPlayers(_ season: SeasonStats) -> [SeasonPlayerStats] {
-        let players = Array(season.players.values)
-        switch sortField {
-        case .points: return players.sorted { $0.points > $1.points }
-        case .goals: return players.sorted { $0.totals.goals > $1.totals.goals }
-        case .assists: return players.sorted { $0.totals.assists > $1.totals.assists }
-        case .minutes: return players.sorted { $0.secondsPlayed > $1.secondsPlayed }
-        }
-    }
-
-    private func keeperTable(_ season: SeasonStats) -> some View {
-        SectionBox(title: "Goalkeeping") {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    Text("GOALKEEPER").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("GP").frame(width: 34, alignment: .trailing)
-                    Text("MIN").frame(width: 52, alignment: .trailing)
-                    Text("SV").frame(width: 38, alignment: .trailing)
-                    Text("GA").frame(width: 38, alignment: .trailing)
-                    Text("SV%").frame(width: 56, alignment: .trailing)
-                    Text("GAA").frame(width: 52, alignment: .trailing)
-                    Text("SHO").frame(width: 42, alignment: .trailing)
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-
-                ForEach(season.sortedKeepers) { keeper in
-                    Divider()
-                    HStack(spacing: 0) {
-                        Text(roster[keeper.playerID]?.shortLabel ?? "—")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("\(keeper.matchesPlayed)").frame(width: 34, alignment: .trailing)
-                        Text("\(keeper.minutesPlayed)").frame(width: 52, alignment: .trailing)
-                        Text("\(keeper.totals.saves)").frame(width: 38, alignment: .trailing)
-                        Text("\(keeper.totals.goalsAllowed)").frame(width: 38, alignment: .trailing)
-                        StatValueText(keeper.savePercentage, style: .percent).frame(width: 56, alignment: .trailing)
-                        StatValueText(keeper.goalsAgainstAverage, style: .decimal).frame(
-                            width: 52, alignment: .trailing)
-                        Text("\(keeper.totals.shutouts)").frame(width: 42, alignment: .trailing)
-                    }
-                    .font(.subheadline)
-                    .monospacedDigit()
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                }
+    private func statisticsLink(title: String, detail: String, symbol: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
             }
-            .padding(.bottom, 8)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(.secondary)
         }
     }
 
     private func completenessSection(_ season: SeasonStats) -> some View {
-        SectionBox(title: "What This Season Tracked") {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(TrackedStat.allCases.sorted { $0.label < $1.label }) { stat in
-                    HStack {
-                        CompletenessRow(stat: stat, state: season.completeness(stat))
-                        if season.completeness(stat) == .needsReview {
-                            Text("\(season.trackedMatches[stat] ?? 0) of \(season.matchesPlayed) matches")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+        Section {
+            ForEach(TrackedStat.allCases.sorted { $0.label < $1.label }) { stat in
+                HStack {
+                    CompletenessRow(stat: stat, state: season.completeness(stat))
+                    if season.completeness(stat) == .needsReview {
+                        Text("\(season.trackedMatches[stat] ?? 0) of \(season.matchesPlayed) matches")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                Text(
-                    "Totals only include matches that were tracking a category. A category no match tracked stays unknown rather than being reported as zero."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
             }
-            .padding(16)
+        } header: {
+            Text("What This Season Tracked")
+        } footer: {
+            Text(
+                "Totals only include matches that were tracking a category. A category no match tracked stays unknown rather than being reported as zero."
+            )
         }
+    }
+}
+
+private struct SeasonPlayerTableRow: Identifiable {
+    let stats: SeasonPlayerStats
+    let player: PlayerSnapshot?
+
+    var id: PlayerID { stats.playerID }
+    var name: String { player?.shortLabel ?? "—" }
+    var gamesPlayed: Int { stats.matchesPlayed }
+    var starts: Int { stats.starts }
+    var minutes: Int { stats.minutesPlayed }
+    var goals: Int? { stats.value(.goals, \.goals).countValue }
+    var assists: Int? { stats.value(.assists, \.assists).countValue }
+    var points: Int? { stats.value(.goals, \.points).countValue }
+    var shots: Int? { stats.value(.shots, \.shots).countValue }
+    var shotsOnGoal: Int? { stats.value(.shots, \.shotsOnGoal).countValue }
+}
+
+/// Sorts the table without collapsing Programme's tracked/untracked distinction.
+///
+/// Unknown or not-applicable statistics always remain after real values in both
+/// sort directions. A tracked zero therefore never becomes equivalent to a
+/// category the match set did not record.
+private struct SeasonPlayerSortComparator: SortComparator {
+    enum Field: String, CaseIterable, Identifiable, Sendable {
+        case name
+        case gamesPlayed
+        case starts
+        case minutes
+        case goals
+        case assists
+        case points
+        case shots
+        case shotsOnGoal
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .name: "Player"
+            case .gamesPlayed: "Games Played"
+            case .starts: "Starts"
+            case .minutes: "Minutes"
+            case .goals: "Goals"
+            case .assists: "Assists"
+            case .points: "Points"
+            case .shots: "Shots"
+            case .shotsOnGoal: "Shots on Goal"
+            }
+        }
+
+        static let compactChoices: [Self] = [.points, .goals, .assists, .minutes]
+    }
+
+    typealias Compared = SeasonPlayerTableRow
+
+    var field: Field
+    var order: SortOrder = .forward
+
+    func compare(_ lhs: SeasonPlayerTableRow, _ rhs: SeasonPlayerTableRow) -> ComparisonResult {
+        switch field {
+        case .name:
+            return applyOrder(lhs.name.localizedStandardCompare(rhs.name))
+        case .gamesPlayed:
+            return compareKnown(lhs.gamesPlayed, rhs.gamesPlayed)
+        case .starts:
+            return compareKnown(lhs.starts, rhs.starts)
+        case .minutes:
+            return compareKnown(lhs.minutes, rhs.minutes)
+        case .goals:
+            return compareOptional(lhs.goals, rhs.goals)
+        case .assists:
+            return compareOptional(lhs.assists, rhs.assists)
+        case .points:
+            return compareOptional(lhs.points, rhs.points)
+        case .shots:
+            return compareOptional(lhs.shots, rhs.shots)
+        case .shotsOnGoal:
+            return compareOptional(lhs.shotsOnGoal, rhs.shotsOnGoal)
+        }
+    }
+
+    private func compareKnown<T: Comparable>(_ lhs: T, _ rhs: T) -> ComparisonResult {
+        let result: ComparisonResult =
+            if lhs < rhs {
+                .orderedAscending
+            } else if lhs > rhs {
+                .orderedDescending
+            } else {
+                .orderedSame
+            }
+        return applyOrder(result)
+    }
+
+    private func compareOptional(_ lhs: Int?, _ rhs: Int?) -> ComparisonResult {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return .orderedSame
+        case (nil, .some):
+            return .orderedDescending
+        case (.some, nil):
+            return .orderedAscending
+        case let (.some(lhs), .some(rhs)):
+            return compareKnown(lhs, rhs)
+        }
+    }
+
+    private func applyOrder(_ result: ComparisonResult) -> ComparisonResult {
+        guard order == .reverse else { return result }
+        switch result {
+        case .orderedAscending: return .orderedDescending
+        case .orderedSame: return .orderedSame
+        case .orderedDescending: return .orderedAscending
+        }
+    }
+}
+
+private struct SeasonPlayersTableView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var rows: [SeasonPlayerTableRow]
+    @State private var selection: PlayerID?
+    @State private var sortOrder = [
+        SeasonPlayerSortComparator(field: .points, order: .reverse)
+    ]
+    @State private var compactSortField = SeasonPlayerSortComparator.Field.points
+
+    init(season: SeasonStats, roster: RosterSnapshot) {
+        let rows = season.players.values.map {
+            SeasonPlayerTableRow(stats: $0, player: roster[$0.playerID])
+        }
+        let initialOrder = [
+            SeasonPlayerSortComparator(field: .points, order: .reverse),
+            SeasonPlayerSortComparator(field: .name),
+        ]
+        _rows = State(initialValue: rows.sorted(using: initialOrder))
+    }
+
+    var body: some View {
+        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Player", sortUsing: SeasonPlayerSortComparator(field: .name)) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.name)
+                        .font(.body.weight(.medium))
+                    if horizontalSizeClass == .compact {
+                        Text("\(row.gamesPlayed) GP · \(row.starts) GS · \(row.minutes) MIN")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(compactProduction(row))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            TableColumn("GP", sortUsing: SeasonPlayerSortComparator(field: .gamesPlayed)) {
+                Text("\($0.gamesPlayed)").monospacedDigit()
+            }
+            TableColumn("GS", sortUsing: SeasonPlayerSortComparator(field: .starts)) {
+                Text("\($0.starts)").monospacedDigit()
+            }
+            TableColumn("MIN", sortUsing: SeasonPlayerSortComparator(field: .minutes)) {
+                Text("\($0.minutes)").monospacedDigit()
+            }
+            TableColumn("G", sortUsing: SeasonPlayerSortComparator(field: .goals)) {
+                StatValueText($0.stats.value(.goals, \.goals))
+            }
+            TableColumn("A", sortUsing: SeasonPlayerSortComparator(field: .assists)) {
+                StatValueText($0.stats.value(.assists, \.assists))
+            }
+            TableColumn("PTS", sortUsing: SeasonPlayerSortComparator(field: .points)) {
+                StatValueText($0.stats.value(.goals, \.points))
+            }
+            TableColumn("SH", sortUsing: SeasonPlayerSortComparator(field: .shots)) {
+                StatValueText($0.stats.value(.shots, \.shots))
+            }
+            TableColumn("SOG", sortUsing: SeasonPlayerSortComparator(field: .shotsOnGoal)) {
+                StatValueText($0.stats.value(.shots, \.shotsOnGoal))
+            }
+        }
+        .onChange(of: sortOrder) { _, order in
+            sortRows(using: order)
+        }
+        .onChange(of: compactSortField) { _, field in
+            guard horizontalSizeClass == .compact else { return }
+            sortOrder = [SeasonPlayerSortComparator(field: field, order: .reverse)]
+        }
+        .onChange(of: horizontalSizeClass) { _, sizeClass in
+            guard sizeClass == .compact else { return }
+            let current = sortOrder.first?.field
+            compactSortField =
+                SeasonPlayerSortComparator.Field.compactChoices.contains(current ?? .points)
+                ? (current ?? .points)
+                : .points
+            sortOrder = [
+                SeasonPlayerSortComparator(field: compactSortField, order: .reverse)
+            ]
+        }
+        .navigationTitle("Player Statistics")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selection) { PlayerDetailView(playerID: $0) }
+        .toolbar {
+            if horizontalSizeClass == .compact {
+                ToolbarItem(placement: .secondaryAction) {
+                    Picker("Sort", selection: $compactSortField) {
+                        ForEach(SeasonPlayerSortComparator.Field.compactChoices) { field in
+                            Text(field.title).tag(field)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+    }
+
+    private func sortRows(using order: [SeasonPlayerSortComparator]) {
+        var effectiveOrder =
+            order.isEmpty
+            ? [SeasonPlayerSortComparator(field: .points, order: .reverse)]
+            : order
+        if effectiveOrder.first?.field != .name {
+            effectiveOrder.append(SeasonPlayerSortComparator(field: .name))
+        }
+        rows.sort(using: effectiveOrder)
+    }
+
+    private func compactProduction(_ row: SeasonPlayerTableRow) -> String {
+        let stats = row.stats
+        return
+            "\(stats.value(.goals, \.goals).text()) G · \(stats.value(.assists, \.assists).text()) A · \(stats.value(.goals, \.points).text()) PTS · \(stats.value(.shots, \.shots).text()) SH · \(stats.value(.shots, \.shotsOnGoal).text()) SOG"
+    }
+}
+
+private struct SeasonKeepersTableView: View {
+    let season: SeasonStats
+    let roster: RosterSnapshot
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var selection: PlayerID?
+
+    var body: some View {
+        Table(season.sortedKeepers, selection: $selection) {
+            TableColumn("Goalkeeper") { keeper in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(roster[keeper.playerID]?.shortLabel ?? "—")
+                        .font(.body.weight(.medium))
+                    if horizontalSizeClass == .compact {
+                        Text(
+                            "\(keeper.matchesPlayed) GP · \(keeper.minutesPlayed) MIN · \(keeper.totals.saves) SV · \(keeper.totals.goalsAllowed) GA"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Text(
+                            "\(keeper.savePercentage.text()) SV% · \(keeper.goalsAgainstAverage.text()) GAA · \(keeper.totals.shutouts) SHO"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            TableColumn("GP") { Text("\($0.matchesPlayed)").monospacedDigit() }
+            TableColumn("MIN") { Text("\($0.minutesPlayed)").monospacedDigit() }
+            TableColumn("SV") { Text("\($0.totals.saves)").monospacedDigit() }
+            TableColumn("GA") { Text("\($0.totals.goalsAllowed)").monospacedDigit() }
+            TableColumn("SV%") { StatValueText($0.savePercentage, style: .percent) }
+            TableColumn("GAA") { StatValueText($0.goalsAgainstAverage, style: .decimal) }
+            TableColumn("SHO") { Text("\($0.totals.shutouts)").monospacedDigit() }
+        }
+        .navigationTitle("Goalkeeping")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selection) { PlayerDetailView(playerID: $0) }
     }
 }
