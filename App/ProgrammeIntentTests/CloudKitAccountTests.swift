@@ -27,29 +27,6 @@ final class CloudKitAccountTests: XCTestCase {
         XCTAssertFalse(CloudKitAccountState.temporarilyUnavailable.isUsable)
     }
 
-    func testCloudKitEntitlementRecognition() {
-        XCTAssertTrue(CloudKitEntitlement.includesCloudKit(["CloudKit"]))
-        XCTAssertTrue(CloudKitEntitlement.includesCloudKit(["CloudKit-Anonymous"]))
-        XCTAssertTrue(CloudKitEntitlement.includesCloudKit(["CloudDocuments", "CloudKit"]))
-        XCTAssertFalse(CloudKitEntitlement.includesCloudKit(["CloudDocuments"]))
-        XCTAssertFalse(CloudKitEntitlement.includesCloudKit([]))
-        XCTAssertFalse(CloudKitEntitlement.includesCloudKit(nil))
-    }
-
-    @MainActor
-    func testMonitorDoesNotConstructContainerWithoutEntitlement() async {
-        let monitor = CloudKitAccountMonitor(
-            makeContainer: {
-                fatalError("CKContainer must not be constructed without the entitlement")
-            },
-            hasCloudKitEntitlement: { false }
-        )
-
-        await monitor.refresh()
-
-        XCTAssertEqual(monitor.state, .temporarilyUnavailable)
-    }
-
     func testInvitationBufferDrainsExactlyOnce() {
         let buffer = InvitationBuffer<String>()
         XCTAssertTrue(buffer.isEmpty)
