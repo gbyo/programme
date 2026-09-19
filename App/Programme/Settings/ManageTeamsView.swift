@@ -82,6 +82,7 @@ struct TeamDetailView: View {
     @State private var errorMessage: String?
     @State private var shareItem: TeamShareItem?
     @State private var participants: [ShareParticipant] = []
+    @State private var conflicts: [(conflict: TeamConflict, matchName: String)] = []
     @State private var isConfirmingStopSharing = false
     @State private var isAddingSeason = false
     @State private var newSeasonName = ""
@@ -197,6 +198,34 @@ struct TeamDetailView: View {
                 )
             }
 
+            if !conflicts.isEmpty {
+                Section {
+                    ForEach(conflicts, id: \.conflict.eventID) { entry in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Contradiction in \(entry.matchName)").font(.body)
+                            Text(
+                                "Both sides recorded revision \(entry.conflict.localRevision) differently. Your version stands."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            Button("Keep Mine") {
+                                Task { await resolveConflict(entry.conflict) }
+                            }
+                            .font(.subheadline)
+                            .accessibilityIdentifier(
+                                "teamDetail.conflict.keep.\(entry.conflict.eventID.rawValue.uuidString)")
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } header: {
+                    Text("Needs Review")
+                } footer: {
+                    Text(
+                        "A collaborator's change contradicted yours at the same revision, so nothing was overwritten. Keeping yours clears the entry; editing the event instead supersedes them everywhere."
+                    )
+                }
+            }
+
             if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -261,6 +290,7 @@ struct TeamDetailView: View {
     /// on first use. Failures (e.g. iCloud signed out) surface here, never
     /// as a dead Share button.
     private func loadShareItem() async {
+        conflicts = await appModel.syncConflicts(teamID: teamID)
         do {
             shareItem = try await appModel.teamShareItem(teamID: teamID)
             participants = await appModel.teamParticipants(teamID: teamID)
@@ -270,6 +300,11 @@ struct TeamDetailView: View {
                 (error as? LocalizedError)?.errorDescription
                 ?? "Programme couldn't prepare that share. Nothing was changed. Try again."
         }
+    }
+
+    private func resolveConflict(_ conflict: TeamConflict) async {
+        await appModel.resolveConflict(conflict)
+        conflicts = await appModel.syncConflicts(teamID: teamID)
     }
 
     private func stopSharing() async {

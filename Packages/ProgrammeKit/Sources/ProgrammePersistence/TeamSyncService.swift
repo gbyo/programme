@@ -38,6 +38,7 @@ public actor TeamSyncService: Sendable {
     private let coordinator: TeamSyncCoordinator
     private let shareCoordinator: TeamShareCoordinator
     private let applier: TeamSyncApplier
+    private let conflicts: TeamConflictStore
     private let owners: SharedZoneOwners
     private var started = false
     private var ensuredZones: Set<String> = []
@@ -75,6 +76,7 @@ public actor TeamSyncService: Sendable {
         let inbox = try SyncInbox(url: directory.appendingPathComponent("inbox.json"))
         let conflicts = try TeamConflictStore(
             url: directory.appendingPathComponent("conflicts.json"))
+        self.conflicts = conflicts
         self.owners = try SharedZoneOwners(
             url: directory.appendingPathComponent("shared-zone-owners.json"))
         self.coordinator = TeamSyncCoordinator(
@@ -111,6 +113,20 @@ public actor TeamSyncService: Sendable {
     public func accept(_ metadata: CKShare.Metadata) async throws {
         try await shareCoordinator.accept(metadata)
         await refreshOwners()
+    }
+
+    /// Unresolved same-revision contradictions for a team, oldest first.
+    /// Readable offline: conflicts are local records, not CloudKit state.
+    public func unresolvedConflicts(teamID: TeamID) async -> [TeamConflict] {
+        await conflicts.unresolved(teamID: teamID)
+    }
+
+    /// Keeps the local version and drops the review entry. The local event
+    /// already stands (nothing was ever overwritten); editing the event
+    /// instead supersedes the remote version everywhere with a newer
+    /// revision.
+    public func resolveConflict(eventID: EventID, inTeam teamID: TeamID) async throws {
+        try await conflicts.resolve(eventID, inTeam: teamID)
     }
 
     // MARK: - Outbound

@@ -172,6 +172,28 @@ final class AppModel {
         try await sharing().stopSharing(teamID: teamID)
     }
 
+    /// Unresolved sync contradictions for a team with their match names.
+    /// Empty when nothing needs review — the common case, and the only
+    /// state this surface adds.
+    func syncConflicts(teamID: TeamID) async -> [(conflict: TeamConflict, matchName: String)] {
+        guard let service = try? syncing(), let store else { return [] }
+        let conflicts = await service.unresolvedConflicts(teamID: teamID)
+        guard !conflicts.isEmpty else { return [] }
+        let names = Dictionary(
+            uniqueKeysWithValues: ((try? await store.matches(teamID: teamID)) ?? []).map {
+                ($0.id, $0.opponentName)
+            })
+        return conflicts.map { ($0, names[$0.matchID] ?? "A match") }
+    }
+
+    /// Keeps the local version of a conflicted event. Never rewrites
+    /// history: the entry simply clears.
+    func resolveConflict(_ conflict: TeamConflict) async {
+        if let service = try? syncing() {
+            try? await service.resolveConflict(eventID: conflict.eventID, inTeam: conflict.teamID)
+        }
+    }
+
     /// Accepts an invitation, then reloads the workspace. Nothing
     /// materializes here: shared content still lands through the applier, so
     /// review-gating applies unchanged.
