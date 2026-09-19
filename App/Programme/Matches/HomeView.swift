@@ -420,7 +420,6 @@ struct FirstRunView: View {
                             Text("Keep your team, score matches, and track the season — all in one place.")
                                 .font(.title3)
                                 .multilineTextAlignment(.center)
-                                .text-wrap(.balance)
                                 .foregroundStyle(Programme.Palette.onBrand.opacity(0.78))
                         }
 
