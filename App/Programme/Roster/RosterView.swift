@@ -28,12 +28,9 @@ struct RosterView: View {
             if !filtered.isEmpty {
                 Section {
                     ForEach(filtered) { player in
-                        Button {
-                            Task { await appModel.open(.player(player.id)) }
-                        } label: {
+                        NavigationLink(value: AppRoute.player(player.id)) {
                             PlayerRosterRow(snapshot: player)
                         }
-                        .buttonStyle(.plain)
                     }
                 } header: {
                     Text(showsFormer ? "All Players" : "Roster")
@@ -60,11 +57,6 @@ struct RosterView: View {
                 ContentUnavailableView.search(text: searchText)
             }
         }
-        .safeAreaInset(edge: .top) {
-            TipView(importTip)
-                .padding(.horizontal)
-                .padding(.top, 4)
-        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu("Add", systemImage: "plus") {
@@ -74,9 +66,14 @@ struct RosterView: View {
                         importTip.invalidate(reason: .actionPerformed)
                     }
                 }
+                // Teach roster import from the control that owns the action;
+                // don't reserve a second bar above the scrolling content.
+                .popoverTip(importTip)
             }
             ToolbarItem(placement: .secondaryAction) {
-                Toggle("Show Former Players", isOn: $showsFormer)
+                Menu("View", systemImage: "line.3.horizontal.decrease.circle") {
+                    Toggle("Show Former Players", isOn: $showsFormer)
+                }
             }
             ToolbarItem(placement: .secondaryAction) {
                 Button("Settings", systemImage: "gearshape") {
@@ -167,10 +164,6 @@ struct PlayerRosterRow: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
