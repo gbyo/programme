@@ -5,24 +5,24 @@ import ProgrammeUI
 import SwiftData
 import SwiftUI
 
+/// Player detail loads statistics from the player's owning team and that
+/// team's current season — never from whichever workspace happens to be
+/// selected, unless they coincide.
 struct PlayerDetailView: View {
     let playerID: PlayerID
 
     @Environment(AppModel.self) private var appModel
-    @Query private var players: [PlayerModel]
+    @State private var snapshot: PlayerSnapshot?
+    @State private var ownerTeamID: TeamID?
     @State private var season: SeasonStats?
     @State private var summaries: [MatchStatSummary] = []
     @State private var isEditing = false
 
-    private var player: PlayerModel? {
-        players.first { $0.identifier == playerID.rawValue }
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                if let player {
-                    header(player)
+                if let snapshot {
+                    header(snapshot)
                 }
                 if let season, let stats = season.players[playerID] {
                     seasonSection(stats)
@@ -32,8 +32,9 @@ struct PlayerDetailView: View {
                 } else if season != nil {
                     EmptyHint(
                         title: "No statistics yet",
-                        message: "This player hasn't appeared in a finalized match this season.")
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                        message: "This player hasn't appeared in a finalized match this season."
+                    )
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                 } else {
                     ProgressView()
                 }
@@ -42,32 +43,41 @@ struct PlayerDetailView: View {
             .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle(player?.snapshot.displaySurname ?? "Player")
+        .navigationTitle(snapshot?.displaySurname ?? "Player")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Edit", systemImage: "pencil") { isEditing = true }
+                    .disabled(snapshot == nil || ownerTeamID == nil)
             }
         }
         .sheet(isPresented: $isEditing) {
-            NavigationStack { PlayerEditorView(player: player) }
+            if let ownerTeamID {
+                NavigationStack { PlayerEditorView(teamID: ownerTeamID, existing: snapshot) }
+            }
         }
-        .task { await load() }
+        .task(id: [playerID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await load() }
     }
 
     private func load() async {
-        guard let store = appModel.store, let teamID = appModel.teamID else { return }
-        summaries = (try? await store.seasonSummaries(teamID: teamID, seasonID: appModel.seasonID)) ?? []
+        guard let store = appModel.store else { return }
+        // Resolve the owning team first; stats come from that team.
+        guard let owner = try? await store.teamID(forPlayer: playerID) else { return }
+        ownerTeamID = owner
+        let roster = (try? await store.roster(teamID: owner, includeFormer: true)) ?? .empty
+        snapshot = roster.players.first { $0.id == playerID }
+        let currentSeason = try? await store.currentSeasonID(teamID: owner)
+        summaries = (try? await store.seasonSummaries(teamID: owner, seasonID: currentSeason)) ?? []
         season = SeasonEngine.aggregate(summaries)
     }
 
-    private func header(_ player: PlayerModel) -> some View {
+    private func header(_ player: PlayerSnapshot) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text(player.jerseyNumber.map { "#\($0)" } ?? "—")
                 .font(.system(size: 34, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 3) {
-                Text(player.snapshot.fullName).font(.largeTitle.weight(.semibold))
+                Text(player.fullName).font(.largeTitle.weight(.semibold))
                 Text(
                     [player.position?.label, player.classYear, player.isOnRoster ? nil : "Former player"]
                         .compactMap(\.self).joined(separator: " · ")
@@ -155,7 +165,7 @@ struct PlayerDetailView: View {
             VStack(spacing: 0) {
                 ForEach(matchLog.reversed()) { entry in
                     Button {
-                        appModel.navigation.open(.match(entry.matchID))
+                        Task { await appModel.open(.match(entry.matchID)) }
                     } label: {
                         HStack(spacing: 12) {
                             if let result = entry.result {

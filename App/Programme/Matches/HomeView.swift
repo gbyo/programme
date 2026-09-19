@@ -4,34 +4,33 @@ import ProgrammeUI
 import SwiftData
 import SwiftUI
 
-/// The opening screen answers one question: what match am I working on?
-struct TodayView: View {
+/// Home answers one question: what does the scorer need to know or do now?
+/// Scoped to one team workspace at fetch time via the store.
+struct HomeView: View {
+    let teamID: TeamID
+
     @Environment(AppModel.self) private var appModel
-    @Query(sort: \TeamModel.name) private var teams: [TeamModel]
-    @Query(sort: \MatchModel.kickoff, order: .reverse) private var matches: [MatchModel]
-    @State private var isCreatingTeam = false
+    @State private var matches: [MatchListItem] = []
+    @State private var teamDetails: TeamDetails?
+    @State private var seasonName: String?
+    @State private var recordText: String?
 
     var body: some View {
-        Group {
-            if teams.isEmpty {
-                FirstRunView(isCreatingTeam: $isCreatingTeam)
-            } else {
-                content
-            }
-        }
-        .navigationTitle("Today")
-        .toolbar {
-            if !teams.isEmpty {
+        content
+            .teamWorkspaceTitle("Home")
+            .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("New Match", systemImage: "plus") {
                         appModel.navigation.isPresentingNewMatch = true
                     }
                 }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Settings", systemImage: "gearshape") {
+                        appModel.navigation.isPresentingSettings = true
+                    }
+                }
             }
-        }
-        .sheet(isPresented: $isCreatingTeam) {
-            NavigationStack { TeamSetupView() }
-        }
+            .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await load() }
     }
 
     /// An inset-grouped List rather than a stack of hand-drawn cards: the
@@ -47,16 +46,16 @@ struct TodayView: View {
 
             if let live = liveMatch {
                 Section("In Progress") {
-                    ResumeMatchCard(match: live) {
-                        Task { await appModel.openLiveSession(matchID: live.matchID) }
+                    ResumeMatchListCard(match: live) {
+                        Task { await appModel.openLiveSession(matchID: live.id) }
                     }
                 }
             }
 
             if let next = nextMatch {
                 Section {
-                    NextMatchCard(match: next) {
-                        Task { await appModel.openLiveSession(matchID: next.matchID) }
+                    NextMatchListCard(match: next) {
+                        Task { await appModel.openLiveSession(matchID: next.id) }
                     }
                 } header: {
                     sectionHeader("Next Match")
@@ -75,15 +74,35 @@ struct TodayView: View {
                 }
             }
 
+            if !needsReview.isEmpty {
+                Section {
+                    ForEach(needsReview) { match in
+                        Button {
+                            Task { await appModel.open(.match(match.id)) }
+                        } label: {
+                            MatchListRow(match: match)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    sectionHeader("Needs Review")
+                }
+            }
+
             if !recentMatches.isEmpty {
                 Section {
                     ForEach(recentMatches) { match in
                         Button {
-                            appModel.navigation.open(.match(match.matchID))
+                            Task { await appModel.open(.match(match.id)) }
                         } label: {
-                            MatchRow(match: match)
+                            MatchListRow(match: match)
                         }
                         .buttonStyle(.plain)
+                    }
+                    Button {
+                        appModel.navigation.section = .matches
+                    } label: {
+                        Text("All Matches")
                     }
                 } header: {
                     sectionHeader("Recent")
@@ -100,40 +119,62 @@ struct TodayView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(appModel.teamName)
+            Text(teamDetails?.name ?? appModel.workspace.selectedTeam?.name ?? "")
                 .font(.largeTitle.weight(.semibold))
             Text(seasonLine)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("today.header")
+        .accessibilityIdentifier("home.header")
     }
 
     private var seasonLine: String {
-        let finalized = matches.filter { $0.phase == .finalized }
-        let wins = finalized.filter { $0.result == .win }.count
-        let losses = finalized.filter { $0.result == .loss }.count
-        let draws = finalized.filter { $0.result == .draw }.count
-        let season = matches.first?.season?.name
-        let record = finalized.isEmpty ? "No matches played yet" : "\(wins)-\(losses)-\(draws)"
-        return [season, record].compactMap(\.self).joined(separator: " · ")
+        [seasonName, recordText].compactMap(\.self).joined(separator: " · ")
     }
 
-    private var liveMatch: MatchModel? {
+    private func load() async {
+        guard let store = appModel.store else { return }
+        // Home works in the team's current season.
+        let currentSeason =
+            appModel.workspace.selectedTeamID == teamID
+            ? appModel.workspace.currentSeasonID
+            : try? await store.currentSeasonID(teamID: teamID)
+        matches = (try? await store.matches(teamID: teamID, seasonID: currentSeason)) ?? []
+        teamDetails = try? await store.teamDetails(teamID: teamID)
+        if let currentSeason {
+            let seasons = (try? await store.seasons(teamID: teamID)) ?? []
+            seasonName = seasons.first { $0.id == currentSeason }?.name
+        } else {
+            seasonName = nil
+        }
+        let finalized = matches.filter { $0.phase == .finalized }
+        if finalized.isEmpty {
+            recordText = "No matches played yet"
+        } else {
+            let wins = finalized.filter { $0.result == .win }.count
+            let losses = finalized.filter { $0.result == .loss }.count
+            let draws = finalized.filter { $0.result == .draw }.count
+            recordText = "\(wins)-\(losses)-\(draws)"
+        }
+    }
+
+    private var liveMatch: MatchListItem? {
         matches.first { $0.isInterrupted }
     }
 
-    private var nextMatch: MatchModel? {
-        matches
-            .filter { $0.phase == .scheduled }
-            .sorted { $0.kickoff < $1.kickoff }
-            .first { $0.kickoff > Date().addingTimeInterval(-6 * 3_600) }
-            ?? matches.filter { $0.phase == .scheduled }.min { $0.kickoff < $1.kickoff }
+    private var nextMatch: MatchListItem? {
+        let scheduled = matches.filter { $0.phase == .scheduled }.sorted { $0.kickoff < $1.kickoff }
+        return scheduled.first { $0.kickoff > Date().addingTimeInterval(-6 * 3_600) }
+            ?? scheduled.first
     }
 
-    private var recentMatches: [MatchModel] {
-        Array(matches.filter { $0.phase == .finalized }.prefix(5))
+    private var needsReview: [MatchListItem] {
+        matches.filter { $0.needsReviewCount > 0 }.sorted { $0.kickoff > $1.kickoff }
+    }
+
+    private var recentMatches: [MatchListItem] {
+        Array(matches.filter { $0.phase == .finalized }.sorted { $0.kickoff > $1.kickoff }.prefix(3))
     }
 }
 
@@ -153,8 +194,8 @@ struct SectionBox<Content: View>: View {
     }
 }
 
-struct ResumeMatchCard: View {
-    let match: MatchModel
+struct ResumeMatchListCard: View {
+    let match: MatchListItem
     var onResume: () -> Void
 
     var body: some View {
@@ -162,12 +203,12 @@ struct ResumeMatchCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(match.venue.shortLabel) \(match.opponentName)")
                     .font(.title3.weight(.semibold))
-                Text("\(match.cachedScoreUs)–\(match.cachedScoreOpponent) · \(match.cachedEventCount) events recorded")
+                Text("\(match.score.us)–\(match.score.opponent) · \(match.eventCount) events recorded")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
-                if match.cachedNeedsReviewCount > 0 {
-                    Label("\(match.cachedNeedsReviewCount) need review", systemImage: "exclamationmark.triangle")
+                if match.needsReviewCount > 0 {
+                    Label("\(match.needsReviewCount) need review", systemImage: "exclamationmark.triangle")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Programme.Palette.caution)
                 }
@@ -185,8 +226,8 @@ struct ResumeMatchCard: View {
     }
 }
 
-struct NextMatchCard: View {
-    let match: MatchModel
+struct NextMatchListCard: View {
+    let match: MatchListItem
     var onPrepare: () -> Void
 
     var body: some View {
@@ -214,8 +255,41 @@ struct NextMatchCard: View {
     }
 }
 
-struct MatchRow: View {
+// Compatibility wrappers so existing MatchModel-based previews keep working.
+struct ResumeMatchCard: View {
     let match: MatchModel
+    var onResume: () -> Void
+    var body: some View {
+        ResumeMatchListCard(
+            match: MatchListItem(
+                id: match.matchID, opponentName: match.opponentName, kickoff: match.kickoff,
+                venue: match.venue, phase: match.phase,
+                score: SidePair(us: match.cachedScoreUs, opponent: match.cachedScoreOpponent),
+                result: match.result, eventCount: match.cachedEventCount,
+                needsReviewCount: match.cachedNeedsReviewCount, competition: match.competition,
+                seasonName: match.season?.name),
+            onResume: onResume)
+    }
+}
+
+struct NextMatchCard: View {
+    let match: MatchModel
+    var onPrepare: () -> Void
+    var body: some View {
+        NextMatchListCard(
+            match: MatchListItem(
+                id: match.matchID, opponentName: match.opponentName, kickoff: match.kickoff,
+                venue: match.venue, phase: match.phase,
+                score: SidePair(us: match.cachedScoreUs, opponent: match.cachedScoreOpponent),
+                result: match.result, eventCount: match.cachedEventCount,
+                needsReviewCount: match.cachedNeedsReviewCount, competition: match.competition,
+                seasonName: match.season?.name),
+            onPrepare: onPrepare)
+    }
+}
+
+struct MatchListRow: View {
+    let match: MatchListItem
     var insets = EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
 
     var body: some View {
@@ -243,7 +317,7 @@ struct MatchRow: View {
             }
             Spacer()
             if match.phase == .finalized {
-                Text("\(match.cachedScoreUs)–\(match.cachedScoreOpponent)")
+                Text("\(match.score.us)–\(match.score.opponent)")
                     .font(.body.weight(.semibold))
                     .monospacedDigit()
             } else if match.isInterrupted {
@@ -270,11 +344,28 @@ struct MatchRow: View {
     private var accessibilityLabel: String {
         var parts = ["\(match.venue.label) versus \(match.opponentName)", match.kickoff.matchDayText]
         if match.phase == .finalized, let result = match.result {
-            parts.append("\(result.label), \(match.cachedScoreUs) to \(match.cachedScoreOpponent)")
+            parts.append("\(result.label), \(match.score.us) to \(match.score.opponent)")
         } else if match.isInterrupted {
             parts.append("in progress")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+struct MatchRow: View {
+    let match: MatchModel
+    var insets = EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
+
+    var body: some View {
+        MatchListRow(
+            match: MatchListItem(
+                id: match.matchID, opponentName: match.opponentName, kickoff: match.kickoff,
+                venue: match.venue, phase: match.phase,
+                score: SidePair(us: match.cachedScoreUs, opponent: match.cachedScoreOpponent),
+                result: match.result, eventCount: match.cachedEventCount,
+                needsReviewCount: match.cachedNeedsReviewCount, competition: match.competition,
+                seasonName: match.season?.name),
+            insets: insets)
     }
 }
 
@@ -299,7 +390,8 @@ struct EmptyHint: View {
     }
 }
 
-/// First run. One job: get a team created so everything else has somewhere to go.
+/// First run lives above the team-scoped tab shell: with no team there are no
+/// meaningful Home/Matches/Roster/Stats destinations to show.
 struct FirstRunView: View {
     @Binding var isCreatingTeam: Bool
     @Environment(AppModel.self) private var appModel
@@ -309,7 +401,9 @@ struct FirstRunView: View {
         ContentUnavailableView {
             Label("Welcome to Programme", systemImage: "book.closed")
         } description: {
-            Text("Create your team to start keeping statistics. Everything stays on this iPad — no account, and nothing needed during a match except the iPad itself.")
+            Text(
+                "Create your team to start keeping statistics. Everything stays on this iPad — no account, and nothing needed during a match except the iPad itself."
+            )
         } actions: {
             Button("Create Your First Team") { isCreatingTeam = true }
                 .programmePrimaryAction()

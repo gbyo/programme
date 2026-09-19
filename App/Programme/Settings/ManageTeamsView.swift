@@ -1,0 +1,256 @@
+import ProgrammeCore
+import ProgrammePersistence
+import ProgrammeUI
+import SwiftUI
+
+/// Team management. Team is workspace context: this list selects and edits
+/// teams but is never itself a tab.
+struct ManageTeamsView: View {
+    @Environment(AppModel.self) private var appModel
+    @State private var isAddingTeam = false
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(appModel.workspace.teams) { team in
+                    NavigationLink {
+                        TeamDetailView(teamID: team.id)
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(Programme.teamColor(hex: nil))
+                                .frame(width: 12, height: 12)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(team.name).font(.body)
+                                Text("\(team.playerCount) players · \(team.seasonCount) seasons")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if team.id == appModel.workspace.selectedTeamID {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                                    .accessibilityLabel("Selected team")
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Teams")
+            }
+
+            Section {
+                Button("Add Team…", systemImage: "plus") { isAddingTeam = true }
+            }
+        }
+        .navigationTitle("Manage Teams")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Settings", systemImage: "gearshape") {
+                    appModel.navigation.isPresentingSettings = true
+                }
+                .accessibilityIdentifier("manageTeams.settings")
+            }
+        }
+        .sheet(isPresented: $isAddingTeam) {
+            NavigationStack { TeamSetupView() }
+        }
+        .task { await refresh() }
+    }
+
+    private func refresh() async {
+        await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
+    }
+}
+
+/// Team details and editing. Editing an existing team calls `updateTeam` —
+/// it never creates a second team. Season management lives here too.
+struct TeamDetailView: View {
+    let teamID: TeamID
+
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var details: TeamDetails?
+    @State private var seasons: [SeasonListItem] = []
+    @State private var name = ""
+    @State private var shortName = ""
+    @State private var mascot = ""
+    @State private var color = Color.accentColor
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var isAddingSeason = false
+    @State private var newSeasonName = ""
+    @State private var newSeasonMakeCurrent = true
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Team name", text: $name)
+                    .textInputAutocapitalization(.words)
+                TextField("Short name", text: $shortName)
+                    .textInputAutocapitalization(.words)
+                TextField("Mascot (optional)", text: $mascot)
+                    .textInputAutocapitalization(.words)
+                ColorPicker("Team colour", selection: $color, supportsOpacity: false)
+            } header: {
+                Text("Identity")
+            } footer: {
+                Text("Used as a small accent. Programme keeps the scoring screen high-contrast rather than tinting it.")
+            }
+
+            if appModel.workspace.selectedTeamID != teamID {
+                Section {
+                    Button("Select This Team") {
+                        Task { await appModel.selectTeam(teamID) }
+                    }
+                } footer: {
+                    Text("Makes this team the workspace for Home, Matches, Roster and Stats.")
+                }
+            }
+
+            Section {
+                ForEach(seasons) { season in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(season.name).font(.body)
+                            Text("\(season.matchCount) matches")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if season.isCurrent {
+                            Text("Current")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            Button("Make Current") {
+                                Task { await makeCurrent(season.id) }
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+                Button("Add Season…", systemImage: "plus") { isAddingSeason = true }
+            } header: {
+                Text("Seasons")
+            } footer: {
+                Text(
+                    "The current season is used for Home, New Match and default filtering. Viewing an older season in Stats never changes it."
+                )
+            }
+
+            if let errorMessage {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Programme.Palette.critical)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(details?.shortName ?? "Team")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { Task { await save() } }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    .fontWeight(.semibold)
+                    .accessibilityIdentifier("teamDetail.save")
+            }
+        }
+        .sheet(isPresented: $isAddingSeason) {
+            NavigationStack {
+                Form {
+                    Section("Season") {
+                        TextField("Season name", text: $newSeasonName)
+                        Toggle("Make current", isOn: $newSeasonMakeCurrent)
+                    }
+                }
+                .formStyle(.grouped)
+                .navigationTitle("Add Season")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { isAddingSeason = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Add") { Task { await addSeason() } }
+                            .disabled(newSeasonName.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .fontWeight(.semibold)
+                    }
+                }
+            }
+        }
+        .task(id: teamID) { await load() }
+    }
+
+    private func load() async {
+        guard let store = appModel.store else { return }
+        details = try? await store.teamDetails(teamID: teamID)
+        seasons = (try? await store.seasons(teamID: teamID)) ?? []
+        if let details {
+            name = details.name
+            shortName = details.shortName
+            mascot = details.mascot ?? ""
+            color = Programme.teamColor(hex: details.primaryColorHex)
+        }
+    }
+
+    private func save() async {
+        guard let store = appModel.store else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try await store.updateTeam(
+                teamID,
+                name: name.trimmingCharacters(in: .whitespaces),
+                shortName: shortName.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? name.trimmingCharacters(in: .whitespaces) : shortName.trimmingCharacters(in: .whitespaces),
+                mascot: mascot.isEmpty ? nil : mascot,
+                primaryColorHex: Programme.hex(from: color),
+                secondaryColorHex: details?.secondaryColorHex)
+            await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
+            await load()
+            errorMessage = nil
+            dismiss()
+        } catch {
+            errorMessage = "Programme couldn't save that team. Nothing was changed. Try again."
+        }
+    }
+
+    private func makeCurrent(_ seasonID: SeasonID) async {
+        guard let store = appModel.store else { return }
+        do {
+            try await store.setCurrentSeason(teamID: teamID, seasonID: seasonID)
+            if appModel.workspace.selectedTeamID == teamID {
+                appModel.workspace.currentSeasonID = seasonID
+                appModel.workspace.viewedStatsSeasonID = seasonID
+                await appModel.refreshWidgetSnapshot()
+            }
+            await load()
+        } catch {
+            errorMessage = "Programme couldn't change the current season. Nothing was changed."
+        }
+    }
+
+    private func addSeason() async {
+        guard let store = appModel.store else { return }
+        do {
+            let id = try await store.createSeason(
+                teamID: teamID,
+                name: newSeasonName.trimmingCharacters(in: .whitespaces),
+                startDate: Date(), endDate: nil,
+                makeCurrent: newSeasonMakeCurrent)
+            if newSeasonMakeCurrent, appModel.workspace.selectedTeamID == teamID {
+                appModel.workspace.currentSeasonID = id
+                appModel.workspace.viewedStatsSeasonID = id
+                await appModel.refreshWidgetSnapshot()
+            }
+            newSeasonName = ""
+            isAddingSeason = false
+            await load()
+        } catch {
+            errorMessage = "Programme couldn't add that season. Nothing was changed."
+        }
+    }
+}

@@ -13,15 +13,12 @@ import SwiftUI
 /// record, and opens the full configuration — but it is not five pickers the
 /// scorer re-confirms before every kickoff either.
 struct NewMatchView: View {
+    /// Captured at open time so a background workspace change cannot redirect
+    /// the new match to another team.
+    let teamID: TeamID
+
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
-
-    /// Shared with Settings. The last configuration used becomes the default for
-    /// the next match, which is what "season defaults" means in practice.
-    @AppStorage("defaultStatProfile") private var defaultProfileID = StatProfile.maxPreps.id
-    @AppStorage("defaultRulesPreset") private var defaultRulesName = MatchRules.highSchool.name
-    @AppStorage("defaultOpponentTracking") private var defaultTrackingID = OpponentTrackingMode
-        .ourTeam.rawValue
 
     @State private var opponent = ""
     @State private var opponentShort = ""
@@ -127,14 +124,23 @@ struct NewMatchView: View {
     }
 
     private func loadDefaults() {
-        rulesPresetName = defaultRulesName
-        profileID = defaultProfileID
-        tracking = OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam
+        let saved = TeamMatchDefaults.load(teamID: teamID)
+        rulesPresetName = saved.rulesName
+        profileID = saved.profileID
+        tracking = saved.tracking
     }
 
     private func create(openingScorer: Bool) async {
-        guard let store = appModel.store, let teamID = appModel.teamID else {
+        guard let store = appModel.store else {
             errorMessage = "Create a team first."
+            return
+        }
+        let currentSeasonID =
+            appModel.workspace.selectedTeamID == teamID
+            ? appModel.workspace.currentSeasonID
+            : try? await store.currentSeasonID(teamID: teamID)
+        guard let seasonID = currentSeasonID else {
+            errorMessage = "This team has no current season yet. Add a season before creating a match."
             return
         }
         isSaving = true
@@ -148,7 +154,7 @@ struct NewMatchView: View {
             let trimmed = opponent.trimmingCharacters(in: .whitespaces)
             let matchID = try await store.createMatch(
                 teamID: teamID,
-                seasonID: appModel.seasonID,
+                seasonID: seasonID,
                 opponentName: trimmed,
                 opponentShortName: opponentShort.isEmpty ? nil : opponentShort,
                 kickoff: kickoff,
@@ -159,10 +165,9 @@ struct NewMatchView: View {
                 competition: competition.isEmpty ? nil : competition,
                 roster: roster)
 
-            // What was just used becomes the default for the next match.
-            defaultRulesName = rulesPresetName
-            defaultProfileID = profileID
-            defaultTrackingID = tracking.rawValue
+            // What was just used becomes this team's default for the next match.
+            TeamMatchDefaults.save(
+                teamID: teamID, profileID: profileID, rulesName: rulesPresetName, tracking: tracking)
 
             await appModel.refreshWidgetSnapshot()
             dismiss()
@@ -171,7 +176,7 @@ struct NewMatchView: View {
                 // starting lineup, so this lands exactly where the work is.
                 await appModel.openLiveSession(matchID: matchID)
             } else {
-                appModel.navigation.open(.match(matchID))
+                await appModel.open(.match(matchID))
             }
         } catch {
             errorMessage = "Programme couldn't create that match. Nothing was changed. Try again."
@@ -274,7 +279,11 @@ struct MatchScoringSettings: View {
 }
 
 /// Creating the team. Kept to the few things Programme genuinely needs.
+/// Calls `onCreated` with the new team so callers can select it; creating a
+/// team never silently edits an existing one.
 struct TeamSetupView: View {
+    var onCreated: ((TeamID) -> Void)? = nil
+
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
 
@@ -337,7 +346,8 @@ struct TeamSetupView: View {
                 secondaryColorHex: nil)
             _ = try await store.createSeason(
                 teamID: teamID, name: seasonName, startDate: Date(), endDate: nil)
-            await appModel.reloadTeamContext()
+            await appModel.reloadWorkspace(selecting: teamID)
+            onCreated?(teamID)
             dismiss()
         } catch {
             errorMessage = "Programme couldn't create that team. Try again."

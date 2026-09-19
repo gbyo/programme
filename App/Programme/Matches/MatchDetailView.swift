@@ -46,7 +46,7 @@ struct MatchDetailView: View {
                         }
                         Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
                         Button("Event Log", systemImage: "list.bullet") {
-                            appModel.navigation.open(.eventLog(matchID))
+                            Task { await appModel.open(.eventLog(matchID)) }
                         }
                     }
                 }
@@ -57,7 +57,8 @@ struct MatchDetailView: View {
                 NavigationStack {
                     ExportSheet(
                         payload: ExportPayload(
-                            teamName: appModel.teamName, teamShortName: appModel.teamShortName,
+                            teamName: context.descriptor.teamName,
+                            teamShortName: context.descriptor.teamShortName,
                             contexts: [context]),
                         exporters: ProgrammeExporters.forMatch())
                 }

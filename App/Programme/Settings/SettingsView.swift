@@ -6,36 +6,34 @@ import SwiftUI
 import TipKit
 
 /// Settings stay small on purpose. Match behaviour belongs to a match's rules
-/// preset, not to a pile of global switches.
+/// preset, not to a pile of global switches. Settings is a sheet, never a tab.
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \TeamModel.name) private var teams: [TeamModel]
 
-    @AppStorage("defaultStatProfile") private var defaultProfileID = StatProfile.maxPreps.id
-    @AppStorage("defaultRulesPreset") private var defaultRulesName = MatchRules.highSchool.name
-    @AppStorage("defaultOpponentTracking") private var defaultTrackingID = OpponentTrackingMode
-        .ourTeam.rawValue
     @AppStorage("confirmBeforeFinalizing") private var confirmBeforeFinalizing = true
     @AppStorage("keepScreenAwakeWhileScoring") private var keepScreenAwake = true
     @AppStorage("hapticFeedbackEnabled") private var hapticsEnabled = true
 
-    @State private var isEditingTeam = false
+    @State private var defaultProfileID = StatProfile.maxPreps.id
+    @State private var defaultRulesName = MatchRules.highSchool.name
+    @State private var defaultTrackingID = OpponentTrackingMode.ourTeam.rawValue
     @State private var isResettingTips = false
+
+    private var selectedTeamID: TeamID? { appModel.workspace.selectedTeamID }
+    private var selectedTeamName: String {
+        appModel.workspace.selectedTeam?.name ?? "No team"
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Team") {
-                    if let team = teams.first {
-                        LabeledContent("Name", value: team.name)
-                        LabeledContent("Short name", value: team.shortName)
-                        if let mascot = team.mascot { LabeledContent("Mascot", value: mascot) }
-                        Button("Edit Team…") { isEditingTeam = true }
-                    } else {
-                        Button("Create a Team…") { isEditingTeam = true }
-                    }
+                Section {
+                    NavigationLink("Manage Teams…") { ManageTeamsView() }
+                } header: {
+                    Text("Teams")
+                } footer: {
+                    Text("Teams are workspaces. Home, Matches, Roster and Stats always show the selected team.")
                 }
 
                 Section {
@@ -55,12 +53,15 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Defaults for New Matches")
+                    Text("Defaults for \(selectedTeamName)")
                 } footer: {
                     Text(
-                        "New Match starts from these, and remembers whatever you used last. Any match can override them when you create it."
+                        "New Match starts from these, and remembers whatever you used last for this team. Any match can override them when you create it."
                     )
                 }
+                .onChange(of: defaultProfileID) { saveTeamDefaults() }
+                .onChange(of: defaultRulesName) { saveTeamDefaults() }
+                .onChange(of: defaultTrackingID) { saveTeamDefaults() }
 
                 Section("Scoring") {
                     Toggle("Haptic feedback", isOn: $hapticsEnabled)
@@ -68,9 +69,19 @@ struct SettingsView: View {
                     Toggle("Confirm before finalizing", isOn: $confirmBeforeFinalizing)
                 }
 
-                Section {
+                Section("Configuration") {
                     NavigationLink("Stat Profiles") { StatProfileListView() }
                     NavigationLink("Match Formats") { MatchFormatListView() }
+                }
+
+                Section {
+                    NavigationLink("Data & Transfer…") { DataTransferView() }
+                } header: {
+                    Text("Data")
+                } footer: {
+                    Text(
+                        "Programme archives, backup and import live here. Season exports live in Stats; match exports live in each match."
+                    )
                 }
 
                 Section {
@@ -98,6 +109,8 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Version", value: appVersion)
+                } header: {
+                    Text("About")
                 } footer: {
                     Text(
                         "Programme keeps a write-ahead recovery log alongside its library so an interrupted match is never lost."
@@ -110,10 +123,25 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .sheet(isPresented: $isEditingTeam) {
-                NavigationStack { TeamSetupView() }
-            }
+            .task(id: selectedTeamID) { loadTeamDefaults() }
         }
+    }
+
+    private func loadTeamDefaults() {
+        guard let selectedTeamID else { return }
+        let saved = TeamMatchDefaults.load(teamID: selectedTeamID)
+        defaultProfileID = saved.profileID
+        defaultRulesName = saved.rulesName
+        defaultTrackingID = saved.tracking.rawValue
+    }
+
+    private func saveTeamDefaults() {
+        guard let selectedTeamID else { return }
+        TeamMatchDefaults.save(
+            teamID: selectedTeamID,
+            profileID: defaultProfileID,
+            rulesName: defaultRulesName,
+            tracking: OpponentTrackingMode(rawValue: defaultTrackingID) ?? .ourTeam)
     }
 
     private var appVersion: String {

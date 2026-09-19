@@ -7,7 +7,11 @@ import SwiftData
 import SwiftUI
 
 /// Season statistics: a record book, not a dashboard.
+/// Tab label is "Stats"; the screen title stays "Season Stats".
+/// `teamID` scopes the data; `seasonID` is the viewed season (temporary UI
+/// state — viewing an old season never changes the team's current season).
 struct SeasonStatsView: View {
+    let teamID: TeamID
     let seasonID: SeasonID?
 
     @Environment(AppModel.self) private var appModel
@@ -15,6 +19,8 @@ struct SeasonStatsView: View {
     @State private var roster: RosterSnapshot = .empty
     @State private var isExporting = false
     @State private var contexts: [MatchContext] = []
+    @State private var seasons: [SeasonListItem] = []
+    @State private var teamDetails: TeamDetails?
     @State private var sortField: SortField = .points
 
     enum SortField: String, CaseIterable, Identifiable {
@@ -23,6 +29,10 @@ struct SeasonStatsView: View {
         case assists = "Assists"
         case minutes = "Minutes"
         var id: String { rawValue }
+    }
+
+    private var viewedSeasonID: SeasonID? {
+        seasonID ?? appModel.workspace.viewedStatsSeasonID
     }
 
     var body: some View {
@@ -39,8 +49,25 @@ struct SeasonStatsView: View {
                 ProgressView()
             }
         }
-        .navigationTitle("Season Stats")
+        .teamWorkspaceTitle("Season Stats")
         .toolbar {
+            ToolbarItem(placement: .secondaryAction) {
+                Menu("Season", systemImage: "calendar") {
+                    ForEach(seasons) { season in
+                        Button {
+                            Task { await selectSeason(season.id) }
+                        } label: {
+                            if season.id == viewedSeasonID {
+                                Label(
+                                    season.isCurrent ? "\(season.name) (Current)" : season.name,
+                                    systemImage: "checkmark")
+                            } else {
+                                Text(season.isCurrent ? "\(season.name) (Current)" : season.name)
+                            }
+                        }
+                    }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Export", systemImage: "square.and.arrow.up") { isExporting = true }
                     .disabled(contexts.isEmpty)
@@ -50,21 +77,39 @@ struct SeasonStatsView: View {
             NavigationStack {
                 ExportSheet(
                     payload: ExportPayload(
-                        teamName: appModel.teamName, teamShortName: appModel.teamShortName,
+                        teamName: teamDetails?.name ?? "",
+                        teamShortName: teamDetails?.shortName,
+                        seasonName: seasons.first { $0.id == viewedSeasonID }?.name,
                         contexts: contexts),
                     exporters: ProgrammeExporters.forSeason())
             }
         }
-        .task { await load() }
+        .task(
+            id: [
+                teamID.rawValue.uuidString, viewedSeasonID?.rawValue.uuidString ?? "current",
+                "\(appModel.storeRevision)",
+            ]
+        ) {
+            await load()
+        }
+    }
+
+    private func selectSeason(_ id: SeasonID) async {
+        // Viewed season only; never marks the season current.
+        appModel.workspace.viewedStatsSeasonID = id
+        await load()
     }
 
     private func load() async {
-        guard let store = appModel.store, let teamID = appModel.teamID else { return }
-        let summaries = (try? await store.seasonSummaries(teamID: teamID, seasonID: seasonID ?? appModel.seasonID)) ?? []
+        guard let store = appModel.store else { return }
+        seasons = (try? await store.seasons(teamID: teamID)) ?? []
+        teamDetails = try? await store.teamDetails(teamID: teamID)
+        let summaries =
+            (try? await store.seasonSummaries(teamID: teamID, seasonID: viewedSeasonID)) ?? []
         season = SeasonEngine.aggregate(summaries)
         roster = (try? await store.roster(teamID: teamID, includeFormer: true)) ?? .empty
 
-        let items = (try? await store.matches(teamID: teamID, seasonID: seasonID ?? appModel.seasonID)) ?? []
+        let items = (try? await store.matches(teamID: teamID, seasonID: viewedSeasonID)) ?? []
         var loaded: [MatchContext] = []
         for item in items where item.phase == .finalized {
             if let context = try? await store.context(for: item.id) { loaded.append(context) }
@@ -90,7 +135,7 @@ struct SeasonStatsView: View {
 
     private func header(_ season: SeasonStats) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(appModel.teamName).font(.largeTitle.weight(.semibold))
+            Text(teamDetails?.name ?? "").font(.largeTitle.weight(.semibold))
             HStack(spacing: 18) {
                 StatCell("Record", .count(season.wins), emphasis: true)
                     .overlay(alignment: .topLeading) {
@@ -209,7 +254,7 @@ struct SeasonStatsView: View {
                 ForEach(sortedPlayers(season)) { stats in
                     Divider()
                     Button {
-                        appModel.navigation.open(.player(stats.playerID))
+                        Task { await appModel.open(.player(stats.playerID)) }
                     } label: {
                         HStack(spacing: 0) {
                             Text(roster[stats.playerID]?.shortLabel ?? "—")
@@ -274,7 +319,8 @@ struct SeasonStatsView: View {
                         Text("\(keeper.totals.saves)").frame(width: 38, alignment: .trailing)
                         Text("\(keeper.totals.goalsAllowed)").frame(width: 38, alignment: .trailing)
                         StatValueText(keeper.savePercentage, style: .percent).frame(width: 56, alignment: .trailing)
-                        StatValueText(keeper.goalsAgainstAverage, style: .decimal).frame(width: 52, alignment: .trailing)
+                        StatValueText(keeper.goalsAgainstAverage, style: .decimal).frame(
+                            width: 52, alignment: .trailing)
                         Text("\(keeper.totals.shutouts)").frame(width: 42, alignment: .trailing)
                     }
                     .font(.subheadline)

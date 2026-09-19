@@ -3,12 +3,13 @@ import SwiftUI
 
 /// Programme's shell.
 ///
-/// Outside a live match this is an ordinary iPad split view. The moment a match
-/// is being scored the scorer gets the whole window: the sidebar is not more
-/// important than the pitch.
+/// Browsing is one adaptive `TabView`: SwiftUI renders a bottom tab bar on
+/// iPhone and an adaptable tab/sidebar presentation on iPad. The live scorer
+/// replaces the whole browsing shell while a match is being scored.
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isCreatingTeam = false
 
     var body: some View {
         @Bindable var navigation = appModel.navigation
@@ -17,8 +18,10 @@ struct RootView: View {
             if let session = appModel.liveSession, navigation.isShowingLiveMatch {
                 LiveMatchView(session: session)
                     .transition(.opacity)
+            } else if appModel.workspace.selectedTeamID == nil {
+                firstRun
             } else {
-                browsingShell
+                tabShell
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: navigation.isShowingLiveMatch)
@@ -34,10 +37,21 @@ struct RootView: View {
             Text(error.message)
         }
         .sheet(isPresented: $navigation.isPresentingNewMatch) {
-            NewMatchView()
+            if let teamID = appModel.workspace.selectedTeamID {
+                NewMatchView(teamID: teamID)
+            }
         }
         .sheet(isPresented: $navigation.isPresentingSettings) {
             SettingsView()
+        }
+        .sheet(isPresented: $navigation.isPresentingManageTeams) {
+            NavigationStack { ManageTeamsView() }
+        }
+        .sheet(isPresented: $navigation.isPresentingNewTeam) {
+            NavigationStack { TeamSetupView() }
+        }
+        .sheet(isPresented: $isCreatingTeam) {
+            NavigationStack { TeamSetupView(onCreated: nil) }
         }
         .task(id: navigation.pendingMatchToOpen) {
             guard let matchID = navigation.pendingMatchToOpen else { return }
@@ -46,68 +60,124 @@ struct RootView: View {
         }
     }
 
-    private var browsingShell: some View {
+    private var firstRun: some View {
+        FirstRunView(isCreatingTeam: $isCreatingTeam)
+    }
+
+    /// Four fixed sections. Each keeps its own NavigationStack/NavigationPath
+    /// so switching tabs preserves where the person was; switching teams
+    /// clears team-specific paths.
+    private var tabShell: some View {
         @Bindable var navigation = appModel.navigation
 
-        let destination = navigation.sidebar ?? .today
-
-        return NavigationSplitView(columnVisibility: $navigation.columnVisibility) {
-            SidebarView()
-        } detail: {
-            // Each destination keeps its own path in the navigation model, so
-            // rebuilding the stack on a sidebar change restores rather than
-            // loses where the person was.
-            NavigationStack(path: navigation.path(for: destination)) {
-                destinationView
-                    .navigationDestination(for: AppRoute.self) { route in
-                        switch route {
-                        case .match(let id): MatchDetailView(matchID: id)
-                        case .player(let id): PlayerDetailView(playerID: id)
-                        case .season(let id): SeasonStatsView(seasonID: id)
-                        case .eventLog(let id): MatchEventLogScreen(matchID: id)
-                        }
-                    }
+        return TabView(selection: $navigation.section) {
+            Tab(AppSection.home.title, systemImage: AppSection.home.symbolName, value: AppSection.home) {
+                sectionStack(for: .home)
             }
-            .id(destination)
+            Tab(
+                AppSection.matches.title, systemImage: AppSection.matches.symbolName,
+                value: AppSection.matches
+            ) {
+                sectionStack(for: .matches)
+            }
+            Tab(AppSection.roster.title, systemImage: AppSection.roster.symbolName, value: AppSection.roster) {
+                sectionStack(for: .roster)
+            }
+            Tab(AppSection.stats.title, systemImage: AppSection.stats.symbolName, value: AppSection.stats) {
+                sectionStack(for: .stats)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
+        .tabViewStyle(.sidebarAdaptable)
+        .tabViewSidebarHeader {
+            Menu {
+                TeamSwitcherMenu()
+            } label: {
+                Label(
+                    appModel.workspace.selectedTeam?.name ?? "Programme",
+                    systemImage: "person.3")
+            }
+            .padding(.vertical, 4)
+        }
+        .id(appModel.workspace.selectedTeamID)
     }
 
     @ViewBuilder
-    private var destinationView: some View {
-        switch appModel.navigation.sidebar ?? .today {
-        case .today: TodayView()
-        case .matches: MatchesView()
-        case .roster: RosterView()
-        case .season: SeasonStatsView(seasonID: appModel.seasonID)
-        case .exports: ExportsView()
+    private func sectionStack(for section: AppSection) -> some View {
+        @Bindable var navigation = appModel.navigation
+        NavigationStack(path: navigation.path(for: section)) {
+            sectionRoot(for: section)
+                .navigationDestination(for: AppRoute.self) { route in
+                    switch route {
+                    case .match(let id): MatchDetailView(matchID: id)
+                    case .player(let id): PlayerDetailView(playerID: id)
+                    case .season(let id):
+                        if let teamID = appModel.workspace.selectedTeamID {
+                            SeasonStatsView(teamID: teamID, seasonID: id)
+                        }
+                    case .eventLog(let id): MatchEventLogScreen(matchID: id)
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionRoot(for section: AppSection) -> some View {
+        if let teamID = appModel.workspace.selectedTeamID {
+            switch section {
+            case .home: HomeView(teamID: teamID)
+            case .matches: MatchesView(teamID: teamID)
+            case .roster: RosterView(teamID: teamID)
+            case .stats:
+                SeasonStatsView(
+                    teamID: teamID, seasonID: appModel.workspace.viewedStatsSeasonID)
+            }
         }
     }
 }
 
-struct SidebarView: View {
+/// Native team switching. Team is context shown as subtitle/title-menu, not a
+/// destination. Used at the root of each section.
+struct TeamSwitcherTitle: ViewModifier {
+    @Environment(AppModel.self) private var appModel
+    let sectionTitle: String
+
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(sectionTitle)
+            .navigationSubtitle(appModel.workspace.selectedTeam?.name ?? "")
+            .toolbarTitleMenu {
+                TeamSwitcherMenu()
+            }
+    }
+}
+
+extension View {
+    func teamWorkspaceTitle(_ title: String) -> some View {
+        modifier(TeamSwitcherTitle(sectionTitle: title))
+    }
+}
+
+struct TeamSwitcherMenu: View {
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        @Bindable var navigation = appModel.navigation
-
-        List(selection: $navigation.sidebar) {
-            Section {
-                ForEach(SidebarDestination.allCases) { destination in
-                    Label(destination.title, systemImage: destination.symbolName)
-                        .tag(destination)
+        ForEach(appModel.workspace.teams) { team in
+            Button {
+                Task { await appModel.selectTeam(team.id) }
+            } label: {
+                if team.id == appModel.workspace.selectedTeamID {
+                    Label(team.name, systemImage: "checkmark")
+                } else {
+                    Text(team.name)
                 }
-            } header: {
-                Text(appModel.teamName)
             }
         }
-        .navigationTitle("Programme")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Settings", systemImage: "gearshape") {
-                    navigation.isPresentingSettings = true
-                }
-            }
+        Divider()
+        Button("Add Team…", systemImage: "plus") {
+            appModel.navigation.isPresentingNewTeam = true
+        }
+        Button("Manage Teams…", systemImage: "person.3") {
+            appModel.navigation.isPresentingManageTeams = true
         }
     }
 }

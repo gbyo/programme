@@ -409,3 +409,133 @@ struct JournalReconciliationTests {
         #expect(try journal.recover(matchID: descriptor.id)?.events.isEmpty == true)
     }
 }
+
+@Suite("Team workspaces stay scoped to their team")
+struct TeamWorkspaceTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makePlayer(first: String, last: String, number: Int) -> PlayerSnapshot {
+        PlayerSnapshot(
+            id: PlayerID(), firstName: first, lastName: last, jerseyNumber: number,
+            position: .forward, classYear: nil, isOnRoster: true)
+    }
+
+    private func makeMatch(
+        store: MatchStore, teamID: TeamID, opponent: String, roster: RosterSnapshot
+    ) async throws -> MatchID {
+        try await store.createMatch(
+            teamID: teamID, seasonID: nil, opponentName: opponent, opponentShortName: nil,
+            kickoff: Date(), venue: .home, rules: .highSchool, statProfile: .maxPreps,
+            tracking: .ourTeam, competition: nil, roster: roster)
+    }
+
+    @Test("Two teams retain separate rosters and matches")
+    func separateRostersAndMatches() async throws {
+        let store = try makeStore()
+        let varsity = try await store.createTeam(name: "Varsity", shortName: "Varsity")
+        let junior = try await store.createTeam(name: "Junior", shortName: "JV")
+        _ = try await store.createSeason(
+            teamID: varsity, name: "2027", startDate: Date(), endDate: nil)
+        _ = try await store.createSeason(
+            teamID: junior, name: "2027", startDate: Date(), endDate: nil)
+
+        let varsityPlayer = makePlayer(first: "Ava", last: "Varsity", number: 10)
+        let juniorPlayer = makePlayer(first: "Zoe", last: "Junior", number: 10)
+        try await store.addPlayers(teamID: varsity, [varsityPlayer])
+        try await store.addPlayers(teamID: junior, [juniorPlayer])
+
+        let varsityRoster = try await store.roster(teamID: varsity)
+        let juniorRoster = try await store.roster(teamID: junior)
+        #expect(varsityRoster[varsityPlayer.id] != nil)
+        #expect(varsityRoster[juniorPlayer.id] == nil)
+        #expect(juniorRoster[juniorPlayer.id] != nil)
+        #expect(juniorRoster[varsityPlayer.id] == nil)
+
+        let varsityMatch = try await self.makeMatch(
+            store: store, teamID: varsity, opponent: "Dixie", roster: varsityRoster)
+        let juniorMatch = try await self.makeMatch(
+            store: store, teamID: junior, opponent: "Newberry", roster: juniorRoster)
+
+        let varsityMatches = try await store.matches(teamID: varsity)
+        let juniorMatches = try await store.matches(teamID: junior)
+        #expect(varsityMatches.map(\.id) == [varsityMatch])
+        #expect(juniorMatches.map(\.id) == [juniorMatch])
+    }
+
+    @Test("Ownership lookups resolve each team's match, player and season")
+    func ownershipLookups() async throws {
+        let store = try makeStore()
+        let varsity = try await store.createTeam(name: "Varsity", shortName: "Varsity")
+        let junior = try await store.createTeam(name: "Junior", shortName: "JV")
+        let varsitySeason = try await store.createSeason(
+            teamID: varsity, name: "2027", startDate: Date(), endDate: nil)
+        let juniorSeason = try await store.createSeason(
+            teamID: junior, name: "2027", startDate: Date(), endDate: nil)
+
+        let varsityPlayer = makePlayer(first: "Ava", last: "Varsity", number: 9)
+        let juniorPlayer = makePlayer(first: "Zoe", last: "Junior", number: 9)
+        try await store.addPlayers(teamID: varsity, [varsityPlayer])
+        try await store.addPlayers(teamID: junior, [juniorPlayer])
+
+        let varsityRoster = try await store.roster(teamID: varsity)
+        let juniorRoster = try await store.roster(teamID: junior)
+        let varsityMatch = try await self.makeMatch(
+            store: store, teamID: varsity, opponent: "Dixie", roster: varsityRoster)
+        let juniorMatch = try await self.makeMatch(
+            store: store, teamID: junior, opponent: "Newberry", roster: juniorRoster)
+
+        #expect(try await store.teamID(forMatch: varsityMatch) == varsity)
+        #expect(try await store.teamID(forMatch: juniorMatch) == junior)
+        #expect(try await store.teamID(forPlayer: varsityPlayer.id) == varsity)
+        #expect(try await store.teamID(forPlayer: juniorPlayer.id) == junior)
+        #expect(try await store.teamID(forSeason: varsitySeason) == varsity)
+        #expect(try await store.teamID(forSeason: juniorSeason) == junior)
+    }
+
+    @Test("Seasons list per team and changing current affects only that team")
+    func seasonsArePerTeam() async throws {
+        let store = try makeStore()
+        let varsity = try await store.createTeam(name: "Varsity", shortName: "Varsity")
+        let junior = try await store.createTeam(name: "Junior", shortName: "JV")
+        let first = try await store.createSeason(
+            teamID: varsity, name: "2026", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        let second = try await store.createSeason(
+            teamID: varsity, name: "2027", startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: nil)
+        let juniorOnly = try await store.createSeason(
+            teamID: junior, name: "2027", startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: nil)
+
+        // The newest season becomes current on creation.
+        #expect(try await store.currentSeasonID(teamID: varsity) == second)
+
+        var varsitySeasons = try await store.seasons(teamID: varsity)
+        #expect(Set(varsitySeasons.map(\.id)) == Set([first, second]))
+        #expect(varsitySeasons.first { $0.id == second }?.isCurrent == true)
+        #expect(varsitySeasons.first { $0.id == first }?.isCurrent == false)
+
+        try await store.setCurrentSeason(teamID: varsity, seasonID: first)
+        #expect(try await store.currentSeasonID(teamID: varsity) == first)
+        varsitySeasons = try await store.seasons(teamID: varsity)
+        #expect(varsitySeasons.first { $0.id == first }?.isCurrent == true)
+        #expect(varsitySeasons.first { $0.id == second }?.isCurrent == false)
+
+        // The other team is untouched.
+        #expect(try await store.currentSeasonID(teamID: junior) == juniorOnly)
+        let juniorSeasons = try await store.seasons(teamID: junior)
+        #expect(juniorSeasons.map(\.id) == [juniorOnly])
+
+        // Editing identity round-trips through TeamDetails without leaking models.
+        try await store.updateTeam(
+            varsity, name: "Varsity Renamed", shortName: "VAR", mascot: "Wildcats",
+            primaryColorHex: "112233", secondaryColorHex: nil)
+        let details = try await store.teamDetails(teamID: varsity)
+        #expect(details.name == "Varsity Renamed")
+        #expect(details.shortName == "VAR")
+    }
+}

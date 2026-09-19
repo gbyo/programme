@@ -156,14 +156,16 @@ struct ExportSheet: View {
     }
 }
 
-/// The Exports destination: recent files, archive import, and a season backup.
-struct ExportsView: View {
+/// Archive/import/transfer utilities. Lives under Settings → Data & Transfer,
+/// never as a top-level destination. The import destination team is explicit.
+struct DataTransferView: View {
     @Environment(AppModel.self) private var appModel
     @State private var contexts: [MatchContext] = []
     @State private var isExporting = false
     @State private var isImporting = false
     @State private var importResult: ImportOutcome?
     @State private var isTargeted = false
+    @State private var importTeamID: TeamID?
 
     struct ImportOutcome: Identifiable {
         let id = UUID()
@@ -172,16 +174,35 @@ struct ExportsView: View {
         var isError: Bool
     }
 
+    private var destinationTeamID: TeamID? {
+        importTeamID ?? appModel.workspace.selectedTeamID
+    }
+
     var body: some View {
         List {
+            Section {
+                Picker("Import into", selection: $importTeamID) {
+                    Text("Selected team").tag(nil as TeamID?)
+                    ForEach(appModel.workspace.teams) { team in
+                        Text(team.name).tag(team.id as TeamID?)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Import Destination")
+            } footer: {
+                Text(
+                    "Archives are imported into the team shown here, never into whichever workspace happens to be selected without saying so."
+                )
+            }
             Section {
                 Button {
                     isExporting = true
                 } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Export Season").font(.body.weight(.medium))
-                            Text("\(contexts.count) finalized matches · CSV, stat sheet, PDF, archive")
+                            Text("Export Team Archive").font(.body.weight(.medium))
+                            Text("\(contexts.count) finalized matches for the selected team · archive")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     } icon: {
@@ -207,7 +228,7 @@ struct ExportsView: View {
                 Text("Backup and Transfer")
             } footer: {
                 Text(
-                    "A Programme archive contains everything needed to rebuild a match — events, roster, configuration and revision history — independently of this iPad."
+                    "A Programme archive contains everything needed to rebuild a match — events, roster, configuration and revision history — independently of this iPad. For a full season export with CSV and stat sheets, use Stats → Export."
                 )
             }
 
@@ -224,12 +245,14 @@ struct ExportsView: View {
                 .padding(.vertical, 4)
             }
         }
-        .navigationTitle("Exports")
+        .navigationTitle("Data & Transfer")
         .dropDestination(for: ProgrammeArchiveTransfer.self) { items, _ in
             guard let item = items.first else { return false }
             Task { await importArchive(item.archive) }
             return true
-        } isTargeted: { isTargeted = $0 }
+        } isTargeted: {
+            isTargeted = $0
+        }
         .overlay {
             if isTargeted {
                 RoundedRectangle(cornerRadius: 16)
@@ -242,9 +265,10 @@ struct ExportsView: View {
             NavigationStack {
                 ExportSheet(
                     payload: ExportPayload(
-                        teamName: appModel.teamName, teamShortName: appModel.teamShortName,
+                        teamName: appModel.workspace.selectedTeam?.name ?? "",
+                        teamShortName: appModel.workspace.selectedTeam?.shortName,
                         contexts: contexts),
-                    exporters: ProgrammeExporters.all)
+                    exporters: [ProgrammeExporters.archive])
             }
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.programmeArchive, .json]) { result in
@@ -267,7 +291,7 @@ struct ExportsView: View {
     }
 
     private func load() async {
-        guard let store = appModel.store, let teamID = appModel.teamID else { return }
+        guard let store = appModel.store, let teamID = appModel.workspace.selectedTeamID else { return }
         let items = (try? await store.matches(teamID: teamID)) ?? []
         var loaded: [MatchContext] = []
         for item in items where item.phase == .finalized {
@@ -295,15 +319,16 @@ struct ExportsView: View {
     }
 
     private func importArchive(_ archive: ProgrammeArchive) async {
-        guard let store = appModel.store, let teamID = appModel.teamID else {
+        guard let store = appModel.store, let teamID = destinationTeamID else {
             importResult = ImportOutcome(
                 title: "Create a team first",
                 message: "Programme needs a team to import matches into.", isError: true)
             return
         }
+        let seasonID = try? await store.currentSeasonID(teamID: teamID)
         var imported = 0
         for match in archive.matches {
-            if (try? await store.importMatch(match.context, teamID: teamID, seasonID: appModel.seasonID)) != nil {
+            if (try? await store.importMatch(match.context, teamID: teamID, seasonID: seasonID)) != nil {
                 imported += 1
             }
         }

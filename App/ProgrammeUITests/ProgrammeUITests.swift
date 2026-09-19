@@ -593,19 +593,98 @@ final class ProgrammeUITests: XCTestCase {
 
     // MARK: - Browsing, creating and exporting
 
-    func testTodayShowsNextMatchAndRecentResults() {
+    func testHomeShowsNextMatchAndRecentResults() {
         let app = launch()
-        let header = element(app, "today.header")
+        let header = element(app, "home.header")
         XCTAssertTrue(header.waitForExistence(timeout: 20))
         XCTAssertTrue(header.label.contains("Ninety Six Boys Soccer"))
         XCTAssertTrue(element(app, "section.Next Match").exists)
         XCTAssertTrue(element(app, "section.Recent").exists)
-        attachScreenshot(named: "Today")
+        attachScreenshot(named: "Home")
+    }
+
+    func testTopLevelDestinationsAreHomeMatchesRosterStats() {
+        let app = launch()
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
+
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
+        openSection(app, "Roster")
+        XCTAssertTrue(app.navigationBars["Roster"].waitForExistence(timeout: 10))
+        openSection(app, "Stats")
+        XCTAssertTrue(app.navigationBars["Season Stats"].waitForExistence(timeout: 10))
+        openSection(app, "Home")
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 10))
+
+        // Exports is a utility under Settings, not a top-level destination.
+        XCTAssertFalse(app.tabBars.buttons["Exports"].exists)
+        XCTAssertFalse(app.buttons["Exports"].exists)
+        XCTAssertFalse(app.navigationBars["Exports"].exists)
+    }
+
+    func testStatsExportProducesFiles() {
+        let app = launch()
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
+
+        openSection(app, "Stats")
+        XCTAssertTrue(app.navigationBars["Season Stats"].waitForExistence(timeout: 10))
+
+        app.buttons["Export"].tap()
+        XCTAssertTrue(app.navigationBars["Export"].waitForExistence(timeout: 5))
+
+        app.staticTexts["Season Totals (CSV)"].tap()
+        app.buttons["Prepare"].tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Ready to Share"].waitForExistence(timeout: 20),
+            "The season export did not produce a file")
+        attachScreenshot(named: "Stats export")
+    }
+
+    func testManageTeamsCreatesAndEditsTeam() {
+        let app = launch()
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
+
+        // Settings → Manage Teams… → Add Team…
+        app.buttons["Settings"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.staticTexts["Manage Teams…"].tap()
+        XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
+        app.buttons["Add Team…"].tap()
+        XCTAssertTrue(app.navigationBars["Create a Team"].waitForExistence(timeout: 5))
+
+        replaceText(app, app.textFields["Team name"], with: "JV Test Team")
+        replaceText(app, app.textFields["Short name (used on buttons)"], with: "JV Test")
+        app.buttons["Create"].tap()
+
+        // Creating a team selects it: Home now shows the new, empty workspace.
+        let header = element(app, "home.header")
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            header.label.contains("JV Test Team"),
+            "Creating a team did not select it: \(header.label)")
+        XCTAssertFalse(
+            element(app, "match.Dixie").exists,
+            "The previous team's matches leaked into the new workspace")
+
+        // Editing the team updates it in place rather than creating another one.
+        app.buttons["Settings"].firstMatch.tap()
+        app.staticTexts["Manage Teams…"].tap()
+        app.staticTexts["JV Test Team"].tap()
+        XCTAssertTrue(app.navigationBars["JV Test"].waitForExistence(timeout: 5))
+        replaceText(app, app.textFields["Team name"], with: "JV Renamed")
+        element(app, "teamDetail.save").tap()
+
+        XCTAssertTrue(app.staticTexts["JV Renamed"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["JV Test Team"].exists)
+        XCTAssertTrue(
+            app.staticTexts["Ninety Six Boys Soccer"].exists,
+            "The original team disappeared after editing the new one")
     }
 
     func testCreatingAMatch() {
         let app = launch()
-        XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
 
         app.buttons["New Match"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["New Match"].waitForExistence(timeout: 5))
@@ -680,7 +759,7 @@ final class ProgrammeUITests: XCTestCase {
 
     func testNewMatchRemembersTheScoringConfiguration() {
         let app = launch()
-        XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
 
         app.buttons["New Match"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["New Match"].waitForExistence(timeout: 5))
@@ -697,7 +776,7 @@ final class ProgrammeUITests: XCTestCase {
 
     func testMatchDetailDistinguishesNotTrackedFromZero() {
         let app = launch()
-        XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
 
         element(app, "match.Dixie").tap()
         XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
@@ -719,7 +798,7 @@ final class ProgrammeUITests: XCTestCase {
 
     func testExportProducesShareableFiles() {
         let app = launch()
-        XCTAssertTrue(element(app, "today.header").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
 
         element(app, "match.Dixie").tap()
         XCTAssertTrue(element(app, "section.Box Score").waitForExistence(timeout: 15))
@@ -738,6 +817,38 @@ final class ProgrammeUITests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Opens one of the four top-level sections, whether SwiftUI renders the
+    /// destinations as a tab bar (iPhone) or an adaptable sidebar (iPad).
+    private func openSection(_ app: XCUIApplication, _ name: String) {
+        if app.tabBars.buttons[name].exists {
+            app.tabBars.buttons[name].tap()
+            return
+        }
+        let button = app.buttons[name].firstMatch
+        if button.waitForExistence(timeout: 5) {
+            button.tap()
+            return
+        }
+        let row = app.cells.containing(.staticText, identifier: name).firstMatch
+        if row.exists {
+            row.tap()
+            return
+        }
+        XCTFail("Could not find the \(name) destination")
+    }
+
+    /// Replaces a text field's contents, since several editors open prefilled.
+    private func replaceText(_ app: XCUIApplication, _ field: XCUIElement, with text: String) {
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        if app.menuItems["Select All"].waitForExistence(timeout: 3) {
+            app.menuItems["Select All"].tap()
+            field.typeText(text)
+        } else {
+            field.typeText(text)
+        }
+    }
 
     private func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
