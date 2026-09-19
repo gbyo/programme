@@ -34,10 +34,10 @@ final class CompactScorerUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
-    /// On a phone the bottom bar cannot show everything, so the system moves its
-    /// lowest-priority items into an overflow menu. That is the right outcome —
-    /// the last-event strip is status and Match Stats is secondary — but it means
-    /// a test has to look inside the menu rather than assume a visible button.
+    /// On a phone the bottom bar cannot show every secondary control, so the
+    /// system moves low-priority items such as Match Stats and Event Log into an
+    /// overflow menu. A test has to look inside the menu rather than assume those
+    /// controls are visible.
     private func tapPossiblyOverflowed(
         _ app: XCUIApplication, identifier: String, label: String
     ) {
@@ -72,6 +72,35 @@ final class CompactScorerUITests: XCTestCase {
         XCTAssertTrue(element(app, "live.compactPane").exists, "The pane control is missing")
         XCTAssertTrue(element(app, "palette.goal").exists, "Record is not the opening pane")
         attachScreenshot(named: "Compact scorer")
+    }
+
+    func testCompactLastEventFloatsAboveTheToolbarThenClears() throws {
+        let app = try launchCompactScorer()
+
+        XCTAssertFalse(
+            element(app, "scoring.lastEvent").exists,
+            "An old last-event summary is still occupying the compact toolbar")
+
+        element(app, "palette.corner").tap()
+        XCTAssertTrue(element(app, "composer.sheet").waitForExistence(timeout: 5))
+        element(app, "pick.7").tap()
+
+        let confirmation = element(app, "scoring.lastEvent")
+        XCTAssertTrue(
+            confirmation.waitForExistence(timeout: 5),
+            "Recording an event did not show compact confirmation")
+        XCTAssertTrue(
+            confirmation.label.contains("Corner"),
+            "Compact confirmation does not describe the recorded event")
+        XCTAssertTrue(
+            element(app, "scoring.undo").isHittable,
+            "The confirmation displaced the correction controls")
+        attachScreenshot(named: "Compact last-event confirmation")
+
+        let disappears = expectation(
+            for: NSPredicate(format: "exists == false"),
+            evaluatedWith: confirmation)
+        wait(for: [disappears], timeout: 5)
     }
 
     func testChoosingAPlayerReturnsToRecordSoTheNextTapIsTheAction() throws {
@@ -403,8 +432,8 @@ final class CompactScorerUITests: XCTestCase {
         XCTAssertTrue(element(app, "sub.commit").isEnabled, "Record is still withheld")
         element(app, "sub.commit").tap()
 
-        // The last-event strip lives in the bar's overflow on a phone, so the
-        // evidence comes from the log: one event, naming the new goalkeeper.
+        // Compact last-event confirmation is intentionally transient, so the
+        // durable evidence comes from the log: one event, naming the new goalkeeper.
         openEventLog(app)
         let recorded = app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS 'Substitution' AND label CONTAINS 'Brannon'"))
