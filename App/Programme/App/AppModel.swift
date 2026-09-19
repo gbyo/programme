@@ -1,5 +1,7 @@
+import CloudKit
 import Foundation
 import Observation
+import ProgrammeCollaboration
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
@@ -120,6 +122,144 @@ final class AppModel {
     /// explicit Remind Me action, never at launch.
     let reminderCenter = MatchReminderCenter()
 
+    // MARK: - Team sharing
+
+    /// Built lazily so the app never constructs a CloudKit container on
+    /// launch paths (previews, intent tests, iCloud-off devices) that never
+    /// share.
+    private var shareCoordinator: TeamShareCoordinator?
+
+    private func sharing() throws -> TeamShareCoordinator {
+        if let shareCoordinator { return shareCoordinator }
+        let url = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        .appending(path: "Programme/Sharing/shared-zones.json")
+        let coordinator = TeamShareCoordinator(
+            makeContainer: { CKContainer.default() }, sharedZones: try SharedZoneStore(url: url))
+        shareCoordinator = coordinator
+        return coordinator
+    }
+
+    /// Resolves the SwiftUI share item for a team. Pre-resolves the live
+    /// zone-wide share when one exists so the system presents it directly
+    /// (`.existing`); otherwise the item's prepare handler creates and saves
+    /// it on demand. Throws a human-readable error when iCloud is
+    /// unavailable or the library is not ready.
+    func teamShareItem(teamID: TeamID) async throws -> TeamShareItem {
+        guard ShareAvailability.isICloudAvailable else { throw TeamShareError.iCloudUnavailable }
+        guard let store else { throw TeamShareError.noLibrary }
+        let details = try await store.teamDetails(teamID: teamID)
+        let coordinator = try sharing()
+        let prepared = await coordinator.existingShare(teamID: teamID)
+        return TeamShareItem(
+            teamID: teamID, teamName: details.name, prepared: prepared,
+            coordinator: coordinator
+        ) {
+            CKContainer.default()
+        }
+    }
+
+    /// Who currently has access to a shared team. Empty when the team is
+    /// not shared. Display only — edits happen in the system share sheet.
+    func teamParticipants(teamID: TeamID) async -> [ShareParticipant] {
+        guard let coordinator = try? sharing() else { return [] }
+        return await coordinator.participants(teamID: teamID)
+    }
+
+    /// Revokes the team's share for everyone. Local truth is untouched.
+    func stopSharing(teamID: TeamID) async throws {
+        try await sharing().stopSharing(teamID: teamID)
+    }
+
+    /// Unresolved sync contradictions for a team with their match names.
+    /// Empty when nothing needs review — the common case, and the only
+    /// state this surface adds.
+    func syncConflicts(teamID: TeamID) async -> [(conflict: TeamConflict, matchName: String)] {
+        guard let service = try? syncing(), let store else { return [] }
+        let conflicts = await service.unresolvedConflicts(teamID: teamID)
+        guard !conflicts.isEmpty else { return [] }
+        let names = Dictionary(
+            uniqueKeysWithValues: ((try? await store.matches(teamID: teamID)) ?? []).map {
+                ($0.id, $0.opponentName)
+            })
+        return conflicts.map { ($0, names[$0.matchID] ?? "A match") }
+    }
+
+    /// Keeps the local version of a conflicted event. Never rewrites
+    /// history: the entry simply clears.
+    func resolveConflict(_ conflict: TeamConflict) async {
+        if let service = try? syncing() {
+            try? await service.resolveConflict(eventID: conflict.eventID, inTeam: conflict.teamID)
+        }
+    }
+
+    /// Concise sync state for team detail. Review comes first (actionable),
+    /// then availability, then engine status. Every state leaves local
+    /// scoring and recovery authoritative.
+    func syncState(teamID: TeamID) async -> TeamSyncState {
+        let reviewCount = await syncConflicts(teamID: teamID).count
+        if reviewCount > 0 { return .needsReview(reviewCount) }
+        guard ShareAvailability.isICloudAvailable else { return .unavailable }
+        guard let service = try? syncing() else { return .offline }
+        switch await service.engineStatus() {
+        case .idle: return .synced
+        case .syncing: return .syncing
+        case .unavailable, .attentionNeeded: return .offline
+        }
+    }
+
+    /// Accepts an invitation, then reloads the workspace. Nothing
+    /// materializes here: shared content still lands through the applier, so
+    /// review-gating applies unchanged.
+    func acceptShare(_ metadata: CKShare.Metadata) async {
+        if ShareAvailability.isICloudAvailable, let service = try? syncing() {
+            try? await service.accept(metadata)
+        } else if let coordinator = try? sharing() {
+            try? await coordinator.accept(metadata)
+        }
+        await reloadWorkspace(selecting: workspace.selectedTeamID)
+        await startSyncIfAvailable()
+    }
+
+    // MARK: - Sync engine
+
+    /// Built lazily for the same reason as the share coordinator: launch
+    /// paths that never sync (previews, intent tests, iCloud-off devices)
+    /// never construct it.
+    private var syncService: TeamSyncService?
+
+    private func syncing() throws -> TeamSyncService {
+        if let syncService { return syncService }
+        guard let store else { throw TeamShareError.noLibrary }
+        let url = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        .appending(path: "Programme/Sync")
+        let service = try TeamSyncService(store: store, directory: url) { CKContainer.default() }
+        syncService = service
+        return service
+    }
+
+    /// Starts CloudKit replication when iCloud is available. Local scoring
+    /// never waits on this: the service is inert until started, and every
+    /// sync failure leaves local truth untouched.
+    func startSyncIfAvailable() async {
+        guard ShareAvailability.isICloudAvailable else { return }
+        guard let service = try? syncing() else { return }
+        await store?.setMutationHandler { [weak self] mutation in
+            Task { await self?.stageForSync(mutation) }
+        }
+        await service.setWorkspaceChangedHandler { [weak self] in
+            Task { await self?.reloadWorkspace(selecting: self?.workspace.selectedTeamID) }
+        }
+        await service.start()
+    }
+
+    private func stageForSync(_ mutation: OutboundMutation) async {
+        await syncService?.stage(mutation)
+    }
+
     /// If the on-disk store cannot be opened at all, the app still launches into
     /// an in-memory one so it can explain what happened instead of crashing.
     private static let fallbackContainer: ModelContainer? = try? ProgrammeStore.container(inMemory: true)
@@ -229,6 +369,7 @@ final class AppModel {
         ])
 
         await reloadWorkspace(selecting: nil)
+        await startSyncIfAvailable()
         if launchOptions.opensLiveMatch {
             let items = (try? await store.matches(limit: 60)) ?? []
             if let live = items.first(where: \.isInterrupted) {

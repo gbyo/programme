@@ -25,7 +25,9 @@ let package = Package(
         .testTarget(name: "ProgrammeExportTests", dependencies: ["ProgrammeCore", "ProgrammeExport"]),
         .testTarget(
             name: "ProgrammePersistenceTests",
-            dependencies: ["ProgrammeCore", "ProgrammePersistence", "ProgrammeExport"],
+            dependencies: [
+                "ProgrammeCore", "ProgrammePersistence", "ProgrammeExport", "ProgrammeCollaboration",
+            ],
             resources: [.copy("Fixtures")]),
         .testTarget(
             name: "ProgrammeCollaborationTests",

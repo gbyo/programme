@@ -1,3 +1,4 @@
+import ProgrammeCollaboration
 import ProgrammeCore
 import ProgrammePersistence
 import ProgrammeUI
@@ -79,6 +80,11 @@ struct TeamDetailView: View {
     @State private var color = Color.accentColor
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var shareItem: TeamShareItem?
+    @State private var participants: [ShareParticipant] = []
+    @State private var conflicts: [(conflict: TeamConflict, matchName: String)] = []
+    @State private var syncState: TeamSyncState = .synced
+    @State private var isConfirmingStopSharing = false
     @State private var isAddingSeason = false
     @State private var newSeasonName = ""
     @State private var newSeasonMakeCurrent = true
@@ -140,6 +146,102 @@ struct TeamDetailView: View {
                 )
             }
 
+            Section {
+                Label(syncState.label, systemImage: syncState.systemImage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("teamDetail.syncState")
+                if let shareItem {
+                    if let prepared = shareItem.prepared {
+                        CollaborationView(
+                            share: prepared, container: shareItem.container(),
+                            teamName: shareItem.teamName
+                        )
+                        .frame(height: 48)
+                        .accessibilityIdentifier("teamDetail.collaboration")
+                    } else {
+                        ShareLink(
+                            item: shareItem,
+                            preview: SharePreview(
+                                Text("Share \(shareItem.teamName)"),
+                                image: Image(systemName: "person.2"))
+                        ) {
+                            Label(
+                                "Share \(shareItem.teamName)…",
+                                systemImage: "square.and.arrow.up")
+                        }
+                        .accessibilityIdentifier("teamDetail.share")
+                    }
+                } else {
+                    HStack {
+                        Text("Preparing Share…")
+                        Spacer()
+                        ProgressView()
+                    }
+                    .accessibilityIdentifier("teamDetail.share.loading")
+                }
+                if !participants.isEmpty {
+                    ForEach(participants, id: \.displayName) { participant in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(
+                                    participant.displayName
+                                        + (participant.isCurrentUser ? " (You)" : "")
+                                )
+                                .font(.body)
+                                Text(
+                                    participant.roleLabel
+                                        + (participant.accepted ? "" : " · Invited")
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                if shareItem?.prepared != nil {
+                    Button("Stop Sharing…", systemImage: "person.2.slash", role: .destructive) {
+                        isConfirmingStopSharing = true
+                    }
+                    .accessibilityIdentifier("teamDetail.stopSharing")
+                }
+            } header: {
+                Text("Sharing")
+            } footer: {
+                Text(
+                    "Shares the whole team workspace by invitation only — there is no public link. Adding people and changing permissions happens in the system share sheet. Shared changes still need review when they contradict local scoring, and statistics always re-derive on this device."
+                )
+            }
+
+            if !conflicts.isEmpty {
+                Section {
+                    ForEach(conflicts, id: \.conflict.eventID) { entry in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Contradiction in \(entry.matchName)").font(.body)
+                            Text(
+                                "Both sides recorded revision \(entry.conflict.localRevision) differently. Your version stands."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            Button("Keep Mine") {
+                                Task { await resolveConflict(entry.conflict) }
+                            }
+                            .font(.subheadline)
+                            .accessibilityIdentifier(
+                                "teamDetail.conflict.keep.\(entry.conflict.eventID.rawValue.uuidString)")
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } header: {
+                    Text("Needs Review")
+                } footer: {
+                    Text(
+                        "A collaborator's change contradicted yours at the same revision, so nothing was overwritten. Keeping yours clears the entry; editing the event instead supersedes them everywhere."
+                    )
+                }
+            }
+
             if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -181,7 +283,55 @@ struct TeamDetailView: View {
                 }
             }
         }
-        .task(id: teamID) { await load() }
+        .task(id: teamID) {
+            await load()
+            await loadShareItem()
+        }
+        .confirmationDialog(
+            "Stop sharing this team?",
+            isPresented: $isConfirmingStopSharing,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Sharing", role: .destructive) { Task { await stopSharing() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Everyone loses access. Matches already on their devices stay there, but nothing new syncs."
+            )
+        }
+    }
+
+    /// Resolves the share item without creating anything: an already-shared
+    /// team presents its live share, otherwise the item prepares the share
+    /// on first use. Failures (e.g. iCloud signed out) surface here, never
+    /// as a dead Share button.
+    private func loadShareItem() async {
+        conflicts = await appModel.syncConflicts(teamID: teamID)
+        syncState = await appModel.syncState(teamID: teamID)
+        do {
+            shareItem = try await appModel.teamShareItem(teamID: teamID)
+            participants = await appModel.teamParticipants(teamID: teamID)
+            errorMessage = nil
+        } catch {
+            errorMessage =
+                (error as? LocalizedError)?.errorDescription
+                ?? "Programme couldn't prepare that share. Nothing was changed. Try again."
+        }
+    }
+
+    private func resolveConflict(_ conflict: TeamConflict) async {
+        await appModel.resolveConflict(conflict)
+        conflicts = await appModel.syncConflicts(teamID: teamID)
+    }
+
+    private func stopSharing() async {
+        do {
+            try await appModel.stopSharing(teamID: teamID)
+            participants = []
+            await loadShareItem()
+        } catch {
+            errorMessage = "Programme couldn't stop sharing. Nothing was changed. Try again."
+        }
     }
 
     private func load() async {
