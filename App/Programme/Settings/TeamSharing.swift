@@ -23,6 +23,10 @@ struct TeamShareItem: Transferable, Sendable {
     /// through the shared database and manage through the system UI only.
     let scope: TeamShareScope
     let coordinator: TeamShareCoordinator
+    /// Snapshot of the collaboration policy when the item loaded. Creation
+    /// of a new share refuses when false; looking up or revoking an
+    /// existing share never consults it.
+    let creationAllowed: Bool
     let containerFactory: @Sendable () -> CKContainer
 
     /// The container for the collaboration view. Evaluated only when the
@@ -37,7 +41,11 @@ struct TeamShareItem: Transferable, Sendable {
                 return .existing(prepared, container: container, allowedSharingOptions: options)
             }
             return .prepareShare(container: container, allowedSharingOptions: options) {
-                try await item.coordinator.prepareShare(teamID: item.teamID, teamName: item.teamName)
+                // No new CKShare while collaboration is disabled. The view
+                // hides ShareLink under this policy; this is the backstop.
+                guard item.creationAllowed else { throw TeamShareError.collaborationDisabled }
+                return try await item.coordinator.prepareShare(
+                    teamID: item.teamID, teamName: item.teamName)
             }
         }
     }
@@ -139,21 +147,41 @@ enum TeamShareError: LocalizedError {
 /// through the applier, so shared content is review-gated exactly like
 /// synced content.
 final class ShareAcceptanceDelegate: NSObject, UIApplicationDelegate {
-    static var onAccept: ((CKShare.Metadata) -> Void)?
+    /// Single handoff lock covering the handler check, metadata staging,
+    /// handler installation and the pending-buffer drain. No invitation can
+    /// be staged after a drain without an installed handler, and handlers
+    /// taken from under the lock are always invoked after releasing it.
+    private static let handoff = NSLock()
+    private static var handler: ((CKShare.Metadata) -> Void)?
     private static let pending = InvitationBuffer<CKShare.Metadata>()
 
     func application(
         _ application: UIApplication, userDidAcceptCloudKitShareWith metadata: CKShare.Metadata
     ) {
-        if let onAccept = Self.onAccept {
-            onAccept(metadata)
-        } else {
-            Self.pending.stage(metadata)
-        }
+        Self.handoff.lock()
+        if Self.handler == nil { Self.pending.stage(metadata) }
+        let deliver = Self.handler
+        Self.handoff.unlock()
+        deliver?(metadata)
+    }
+
+    /// Installs the acceptance handler and drains staged invitations as one
+    /// transition. The caller invokes the returned items outside the lock.
+    static func installHandler(
+        _ newHandler: @escaping (CKShare.Metadata) -> Void
+    ) -> [CKShare.Metadata] {
+        Self.handoff.lock()
+        Self.handler = newHandler
+        let staged = Self.pending.drain()
+        Self.handoff.unlock()
+        return staged
     }
 
     /// Metadata that arrived before the acceptance closure was installed.
     static func drainPending() -> [CKShare.Metadata] {
-        pending.drain()
+        Self.handoff.lock()
+        let staged = Self.pending.drain()
+        Self.handoff.unlock()
+        return staged
     }
 }

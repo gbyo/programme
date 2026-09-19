@@ -38,6 +38,10 @@ enum CloudKitAccountState: Hashable, Sendable {
 @Observable
 final class CloudKitAccountMonitor {
     var state: CloudKitAccountState = .unknown
+    /// Fires once per transition into `.available` (initial refresh and
+    /// `CKAccountChanged` updates alike). Unavailable and unknown states
+    /// deliberately trigger nothing.
+    var onBecameAvailable: (() -> Void)?
 
     private let makeContainer: @Sendable () -> CKContainer
     private var started = false
@@ -61,11 +65,24 @@ final class CloudKitAccountMonitor {
     }
 
     func refresh() async {
+        let previous = state
         do {
             state = CloudKitAccountState.map(try await makeContainer().accountStatus())
         } catch {
             state = .temporarilyUnavailable
         }
+        if Self.becameAvailable(previous: previous, current: state) {
+            onBecameAvailable?()
+        }
+    }
+
+    /// Pure transition seam: only entering `.available` fires, so sign-in
+    /// starts replication once while unavailable states stay silent.
+    /// Covered directly; the container call itself needs a real account.
+    static func becameAvailable(
+        previous: CloudKitAccountState, current: CloudKitAccountState
+    ) -> Bool {
+        current == .available && previous != .available
     }
 }
 

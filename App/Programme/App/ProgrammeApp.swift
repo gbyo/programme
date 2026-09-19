@@ -27,8 +27,13 @@ struct ProgrammeApp: App {
             RootView()
                 .environment(appModel)
                 .task {
-                    ShareAcceptanceDelegate.onAccept = { metadata in
+                    // Install the acceptance handler and drain staged
+                    // invitations atomically; later arrivals deliver
+                    // directly, so nothing staged afterwards is orphaned.
+                    for metadata in ShareAcceptanceDelegate.installHandler({ metadata in
                         Task { await appModel.acceptShare(metadata) }
+                    }) {
+                        await appModel.acceptShare(metadata)
                     }
                     appModel.watchBridge.activate()
                     await appModel.bootstrap()
