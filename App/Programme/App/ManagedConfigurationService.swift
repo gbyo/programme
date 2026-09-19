@@ -10,7 +10,7 @@ extension Notification.Name {
     /// Values are never posted because managed payloads can name teams and
     /// policies that should not fan out through NotificationCenter.
     static let managedConfigurationChanged = Notification.Name(
-        "org.programme.Programme.managedConfigurationChanged")
+        "com.gbyo.programme.Programme.managedConfigurationChanged")
 }
 
 /// Observes MDM-delivered app configuration, if any.
