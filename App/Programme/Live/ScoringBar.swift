@@ -15,6 +15,9 @@ import SwiftUI
 /// recorded two seconds ago is a correction, not a destructive act.
 struct ScoringToolbar: ToolbarContent {
     let session: LiveMatchSession
+    /// Roomy bars keep the last event inline. Compact layouts move it above the
+    /// bar so passive status never occupies the gap between primary controls.
+    var showsInlineLastEvent: Bool = true
     var onSubstitute: () -> Void
     var onEdit: () -> Void
     var onLog: () -> Void
@@ -32,15 +35,18 @@ struct ScoringToolbar: ToolbarContent {
         }
         .liveVisibilityPriority(.high)
 
-        ToolbarSpacer(.fixed, placement: .bottomBar)
+        if showsInlineLastEvent {
+            ToolbarSpacer(.fixed, placement: .bottomBar)
 
-        // Status, not a control, so it opts out of the shared control background
-        // rather than drawing its own capsule to look different.
-        ToolbarItem(placement: .bottomBar) {
-            LastEventSummary(session: session)
+            // On regular widths the status has enough room to read as part of
+            // the bar. Compact widths present the same summary transiently above
+            // the controls instead.
+            ToolbarItem(placement: .bottomBar) {
+                LastEventSummary(session: session)
+            }
+            .sharedBackgroundVisibility(.hidden)
+            .liveVisibilityPriority(.low)
         }
-        .sharedBackgroundVisibility(.hidden)
-        .liveVisibilityPriority(.low)
 
         ToolbarSpacer(.flexible, placement: .bottomBar)
 
@@ -120,6 +126,24 @@ extension ToolbarContent {
         } else {
             self
         }
+    }
+}
+
+/// Compact presentation of the same last-event status.
+///
+/// It deliberately reuses the same bottom overlay as Programme's notices, so it
+/// sits above the system toolbar without guessing the toolbar's height. The
+/// glass is a temporary status surface, not another button, and never intercepts
+/// a scoring tap.
+struct CompactLastEventConfirmation: View {
+    let session: LiveMatchSession
+
+    var body: some View {
+        LastEventSummary(session: session)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .glassEffect(.regular, in: .capsule)
+            .allowsHitTesting(false)
     }
 }
 
