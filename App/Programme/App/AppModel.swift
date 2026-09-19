@@ -129,6 +129,9 @@ final class AppModel {
     /// Optional MDM-delivered suggestions and policy. Unmanaged devices
     /// rest at `.unmanaged`: no suggestions, everything allowed.
     let managed = ManagedConfigurationService()
+    /// Real CloudKit account state from `accountStatus()`, observed for
+    /// runtime changes. Starts unknown; launch and scoring never wait on it.
+    let cloudAccount = CloudKitAccountMonitor()
     /// Nearby read-only scoreboard. Lives for the app lifetime so the
     /// scoreboard window can display while no local session exists.
     let nearby = NearbyScoreboardService()
@@ -157,15 +160,39 @@ final class AppModel {
     /// (`.existing`); otherwise the item's prepare handler creates and saves
     /// it on demand. Throws a human-readable error when iCloud is
     /// unavailable or the library is not ready.
+    /// Whether this device owns the team (private database, may invite and
+    /// manage) or participates in someone else's share (shared database,
+    /// system UI only). Resolved from the shared-zone owner list the sync
+    /// layer already tracks — never by guessing, and never by treating a
+    /// team as unshared merely because its share isn't in our private
+    /// database.
+    func shareScope(teamID: TeamID) async -> TeamShareScope {
+        guard let service = try? syncing() else { return .owned }
+        let owners = await service.sharedZoneOwners()
+        guard let owner = owners[teamID] else { return .owned }
+        return .shared(ownerName: owner)
+    }
+
     func teamShareItem(teamID: TeamID) async throws -> TeamShareItem {
-        guard ShareAvailability.isICloudAvailable else { throw TeamShareError.iCloudUnavailable }
+        guard cloudAccount.state.isUsable else { throw TeamShareError.iCloudUnavailable }
         guard let store else { throw TeamShareError.noLibrary }
         let details = try await store.teamDetails(teamID: teamID)
         let coordinator = try sharing()
-        let prepared = await coordinator.existingShare(teamID: teamID)
+        let scope = await shareScope(teamID: teamID)
+        let prepared: CKShare?
+        switch await coordinator.lookupShare(teamID: teamID, scope: scope) {
+        case .shared(let share):
+            prepared = share
+        case .notShared:
+            prepared = nil
+        case .unavailable:
+            // A failed lookup is not proof the team is unshared: surface a
+            // retryable error instead of a "Share Team…" button.
+            throw TeamShareError.shareLookupFailed
+        }
         return TeamShareItem(
             teamID: teamID, teamName: details.name, prepared: prepared,
-            coordinator: coordinator
+            scope: scope, coordinator: coordinator
         ) {
             CKContainer.default()
         }
@@ -175,7 +202,7 @@ final class AppModel {
     /// not shared. Display only — edits happen in the system share sheet.
     func teamParticipants(teamID: TeamID) async -> [ShareParticipant] {
         guard let coordinator = try? sharing() else { return [] }
-        return await coordinator.participants(teamID: teamID)
+        return await coordinator.participants(teamID: teamID, scope: shareScope(teamID: teamID))
     }
 
     /// Revokes the team's share for everyone. Local truth is untouched.
@@ -211,7 +238,16 @@ final class AppModel {
     func syncState(teamID: TeamID) async -> TeamSyncState {
         let reviewCount = await syncConflicts(teamID: teamID).count
         if reviewCount > 0 { return .needsReview(reviewCount) }
-        guard ShareAvailability.isICloudAvailable else { return .unavailable }
+        switch cloudAccount.state {
+        case .available:
+            break
+        case .unknown:
+            // Account state not yet resolved: frame as local-safe offline,
+            // never as proof iCloud is missing.
+            return .offline
+        case .noAccount, .restricted, .temporarilyUnavailable:
+            return .unavailable
+        }
         guard let service = try? syncing() else { return .offline }
         switch await service.engineStatus() {
         case .idle: return .synced
@@ -224,7 +260,7 @@ final class AppModel {
     /// materializes here: shared content still lands through the applier, so
     /// review-gating applies unchanged.
     func acceptShare(_ metadata: CKShare.Metadata) async {
-        if ShareAvailability.isICloudAvailable, let service = try? syncing() {
+        if cloudAccount.state.isUsable, let service = try? syncing() {
             try? await service.accept(metadata)
         } else if let coordinator = try? sharing() {
             try? await coordinator.accept(metadata)
@@ -256,7 +292,7 @@ final class AppModel {
     /// never waits on this: the service is inert until started, and every
     /// sync failure leaves local truth untouched.
     func startSyncIfAvailable() async {
-        guard ShareAvailability.isICloudAvailable else { return }
+        guard cloudAccount.state.isUsable else { return }
         guard let service = try? syncing() else { return }
         await store?.setMutationHandler { [weak self] mutation in
             Task { await self?.stageForSync(mutation) }
@@ -368,7 +404,8 @@ final class AppModel {
     /// application context. No per-second streaming: the Watch renders
     /// its clock locally from the anchor.
     private func pushWatchSnapshot(
-        teamName: String, teamShort: String, recordText: String, matches: [MatchListItem]
+        teamID: TeamID, teamName: String, teamShort: String, recordText: String,
+        matches: [MatchListItem], reviewCount: Int
     ) {
         let refs = matches.map {
             WatchMatchRef(
@@ -389,11 +426,10 @@ final class AppModel {
                 needsReviewCount: session.snapshot.needsReviewCount,
                 lastEventText: session.lastEventDescription?.oneLine)
         }
-        let review = (live?.needsReviewCount ?? 0)
         watchBridge.push(
             WatchSnapshot(
                 teamName: teamName, teamShortName: teamShort, recordText: recordText,
-                live: live, upcoming: upcoming, recent: recent, reviewCount: review))
+                live: live, upcoming: upcoming, recent: recent, reviewCount: reviewCount))
     }
 
     func bootstrap() async {
@@ -401,6 +437,14 @@ final class AppModel {
         defer { isReady = true }
         guard let container, let store else { return }
         managed.start()
+        // CloudKit account state resolves in the background; launch and
+        // scoring never wait on it.
+        cloudAccount.start()
+        // Invitations that launched the app before the acceptance closure
+        // was installed are drained here, exactly once.
+        for metadata in ShareAcceptanceDelegate.drainPending() {
+            await acceptShare(metadata)
+        }
 
         // Keep pending reminder notifications in sync with kickoff changes
         // and deletions, whoever initiates them.
@@ -771,9 +815,16 @@ final class AppModel {
                     scoreOpponent: $0.score.opponent, kickoff: $0.kickoff)
             }
 
+        // Team-wide review count: live-match attribution items plus every
+        // unresolved sync contradiction on the team. Cheap here — conflicts
+        // are local records and the live count is already derived.
+        let reviewCount =
+            (liveSession?.snapshot.needsReviewCount ?? 0)
+            + (await syncConflicts(teamID: selectedTeamID).count)
         pushWatchSnapshot(
-            teamName: teamName, teamShort: teamShort, recordText: season?.recordText ?? "0-0-0",
-            matches: matches)
+            teamID: selectedTeamID, teamName: teamName, teamShort: teamShort,
+            recordText: season?.recordText ?? "0-0-0", matches: matches,
+            reviewCount: reviewCount)
 
         Task { await intentProvider?.reindexSpotlight() }
         ProgrammeSharedContainer.write(
