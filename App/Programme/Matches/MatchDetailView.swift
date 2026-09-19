@@ -16,6 +16,8 @@ struct MatchDetailView: View {
     @State private var issues: [ValidationIssue] = []
     @State private var isExporting = false
     @State private var isPresentingCalendar = false
+    @State private var reminderMinutes: Int?
+    @State private var reminderMessage: String?
     @State private var loadFailed = false
     @Environment(\.openURL) private var openURL
 
@@ -97,6 +99,7 @@ struct MatchDetailView: View {
             context = loaded
             snapshot = derived
             issues = ValidationEngine.issues(context: loaded, snapshot: derived)
+            reminderMinutes = try? await store.reminderMinutesBefore(for: matchID)
         } catch {
             loadFailed = true
         }
@@ -134,6 +137,27 @@ struct MatchDetailView: View {
                             isPresentingCalendar = true
                         }
                         .accessibilityIdentifier("matchDetail.addToCalendar")
+                        Menu {
+                            ForEach(MatchReminderOption.allCases) { option in
+                                Button {
+                                    Task { await chooseReminder(option, context: context) }
+                                } label: {
+                                    if reminderMinutes == option.minutesBefore {
+                                        Label(option.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Remind Me", systemImage: "bell")
+                        }
+                        .accessibilityIdentifier("matchDetail.remindMe")
+                        if let status = reminderStatus(context: context) {
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -243,6 +267,50 @@ struct MatchDetailView: View {
             .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// Explicit Remind Me choice. Permission is requested here and only
+    /// here; a denial or an already-past fire time schedules nothing and
+    /// persists nothing, with a plain-language explanation instead.
+    private func chooseReminder(_ option: MatchReminderOption, context: MatchContext) async {
+        guard let store = appModel.store else { return }
+        reminderMessage = nil
+        guard let minutes = option.minutesBefore else {
+            try? await store.setReminderMinutesBefore(nil, for: matchID)
+            reminderMinutes = nil
+            await appModel.reminderCenter.cancel(matchID: matchID)
+            return
+        }
+        guard await appModel.reminderCenter.requestAuthorization() else {
+            reminderMessage =
+                "Notifications are off. Turn them on in Settings to use reminders — nothing was scheduled."
+            return
+        }
+        let descriptor = context.descriptor
+        guard
+            MatchReminderRequest.fireDate(kickoff: descriptor.kickoff, minutesBefore: minutes) != nil
+        else {
+            reminderMessage = "That reminder time has already passed — nothing was scheduled."
+            return
+        }
+        try? await store.setReminderMinutesBefore(minutes, for: matchID)
+        reminderMinutes = minutes
+        await appModel.reminderCenter.sync(
+            matchID: matchID, kickoff: descriptor.kickoff, minutesBefore: minutes,
+            title: MatchReminderRequest.title(descriptor: descriptor),
+            body: MatchReminderRequest.body(descriptor: descriptor, minutesBefore: minutes))
+    }
+
+    private func reminderStatus(context: MatchContext) -> String? {
+        if let reminderMessage { return reminderMessage }
+        guard let minutes = reminderMinutes else { return nil }
+        if MatchReminderRequest.fireDate(
+            kickoff: context.descriptor.kickoff, minutesBefore: minutes) == nil
+        {
+            return "Reminder time has passed."
+        }
+        return
+            "Reminds \(MatchReminderOption.option(minutesBefore: minutes).label.lowercased()) kickoff."
     }
 
     private func openInMaps(_ location: MatchLocation) {

@@ -116,6 +116,9 @@ final class AppModel {
     /// Set once at launch; used by App Intents, Spotlight and Shortcuts.
     var intentProvider: ProgrammeIntentProvider?
     private let storeObserver = StoreChangeObserver()
+    /// Device-local kickoff reminders. Permission is requested only from the
+    /// explicit Remind Me action, never at launch.
+    let reminderCenter = MatchReminderCenter()
 
     /// If the on-disk store cannot be opened at all, the app still launches into
     /// an in-memory one so it can explain what happened instead of crashing.
@@ -176,6 +179,25 @@ final class AppModel {
         }
     }
 
+    /// Reconciles the pending kickoff notification with the stored
+    /// preference after a kickoff change, and clears it after a deletion
+    /// (where the context lookup fails) or finalization.
+    func syncReminder(for matchID: MatchID) async {
+        guard let store else { return }
+        guard let minutes = try? await store.reminderMinutesBefore(for: matchID),
+            let context = try? await store.context(for: matchID),
+            context.phase == .scheduled
+        else {
+            await reminderCenter.cancel(matchID: matchID)
+            return
+        }
+        let descriptor = context.descriptor
+        await reminderCenter.sync(
+            matchID: matchID, kickoff: descriptor.kickoff, minutesBefore: minutes,
+            title: MatchReminderRequest.title(descriptor: descriptor),
+            body: MatchReminderRequest.body(descriptor: descriptor, minutesBefore: minutes))
+    }
+
     // MARK: - Testing
 
     /// Test seam for intent tests: replace the library with an empty
@@ -194,6 +216,12 @@ final class AppModel {
         guard !isReady else { return }
         defer { isReady = true }
         guard let container, let store else { return }
+
+        // Keep pending reminder notifications in sync with kickoff changes
+        // and deletions, whoever initiates them.
+        await store.setMatchChangeHandler { [weak self] matchID in
+            Task { [weak self] in await self?.syncReminder(for: matchID) }
+        }
 
         try? Tips.configure([
             .displayFrequency(.weekly),
