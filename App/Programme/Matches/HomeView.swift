@@ -399,38 +399,75 @@ struct FirstRunView: View {
     @State private var isLoadingSample = false
 
     var body: some View {
-        ContentUnavailableView {
-            Label("Welcome to Programme", systemImage: "soccerball")
-        } description: {
-            Text(
-                "Keep your team, score matches, and track the season — all in one place. Your data stays on your device, with no account or internet connection required."
-            )
-        } actions: {
-            Button("Create Your First Team") {
-                isCreatingTeam = true
-            }
-            .programmePrimaryAction(in: .control)
-            .controlSize(.large)
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer(minLength: 40)
 
-            Button {
-                isLoadingSample = true
-                Task {
-                    await appModel.loadSampleData()
-                    isLoadingSample = false
-                }
-            } label: {
-                if isLoadingSample {
-                    HStack {
-                        ProgressView()
-                        Text("Loading Sample Team…")
+                VStack(spacing: 20) {
+                    Image(systemName: "soccerball")
+                        .font(.system(size: 56, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+
+                    VStack(spacing: 8) {
+                        Text("Welcome to Programme")
+                            .font(.largeTitle.weight(.semibold))
+                            .multilineTextAlignment(.center)
+
+                        Text("Score matches. Track players. Keep the season together.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                } else {
-                    Text("Explore a Sample Team")
+
+                    Text("No account required. Works offline.")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
                 }
+                .frame(maxWidth: 520)
+
+                Spacer(minLength: 36)
+
+                VStack(spacing: 14) {
+                    Button {
+                        isCreatingTeam = true
+                    } label: {
+                        Text("Create Your First Team")
+                            .font(.headline)
+                            .frame(minWidth: 220)
+                    }
+                    .programmePrimaryAction(in: .control)
+                    .controlSize(.large)
+
+                    Button {
+                        isLoadingSample = true
+                        Task {
+                            await appModel.loadSampleData()
+                            isLoadingSample = false
+                        }
+                    } label: {
+                        if isLoadingSample {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Loading Sample Team…")
+                            }
+                        } else {
+                            Text("Explore a Sample Team")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+                    .disabled(isLoadingSample)
+                }
+
+                Spacer(minLength: 40)
             }
-            .buttonStyle(.glass)
-            .controlSize(.large)
-            .disabled(isLoadingSample)
+            .padding(.horizontal, 24)
+            .containerRelativeFrame(.vertical)
+            .frame(maxWidth: .infinity)
         }
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
