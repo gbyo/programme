@@ -33,6 +33,7 @@ targets:
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI, ProgrammeCollaboration]
       - target: ProgrammeWidgets
       - target: ProgrammeWatch
+      - target: ProgrammeThumbnails
     # CloudKit container for team collaboration, declared in
     # App/Programme/Programme.entitlements. Still required as external
     # steps before any device syncs: provision the
@@ -92,6 +93,19 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "1.0"
 
+  ProgrammeThumbnails:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: App/ProgrammeThumbnails
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.Thumbnails
+        PRODUCT_NAME: ProgrammeThumbnails
+        INFOPLIST_FILE: App/ProgrammeThumbnails/Info.plist
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0"
+
   ProgrammeUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -126,6 +140,7 @@ schemes:
         Programme: all
         ProgrammeWidgets: all
         ProgrammeWatch: all
+        ProgrammeThumbnails: all
         ProgrammeUITests: [test]
         ProgrammeIntentTests: [test]
     run:
