@@ -118,6 +118,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.programme.Programme.UITests
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
+        FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks
 
   ProgrammeIntentTests:
     type: bundle.unit-test

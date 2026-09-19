@@ -158,6 +158,7 @@ struct NewMatchView: View {
             let roster = try await store.roster(teamID: teamID)
             guard !roster.players.isEmpty else {
                 errorMessage = "Add players to your roster before creating a match."
+                ProgrammeStateReporter.reportWorkflow(.browsing)
                 return
             }
             let trimmed = opponent.trimmingCharacters(in: .whitespaces)
@@ -200,6 +201,7 @@ struct NewMatchView: View {
                 await appModel.open(.match(matchID))
             }
         } catch {
+            ProgrammeStateReporter.reportWorkflow(.browsing)
             errorMessage = "Programme couldn't create that match. Nothing was changed. Try again."
         }
     }
