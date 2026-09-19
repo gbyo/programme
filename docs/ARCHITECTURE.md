@@ -15,6 +15,8 @@ ProgrammePersistence             SwiftData + recovery journal
 ProgrammeExport                  archive/import/export
 ProgrammeUI                      reusable platform UI
     ↑
+ProgrammeCollaboration           optional CloudKit replication/sharing
+    ↑
 Programme app + widget extension composition and presentation
 ```
 
@@ -63,6 +65,26 @@ Exporters consume verified domain snapshots rather than querying SwiftData or re
 ### ProgrammeUI
 
 Owns reusable Apple-platform presentation pieces, including the vector pitch, visual tokens, Live Activity attributes, and statistic rendering helpers.
+
+### ProgrammeCollaboration
+
+Owns optional CloudKit replication, never truth or recovery:
+
+- one custom record zone per Team, with UUID-derived record names
+- source-truth-only record mapping (no derived totals, no device preferences)
+- `CKSyncEngine` coordination with a durable file-backed outbox/inbox
+- deterministic event merge policy (revision wins; same-revision conflicts
+  surface for review, never wall-clock)
+
+Cloud collaboration is optional replication. Recording and recovering a live
+match never depends on CloudKit.
+
+Signed/provisioned builds are required before any device syncs: the
+`iCloud.org.programme.Programme` container must exist in the Developer
+Portal with the Xcode iCloud capability enabled. Until then the sync
+coordinator reports unavailable and every local behavior is unchanged.
+Push-notification subscriptions for timely sync are future work; the engine
+syncs on launch, foreground, and after staging without them.
 
 ## App shell
 
