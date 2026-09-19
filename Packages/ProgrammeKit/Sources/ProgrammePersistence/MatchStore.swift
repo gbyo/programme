@@ -122,6 +122,15 @@ public enum StoreError: Error, Sendable {
 @ModelActor
 public actor MatchStore {
 
+    /// Called after `updateConfiguration`/`deleteMatch` so the app layer can
+    /// keep device-local integrations (reminder notifications) in sync with
+    /// the new state. The store itself never touches notifications.
+    public var onMatchChanged: (@Sendable (MatchID) -> Void)?
+
+    public func setMatchChangeHandler(_ handler: (@Sendable (MatchID) -> Void)?) {
+        onMatchChanged = handler
+    }
+
     // MARK: - Teams
 
     public func createTeam(
@@ -418,6 +427,7 @@ public actor MatchStore {
         model.location = location
         model.updatedAt = Date()
         try modelContext.save()
+        onMatchChanged?(matchID)
     }
 
     public func updateMatchRoster(matchID: MatchID, roster: RosterSnapshot, opponentRoster: RosterSnapshot)
@@ -432,6 +442,22 @@ public actor MatchStore {
     public func deleteMatch(_ matchID: MatchID) throws {
         guard let model = try match(matchID) else { throw StoreError.matchNotFound }
         modelContext.delete(model)
+        try modelContext.save()
+        onMatchChanged?(matchID)
+    }
+
+    /// Device-local reminder preference, in minutes before kickoff. Nil means
+    /// no reminder. This is presentation state, never match truth: it stays
+    /// out of the descriptor, archive, and sync payload.
+    public func reminderMinutesBefore(for matchID: MatchID) throws -> Int? {
+        guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        return model.reminderMinutesBefore
+    }
+
+    public func setReminderMinutesBefore(_ minutes: Int?, for matchID: MatchID) throws {
+        guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        model.reminderMinutesBefore = minutes
+        model.updatedAt = Date()
         try modelContext.save()
     }
 

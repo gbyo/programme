@@ -805,6 +805,24 @@ final class ProgrammeUITests: XCTestCase {
             "Open in Maps must not appear for a match with no location")
     }
 
+    func testScheduledMatchOffersCalendarAndReminderActions() {
+        let app = launch()
+        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))
+
+        // The Clinton fixture kicks off in the future, so its detail offers
+        // the scheduled-match system actions. Neither is tapped: that would
+        // present system permission UI.
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
+        element(app, "match.Clinton").tap()
+        XCTAssertTrue(
+            element(app, "matchDetail.addToCalendar").waitForExistence(timeout: 15),
+            "Add to Calendar is missing from scheduled Match Detail")
+        XCTAssertTrue(
+            element(app, "matchDetail.remindMe").exists,
+            "Remind Me is missing from scheduled Match Detail")
+    }
+
     func testMatchDetailDistinguishesNotTrackedFromZero() {
         let app = launch()
         XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 20))

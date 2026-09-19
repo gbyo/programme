@@ -21,21 +21,39 @@ public enum ProgrammeSchemaV2: VersionedSchema {
     public static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
 
     public static var models: [any PersistentModel.Type] {
+        [
+            SchemaV2Models.TeamModel.self, SchemaV2Models.SeasonModel.self,
+            SchemaV2Models.PlayerModel.self, SchemaV2Models.MatchModel.self,
+            SchemaV2Models.MatchEventModel.self,
+        ]
+    }
+}
+
+/// V3 adds the optional `reminderMinutesBefore` column on matches. Older
+/// stores migrate with nil, which reads as "no reminder" — a purely
+/// additive lightweight migration.
+public enum ProgrammeSchemaV3: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
+
+    public static var models: [any PersistentModel.Type] {
         [TeamModel.self, SeasonModel.self, PlayerModel.self, MatchModel.self, MatchEventModel.self]
     }
 }
 
 public enum ProgrammeMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [ProgrammeSchemaV1.self, ProgrammeSchemaV2.self]
+        [ProgrammeSchemaV1.self, ProgrammeSchemaV2.self, ProgrammeSchemaV3.self]
     }
     public static var stages: [MigrationStage] {
-        [.lightweight(fromVersion: ProgrammeSchemaV1.self, toVersion: ProgrammeSchemaV2.self)]
+        [
+            .lightweight(fromVersion: ProgrammeSchemaV1.self, toVersion: ProgrammeSchemaV2.self),
+            .lightweight(fromVersion: ProgrammeSchemaV2.self, toVersion: ProgrammeSchemaV3.self),
+        ]
     }
 }
 
 public enum ProgrammeStore {
-    public static var schema: Schema { Schema(versionedSchema: ProgrammeSchemaV2.self) }
+    public static var schema: Schema { Schema(versionedSchema: ProgrammeSchemaV3.self) }
 
     /// The on-disk container. Local-first: no account, no network, no CloudKit
     /// requirement. Scoring a match never touches any of those.

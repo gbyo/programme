@@ -153,6 +153,10 @@ public final class MatchModel {
     /// Optional geographic location as JSON. Nil for every match created
     /// before locations existed, which is exactly what a V1 store migrates to.
     public var locationData: Data?
+    /// Minutes before kickoff the scorer asked to be reminded, if any. Nil
+    /// means no reminder. Device-local preference, never match truth: it is
+    /// not part of the descriptor, archive, or sync payload.
+    public var reminderMinutesBefore: Int?
     public var trackingRaw: String = OpponentTrackingMode.ourTeam.rawValue
     public var phaseRaw: String = MatchPhase.scheduled.rawValue
     public var finalizedAt: Date?
