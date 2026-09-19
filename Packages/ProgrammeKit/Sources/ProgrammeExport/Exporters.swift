@@ -9,7 +9,7 @@ public struct ProgrammeArchiveExporter: StatExporter {
     public let name = "Programme Archive"
     public let detail = "A complete, versioned copy of the match — events, roster and configuration."
     public let fileExtension = "programme"
-    public let contentTypeIdentifier = "org.programme.archive"
+    public let contentTypeIdentifier = "com.gbyo.programme.archive"
     public let symbolName = "archivebox"
 
     public func export(_ payload: ExportPayload) throws -> Data {
