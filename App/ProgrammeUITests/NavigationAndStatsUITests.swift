@@ -84,6 +84,45 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Home awaiting finalization")
     }
 
+    /// Halftime keeps one obvious primary next action and offers review as
+    /// a secondary toolbar action — never two competing giant CTAs, and the
+    /// primary is never duplicated between a bar and the toolbar.
+    func testHalftimeOffersSinglePrimaryActionWithReviewAvailable() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "live.endPeriod").tap()
+        XCTAssertTrue(app.navigationBars["Halftime"].waitForExistence(timeout: 10))
+
+        // The seeded live match carries review items, so Review Issues must
+        // be reachable without a second prominent bottom button.
+        XCTAssertTrue(
+            app.buttons["Review Issues"].waitForExistence(timeout: 10),
+            "Review Issues is missing from the halftime review path")
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label == 'Start Second Half'")).count == 1,
+            "The primary next-period action is duplicated or missing")
+        attachScreenshot(named: "Halftime single primary action")
+    }
+
+    /// Manage Teams pushed from Settings is a normal pushed destination:
+    /// the system back button is the way out, with no Settings-again
+    /// action leading back where the user just came from.
+    func testManageTeamsPushedFromSettingsHasNoSettingsAgain() {
+        let app = launch()
+        waitForHome(app)
+
+        tapToolbarButton(app, "home.settings", label: "Settings")
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.staticTexts["Manage Teams…"].tap()
+        XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
+
+        XCTAssertFalse(
+            element(app, "manageTeams.settings").exists,
+            "Manage Teams pushed from Settings offers a redundant Settings action")
+        attachScreenshot(named: "Manage Teams pushed")
+    }
+
     /// Both action rows are single native rows: no nested prominent
     /// Resume Scoring / Prepare Match buttons anywhere, portrait included.
     func testHomeHasNoNestedProminentActionButtons() {
