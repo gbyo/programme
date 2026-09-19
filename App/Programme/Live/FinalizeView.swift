@@ -1,7 +1,6 @@
 import ProgrammeCore
 import ProgrammeUI
 import SwiftUI
-import TipKit
 
 /// The full-time check.
 ///
@@ -16,83 +15,76 @@ struct FinalizeView: View {
     @State private var isConfirming = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
-
-                section("Match Check") {
-                    ForEach(checks, id: \.title) { check in
-                        CheckRow(check: check)
-                    }
-                }
-
-                section("Stat Completeness") {
-                    TipView(CompletenessTip())
-                    ForEach(TrackedStat.allCases.sorted { $0.label < $1.label }) { stat in
-                        CompletenessRow(
-                            stat: stat, state: session.snapshot.completeness(stat))
-                    }
-                    Text(
-                        "“Not tracked” means the category was never recorded for this match. It stays unknown in exports and season totals — it is never counted as zero."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
-                }
-
-                section("Playing Time") {
-                    ForEach(playedPlayers) { player in
-                        HStack {
-                            Text(player.shortLabel).font(.subheadline)
-                            Spacer()
-                            Text("\(session.snapshot.player(player.id).minutesPlayed) min")
-                                .font(.subheadline.weight(.medium))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                    HStack {
-                        Text("Total").font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Text("\(totalMinutes) min")
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                    Text(minutesExplanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        List {
+            Section {
+                matchSummary
             }
-            .padding(22)
+
+            Section {
+                if !blockingIssues.isEmpty {
+                    Label(
+                        "\(blockingIssues.count) issue\(blockingIssues.count == 1 ? "" : "s") must be resolved before finalizing",
+                        systemImage: "exclamationmark.octagon.fill"
+                    )
+                    .foregroundStyle(Programme.Palette.critical)
+                    .accessibilityIdentifier("finalize.blockingIssues")
+                }
+
+                ForEach(checks, id: \.title) { check in
+                    CheckRow(check: check)
+                }
+            } header: {
+                Text("Match Check")
+            }
+
+            Section {
+                ForEach(TrackedStat.allCases.sorted { $0.label < $1.label }) { stat in
+                    CompletenessRow(
+                        stat: stat, state: session.snapshot.completeness(stat))
+                }
+            } header: {
+                Text("Stat Completeness")
+            } footer: {
+                Text(
+                    "“Not tracked” means the category was never recorded for this match. It stays unknown in exports and season totals — it is never counted as zero."
+                )
+            }
+
+            Section {
+                ForEach(playedPlayers) { player in
+                    LabeledContent(player.shortLabel) {
+                        Text("\(session.snapshot.player(player.id).minutesPlayed) min")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                LabeledContent("Total") {
+                    Text("\(totalMinutes) min")
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                }
+                .fontWeight(.semibold)
+            } header: {
+                Text("Playing Time")
+            } footer: {
+                Text(minutesExplanation)
+            }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("Finalize Match")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Not Yet") { dismiss() }
             }
-        }
-        .safeAreaBar(edge: .bottom) {
-            VStack(spacing: 8) {
-                if !blockingIssues.isEmpty {
-                    Label(
-                        "\(blockingIssues.count) issue\(blockingIssues.count == 1 ? "" : "s") must be resolved first",
-                        systemImage: "exclamationmark.octagon.fill"
-                    )
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Programme.Palette.critical)
-                }
-                Button {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Finalize") {
                     isConfirming = true
-                } label: {
-                    Label("Finalize Match", systemImage: "flag.checkered")
-                        .font(.headline)
-                        .frame(minHeight: 50)
                 }
-                .programmePrimaryAction(in: .control)
-                .buttonSizing(.flexible)
+                .programmeConfirmationTint()
                 .disabled(!blockingIssues.isEmpty)
+                .accessibilityIdentifier("finalize.action")
             }
         }
         .confirmationDialog(
@@ -109,38 +101,42 @@ struct FinalizeView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("FULL TIME")
-                .font(.caption.weight(.semibold))
-                .kerning(0.8)
-                .foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(session.descriptor.teamShortName).font(.title2.weight(.semibold))
-                Text("\(session.snapshot.score.us)–\(session.snapshot.score.opponent)")
-                    .font(.programmeScore(38))
-                Text(session.descriptor.opponentShortName)
-                    .font(.title2.weight(.semibold))
+    private var matchSummary: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Full Time")
+                    .font(.headline)
+                Text("\(session.descriptor.teamShortName) vs \(session.descriptor.opponentShortName)")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                if let result = session.snapshot.result {
-                    Text(result.letter)
-                        .font(.headline)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
-                        .background(result.tint.opacity(0.18), in: Capsule())
-                }
+            }
+
+            Spacer()
+
+            Text("\(session.snapshot.score.us)–\(session.snapshot.score.opponent)")
+                .font(.programmeScore(32))
+                .monospacedDigit()
+
+            if let result = session.snapshot.result {
+                Text(result.letter)
+                    .font(.headline)
+                    .foregroundStyle(result.tint)
             }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(matchSummaryAccessibilityLabel)
     }
 
-    private func section<Content: View>(
-        _ title: String, @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).programmeSectionHeader()
-            content()
+    private var matchSummaryAccessibilityLabel: String {
+        var parts = [
+            "Full time",
+            "\(session.descriptor.teamShortName) \(session.snapshot.score.us)",
+            "\(session.descriptor.opponentShortName) \(session.snapshot.score.opponent)",
+        ]
+        if let result = session.snapshot.result {
+            parts.append(result.label)
         }
+        return parts.joined(separator: ", ")
     }
 
     private var blockingIssues: [ValidationIssue] { session.issues.blocking }
