@@ -127,7 +127,9 @@ struct ShootoutView: View {
             // Alternate sides by default, which is how a shootout is taken.
             pendingSide = attempts.count.isMultiple(of: 2) ? .us : .opponent
         }
-        .sensoryFeedback(.selection, trigger: pendingTaker)
+        .sensoryFeedback(.selection, trigger: pendingTaker) { oldValue, newValue in
+            newValue != nil && newValue != oldValue
+        }
     }
 
     private var scoreboard: some View {
