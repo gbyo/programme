@@ -176,7 +176,9 @@ final class LiveMatchSession {
             commit(effects)
             switch feedback {
             case .standard: Haptics.recorded()
-            case .goal: Haptics.goal()
+            case .goal:
+                Haptics.goal()
+                announceGoal()
             case .silent: break
             }
             return true
@@ -203,7 +205,9 @@ final class LiveMatchSession {
             commit(effects)
             switch feedback {
             case .standard: Haptics.recorded()
-            case .goal: Haptics.goal()
+            case .goal:
+                Haptics.goal()
+                announceGoal()
             case .silent: break
             }
             return appended
@@ -251,7 +255,10 @@ final class LiveMatchSession {
             let effects = try MatchEngine.perform(command, on: context, at: Date())
             commit(effects)
             Haptics.selectionChanged()
-            if let message { show(notice: LiveNotice(text: message, kind: .confirmation)) }
+            if let message {
+                show(notice: LiveNotice(text: message, kind: .confirmation))
+                Announcer.post(message)
+            }
             return true
         } catch {
             present(error: error)
@@ -267,9 +274,9 @@ final class LiveMatchSession {
             commit(effects)
             Haptics.undone()
             Task { await CorrectEventTimeTip.didUndo.donate() }
-            show(
-                notice: LiveNotice(
-                    text: "Undid \(description?.title ?? "last event")", kind: .undo))
+            let undoneText = "Undid \(description?.title ?? "last event")"
+            show(notice: LiveNotice(text: undoneText, kind: .undo))
+            Announcer.post("\(undoneText).")
         } catch {
             present(error: error)
         }
@@ -281,6 +288,7 @@ final class LiveMatchSession {
             commit(effects)
             Haptics.recorded()
             show(notice: LiveNotice(text: "Redone", kind: .confirmation))
+            Announcer.post("Last event redone.")
         } catch {
             present(error: error)
         }
@@ -303,10 +311,18 @@ final class LiveMatchSession {
         _ outcome: ShotOutcome, by shooter: PlayerRef, side: TeamSide = .us,
         phase: PlayPhase = .openPlay, location: PitchPoint? = nil
     ) {
-        run(
-            .recordShot(
-                ShotEvent(
-                    side: side, shooter: shooter, outcome: outcome, location: location, phase: phase)))
+        guard
+            run(
+                .recordShot(
+                    ShotEvent(
+                        side: side, shooter: shooter, outcome: outcome, location: location,
+                        phase: phase)))
+        else { return }
+        // A shot with a settled scorer is haptic-only. One parked in Needs
+        // Review needs words: the review badge alone says nothing out loud.
+        if let last = lastEventDescription, last.needsAttribution {
+            Announcer.post("Shot recorded. \(last.accessibilityLabel)")
+        }
     }
 
     /// Our goalkeeper saves an opponent shot. One event: the opponent's shot on
@@ -324,10 +340,16 @@ final class LiveMatchSession {
     }
 
     func substitute(out: [PlayerID], in playersIn: [PlayerID], goalkeeperAfter: PlayerID?) {
-        run(
-            .substitute(
-                SubstitutionEvent(
-                    side: .us, playersOut: out, playersIn: playersIn, goalkeeperAfter: goalkeeperAfter)))
+        guard
+            run(
+                .substitute(
+                    SubstitutionEvent(
+                        side: .us, playersOut: out, playersIn: playersIn,
+                        goalkeeperAfter: goalkeeperAfter)))
+        else { return }
+        if let last = lastEventDescription {
+            Announcer.post("Substitution recorded. \(last.accessibilityLabel)")
+        }
     }
 
     func startNextPeriod() {
@@ -449,13 +471,21 @@ final class LiveMatchSession {
 
     private func present(error: any Error) {
         Haptics.rejected()
-        if let commandError = error as? MatchCommandError {
-            show(notice: LiveNotice(text: commandError.message, kind: .warning))
-        } else {
-            show(
-                notice: LiveNotice(
-                    text: "Programme couldn't record that. Your match is safe — try again.",
-                    kind: .warning))
+        let text =
+            (error as? MatchCommandError)?.message
+            ?? "Programme couldn't record that. Your match is safe — try again."
+        show(notice: LiveNotice(text: text, kind: .warning))
+        // A rejection has no other surface: the notice fades, so the words
+        // must also be spoken. Same copy, same safety reassurance.
+        Announcer.post(text)
+    }
+
+    /// The goal just committed is `lastEventDescription`: `commit` refreshes it
+    /// before the `.goal` feedback runs, so the announcement names the scorer
+    /// and the score exactly as the event list shows them.
+    private func announceGoal() {
+        if let last = lastEventDescription {
+            Announcer.post("Goal recorded. \(last.accessibilityLabel)")
         }
     }
 

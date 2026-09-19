@@ -60,6 +60,34 @@ enum Haptics {
     }
 }
 
+/// Spoken confirmation of domain-level results, posted at exactly the same
+/// boundary as `Haptics` — the `LiveMatchSession` funnels — so a VoiceOver
+/// scorer hears what a sighted scorer sees in the transient notice bar.
+/// Nothing here fires for clock ticks, navigation, or layout: only recorded
+/// facts, undo/redo, edit confirmations, and failures.
+///
+/// `posted` is an in-memory record of what was announced (capped, never
+/// persisted) so tests can assert the scorer-facing copy without VoiceOver.
+@MainActor
+enum Announcer {
+    private static let capacity = 20
+    private(set) static var posted: [String] = []
+
+    static func post(_ message: String) {
+        posted.append(message)
+        if posted.count > capacity {
+            posted.removeFirst(posted.count - capacity)
+        }
+        AccessibilityNotification.Announcement(message).post()
+    }
+
+    /// Takes and clears the in-memory record. Tests only.
+    static func drain() -> [String] {
+        defer { posted = [] }
+        return posted
+    }
+}
+
 enum WidgetRefresher {
     static func reload() {
         #if canImport(WidgetKit)
