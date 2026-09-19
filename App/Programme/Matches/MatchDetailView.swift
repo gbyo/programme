@@ -15,6 +15,7 @@ struct MatchDetailView: View {
     @State private var snapshot: MatchSnapshot?
     @State private var issues: [ValidationIssue] = []
     @State private var isExporting = false
+    @State private var isPresentingCalendar = false
     @State private var loadFailed = false
     @Environment(\.openURL) private var openURL
 
@@ -68,6 +69,15 @@ struct MatchDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $isPresentingCalendar) {
+            if let context {
+                SystemCalendarEditor(
+                    draft: CalendarEventDraft(descriptor: context.descriptor),
+                    isPresented: $isPresentingCalendar
+                )
+                .ignoresSafeArea()
+            }
+        }
         .task(id: matchID) { await load() }
     }
 
@@ -118,6 +128,12 @@ struct MatchDetailView: View {
                         actionTitle: "Open Scorer"
                     ) {
                         Task { await appModel.openLiveSession(matchID: matchID) }
+                    }
+                    if context.phase == .scheduled {
+                        Button("Add to Calendar…", systemImage: "calendar.badge.plus") {
+                            isPresentingCalendar = true
+                        }
+                        .accessibilityIdentifier("matchDetail.addToCalendar")
                     }
                 }
             }
