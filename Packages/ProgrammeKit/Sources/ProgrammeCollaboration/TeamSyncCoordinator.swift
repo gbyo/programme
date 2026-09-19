@@ -6,7 +6,7 @@ import ProgrammeCore
 /// Developer Portal + Xcode capability step (see docs/ARCHITECTURE.md):
 /// until then the coordinator stays unavailable and everything local works.
 public enum CollaborationEnvironment {
-    public static let containerIdentifier = "iCloud.org.programme.Programme"
+    public static let containerIdentifier = "iCloud.com.gbyo.programme"
 }
 
 /// Which CloudKit database an intent belongs to. One sync engine per
