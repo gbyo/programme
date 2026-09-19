@@ -161,6 +161,7 @@ struct MatchControlsToolbar: ToolbarContent {
     var onEditLineup: () -> Void
     var onEditOpponentRoster: () -> Void
     var onAdjustClock: () -> Void
+    var supportsScoreboardWindow: Bool
     var onOpenScoreboard: () -> Void
     var onConnectDisplay: () -> Void
     var onShootout: () -> Void
@@ -225,6 +226,7 @@ struct MatchControlsToolbar: ToolbarContent {
                 onEditLineup: onEditLineup,
                 onEditOpponentRoster: onEditOpponentRoster,
                 onAdjustClock: onAdjustClock,
+                supportsScoreboardWindow: supportsScoreboardWindow,
                 onOpenScoreboard: onOpenScoreboard,
                 onConnectDisplay: onConnectDisplay,
                 onShootout: onShootout,
@@ -273,6 +275,7 @@ private struct MatchManagementMenu: View {
     var onEditLineup: () -> Void
     var onEditOpponentRoster: () -> Void
     var onAdjustClock: () -> Void
+    var supportsScoreboardWindow: Bool
     var onOpenScoreboard: () -> Void
     var onConnectDisplay: () -> Void
     var onShootout: () -> Void
@@ -292,9 +295,11 @@ private struct MatchManagementMenu: View {
             Button(
                 "Adjust Clock", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
                 action: onAdjustClock)
-            Button(
-                "Open Scoreboard Window", systemImage: "rectangle.on.rectangle",
-                action: onOpenScoreboard)
+            if supportsScoreboardWindow {
+                Button(
+                    "Open Scoreboard Window", systemImage: "rectangle.on.rectangle",
+                    action: onOpenScoreboard)
+            }
             Button(
                 "Connect Nearby Display…", systemImage: "wifi",
                 action: onConnectDisplay)
