@@ -9,11 +9,95 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
 
     func testHomeShowsNextMatchAndRecentResults() {
         let app = launch()
-        let header = waitForHome(app)
-        XCTAssertTrue(header.label.contains("Ninety Six Boys Soccer"))
+        waitForHome(app)
+        // Team identity lives in the navigation bar subtitle, not in body content.
+        XCTAssertTrue(app.navigationBars["Home"].exists)
         XCTAssertTrue(element(app, "section.Next Match").exists)
         XCTAssertTrue(element(app, "section.Recent").exists)
         attachScreenshot(named: "Home")
+    }
+
+    /// The interrupted seed match surfaces as one Current Match action row,
+    /// and tapping anywhere on that row resumes scoring.
+    func testCurrentMatchResumesFromTheWholeRow() {
+        let app = launch(["-programme-open-live"])
+        closeLiveScorerAndWaitForHome(app)
+
+        XCTAssertTrue(element(app, "section.Current Match").exists)
+        let row = element(app, "home.currentMatch")
+        XCTAssertTrue(row.exists)
+        XCTAssertTrue(
+            row.label.contains("in progress"),
+            "The Current Match row does not carry its state: \(row.label)")
+        row.tap()
+
+        waitForScorer(app)
+    }
+
+    /// The interrupted match reports its review items inside Current Match,
+    /// so it must not appear a second time under Needs Review.
+    func testCurrentMatchIsNotDuplicatedInNeedsReview() {
+        let app = launch(["-programme-open-live"])
+        closeLiveScorerAndWaitForHome(app)
+
+        XCTAssertTrue(element(app, "section.Current Match").exists)
+        XCTAssertTrue(
+            element(app, "home.currentMatch").label.contains("need review"),
+            "The seeded live match was expected to carry review items")
+        XCTAssertFalse(
+            element(app, "section.Needs Review").exists,
+            "The current match is duplicated under Needs Review")
+    }
+
+    /// Playing out both halves leaves the match awaiting finalization, and
+    /// Home must offer Finish — not Resume Scoring — for that state.
+    func testAwaitingFinalizationOffersFinish() {
+        let app = launch(["-programme-open-live"])
+        waitForScorer(app)
+
+        element(app, "live.endPeriod").tap()
+        XCTAssertTrue(app.staticTexts["Halftime"].waitForExistence(timeout: 10))
+        app.buttons["Start Second Half"].tap()
+
+        XCTAssertTrue(element(app, "live.endPeriod").waitForExistence(timeout: 10))
+        element(app, "live.endPeriod").tap()
+        XCTAssertTrue(app.navigationBars["Full Time"].waitForExistence(timeout: 10))
+        app.buttons["Finalize Match"].tap()
+
+        XCTAssertTrue(app.navigationBars["Finalize Match"].waitForExistence(timeout: 10))
+        app.buttons["Not Yet"].tap()
+
+        // Awaiting finalization is not a live phase, so closing needs no
+        // confirmation and Home takes over again.
+        element(app, "live.closeScorer").tap()
+        waitForHome(app)
+
+        XCTAssertTrue(element(app, "section.Current Match").exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Ready to finalize'"))
+                .firstMatch.waitForExistence(timeout: 10),
+            "The awaiting-finalization match does not read as ready to finalize")
+        XCTAssertTrue(app.staticTexts["Finish"].exists)
+        XCTAssertFalse(app.buttons["Resume Scoring"].exists)
+        XCTAssertFalse(element(app, "section.Needs Review").exists)
+        attachScreenshot(named: "Home awaiting finalization")
+    }
+
+    /// Both action rows are single native rows: no nested prominent
+    /// Resume Scoring / Prepare Match buttons anywhere, portrait included.
+    func testHomeHasNoNestedProminentActionButtons() {
+        let app = launch(["-programme-open-live"], landscape: false)
+        XCUIDevice.shared.orientation = .portrait
+        closeLiveScorerAndWaitForHome(app)
+
+        XCTAssertTrue(element(app, "home.currentMatch").exists)
+        XCTAssertTrue(element(app, "home.nextMatch").exists)
+        XCTAssertFalse(app.buttons["Resume Scoring"].exists)
+        XCTAssertFalse(app.buttons["Prepare Match"].exists)
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'events recorded'"))
+                .firstMatch.exists,
+            "Recovery reassurance leaked into everyday Home content")
     }
 
     func testTopLevelDestinationsAreHomeMatchesRosterStats() {
@@ -27,7 +111,7 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         openSection(app, "Stats")
         XCTAssertTrue(app.navigationBars["Season Stats"].waitForExistence(timeout: 10))
         openSection(app, "Home")
-        XCTAssertTrue(element(app, "home.header").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "home.content").waitForExistence(timeout: 10))
 
         // Exports is a utility under Settings, not a top-level destination.
         XCTAssertFalse(app.tabBars.buttons["Exports"].exists)

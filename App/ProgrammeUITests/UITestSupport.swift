@@ -35,14 +35,30 @@ class ProgrammeUITestCase: XCTestCase {
     }
 
     /// Same cold-start headroom as waitForScorer for tests that land on Home.
-    /// Returns the header so callers can assert on its label.
+    /// Returns the Home content so callers can assert it is on screen. Team
+    /// identity lives in the navigation bar, not in a body header.
     @discardableResult
     func waitForHome(_ app: XCUIApplication) -> XCUIElement {
-        let header = element(app, "home.header")
+        let content = element(app, "home.content")
         XCTAssertTrue(
-            header.waitForExistence(timeout: 60),
+            content.waitForExistence(timeout: 60),
             "The home workspace did not appear")
-        return header
+        return content
+    }
+
+    /// The `-programme-open-live` flag lands in the scorer. Close it and wait
+    /// for Home. The seeded match is live, so closing asks for confirmation;
+    /// the dialog button is picked out from the toolbar button by identifier.
+    func closeLiveScorerAndWaitForHome(_ app: XCUIApplication) {
+        waitForScorer(app)
+        element(app, "live.closeScorer").tap()
+        XCTAssertTrue(
+            app.staticTexts["Leave this match running?"].waitForExistence(timeout: 5))
+        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Close Scorer'"))
+            .allElementsBoundByIndex.first { $0.identifier != "live.closeScorer" }
+        XCTAssertNotNil(confirm, "The close confirmation is missing its confirm button")
+        confirm?.tap()
+        waitForHome(app)
     }
 
     /// Scrolls the lineup column until a row is reachable. The swipe is anchored

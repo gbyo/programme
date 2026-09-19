@@ -1,19 +1,20 @@
 import ProgrammeCore
 import ProgrammePersistence
 import ProgrammeUI
-import SwiftData
 import SwiftUI
 
 /// Home answers one question: what does the scorer need to know or do now?
 /// Scoped to one team workspace at fetch time via the store.
+///
+/// Team identity lives in the navigation bar (title, subtitle, title menu);
+/// the list below holds only actionable sections. Immediate actions
+/// (Resume/Prepare) are whole-row Buttons into the live-session flow, while
+/// drill-down rows are NavigationLinks that the List discloses natively.
 struct HomeView: View {
     let teamID: TeamID
 
     @Environment(AppModel.self) private var appModel
     @State private var matches: [MatchListItem] = []
-    @State private var teamDetails: TeamDetails?
-    @State private var seasonName: String?
-    @State private var recordText: String?
 
     var body: some View {
         content
@@ -34,104 +35,80 @@ struct HomeView: View {
             .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await load() }
     }
 
-    /// An inset-grouped List rather than a stack of hand-drawn cards: the
-    /// section headers, the row separators, the press highlight, pointer hover
-    /// and keyboard focus are all things the system already provides here.
+    @ViewBuilder
     private var content: some View {
-        List {
-            Section {
-                header
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
-
-            if let live = liveMatch {
-                Section("In Progress") {
-                    ResumeMatchListCard(match: live) {
-                        Task { await appModel.openLiveSession(matchID: live.id) }
-                    }
+        if matches.isEmpty {
+            ContentUnavailableView {
+                Label("No Matches Yet", systemImage: "calendar.badge.plus")
+            } description: {
+                Text("Schedule your first match to prepare the lineup and start scoring.")
+            } actions: {
+                Button("New Match") {
+                    appModel.navigation.isPresentingNewMatch = true
                 }
             }
+            .accessibilityIdentifier("home.content")
+        } else {
+            List {
+                if let live = liveMatch {
+                    Section {
+                        CurrentMatchRow(match: live)
+                    } header: {
+                        sectionHeader("Current Match")
+                    }
+                }
 
-            if let next = nextMatch {
                 Section {
-                    NextMatchListCard(match: next) {
-                        Task { await appModel.openLiveSession(matchID: next.id) }
+                    if let next = nextMatch {
+                        NextMatchRow(match: next)
+                    } else {
+                        Button {
+                            appModel.navigation.isPresentingNewMatch = true
+                        } label: {
+                            Label("Schedule Next Match", systemImage: "plus")
+                        }
                     }
                 } header: {
                     sectionHeader("Next Match")
                 }
-            } else if liveMatch == nil {
-                Section {
-                    EmptyHint(
-                        title: "No match scheduled",
-                        message: "Create a match to prepare a lineup before kickoff.",
-                        actionTitle: "Create a Match"
-                    ) {
-                        appModel.navigation.isPresentingNewMatch = true
-                    }
-                } header: {
-                    sectionHeader("Next Match")
-                }
-            }
 
-            if !needsReview.isEmpty {
-                Section {
-                    ForEach(needsReview) { match in
-                        Button {
-                            Task { await appModel.open(.match(match.id)) }
-                        } label: {
-                            MatchListRow(match: match)
+                if !needsReview.isEmpty {
+                    Section {
+                        ForEach(needsReview) { match in
+                            NavigationLink(value: AppRoute.match(match.id)) {
+                                MatchRowContent(match: match)
+                            }
                         }
-                        .buttonStyle(.plain)
+                    } header: {
+                        sectionHeader("Needs Review")
                     }
-                } header: {
-                    sectionHeader("Needs Review")
                 }
-            }
 
-            if !recentMatches.isEmpty {
-                Section {
-                    ForEach(recentMatches) { match in
-                        Button {
-                            Task { await appModel.open(.match(match.id)) }
-                        } label: {
-                            MatchListRow(match: match)
+                if !recentMatches.isEmpty {
+                    Section {
+                        ForEach(recentMatches) { match in
+                            NavigationLink(value: AppRoute.match(match.id)) {
+                                MatchRowContent(match: match)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        Button {
+                            appModel.navigation.section = .matches
+                        } label: {
+                            Text("All Matches")
+                        }
+                    } header: {
+                        sectionHeader("Recent")
                     }
-                    Button {
-                        appModel.navigation.section = .matches
-                    } label: {
-                        Text("All Matches")
-                    }
-                } header: {
-                    sectionHeader("Recent")
                 }
             }
+            .listStyle(.insetGrouped)
+            .accessibilityIdentifier("home.content")
         }
-        .listStyle(.insetGrouped)
     }
 
     /// A plain section header that carries the identifier its coverage asks for.
     private func sectionHeader(_ title: String) -> some View {
         Text(title).accessibilityIdentifier("section.\(title)")
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(teamDetails?.name ?? appModel.workspace.selectedTeam?.name ?? "")
-                .font(.largeTitle.weight(.semibold))
-            Text(seasonLine)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("home.header")
-    }
-
-    private var seasonLine: String {
-        [seasonName, recordText].compactMap(\.self).joined(separator: " · ")
     }
 
     private func load() async {
@@ -142,22 +119,6 @@ struct HomeView: View {
             ? appModel.workspace.currentSeasonID
             : try? await store.currentSeasonID(teamID: teamID)
         matches = (try? await store.matches(teamID: teamID, seasonID: currentSeason)) ?? []
-        teamDetails = try? await store.teamDetails(teamID: teamID)
-        if let currentSeason {
-            let seasons = (try? await store.seasons(teamID: teamID)) ?? []
-            seasonName = seasons.first { $0.id == currentSeason }?.name
-        } else {
-            seasonName = nil
-        }
-        let finalized = matches.filter { $0.phase == .finalized }
-        if finalized.isEmpty {
-            recordText = "No matches played yet"
-        } else {
-            let wins = finalized.filter { $0.result == .win }.count
-            let losses = finalized.filter { $0.result == .loss }.count
-            let draws = finalized.filter { $0.result == .draw }.count
-            recordText = "\(wins)-\(losses)-\(draws)"
-        }
     }
 
     private var liveMatch: MatchListItem? {
@@ -170,8 +131,12 @@ struct HomeView: View {
             ?? scheduled.first
     }
 
+    /// The interrupted match surfaces its review count inside Current Match,
+    /// so it never appears here a second time.
     private var needsReview: [MatchListItem] {
-        matches.filter { $0.needsReviewCount > 0 }.sorted { $0.kickoff > $1.kickoff }
+        matches
+            .filter { $0.needsReviewCount > 0 && $0.id != liveMatch?.id }
+            .sorted { $0.kickoff > $1.kickoff }
     }
 
     private var recentMatches: [MatchListItem] {
@@ -179,117 +144,127 @@ struct HomeView: View {
     }
 }
 
-struct SectionBox<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .programmeSectionHeader()
-                .accessibilityIdentifier("section.\(title)")
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        }
-    }
-}
-
-struct ResumeMatchListCard: View {
+/// The one match that needs the scorer right now. The whole row is a single
+/// Button into the existing live-session flow; the List owns the container,
+/// so there is no nested control and no card chrome.
+struct CurrentMatchRow: View {
     let match: MatchListItem
-    var onResume: () -> Void
+
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(match.venue.shortLabel) \(match.opponentName)")
-                    .font(.title3.weight(.semibold))
-                Text("\(match.score.us)–\(match.score.opponent) · \(match.eventCount) events recorded")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                if match.needsReviewCount > 0 {
-                    Label("\(match.needsReviewCount) need review", systemImage: "exclamationmark.triangle")
+        Button {
+            Task { await appModel.openLiveSession(matchID: match.id) }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(match.venue.shortLabel) \(match.opponentName)")
+                        .font(.headline)
+                    Text("\(match.score.us)–\(match.score.opponent) · \(statusText)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    if match.needsReviewCount > 0 {
+                        Label(
+                            "\(match.needsReviewCount) need review",
+                            systemImage: "exclamationmark.triangle"
+                        )
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Programme.Palette.caution)
+                    }
                 }
+                Spacer()
+                Label(actionText, systemImage: actionSymbol)
+                    .font(.subheadline.weight(.semibold))
             }
-            Spacer()
-            Button(action: onResume) {
-                Label("Resume Scoring", systemImage: "play.fill")
-                    .font(.headline)
-                    .frame(minHeight: 46)
-                    .padding(.horizontal, 10)
-            }
-            .programmePrimaryAction()
         }
-        .padding(.vertical, 6)
+        .accessibilityIdentifier("home.currentMatch")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+    }
+
+    private var statusText: String {
+        switch match.phase {
+        case .inPeriod: "In progress"
+        case .periodBreak: "Between periods"
+        case .awaitingFinalization: "Ready to finalize"
+        case .scheduled, .finalized: match.phase.rawValue
+        }
+    }
+
+    private var actionText: String {
+        match.phase == .awaitingFinalization ? "Finish" : "Resume"
+    }
+
+    private var actionSymbol: String {
+        match.phase == .awaitingFinalization ? "checkmark.circle" : "play.fill"
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [
+            "\(match.venue.label) versus \(match.opponentName)",
+            "\(match.score.us) to \(match.score.opponent)",
+            statusText.lowercased(),
+        ]
+        if match.needsReviewCount > 0 {
+            parts.append("\(match.needsReviewCount) need review")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var accessibilityHint: String {
+        match.phase == .awaitingFinalization ? "Opens the final match review" : "Resumes scoring"
     }
 }
 
-struct NextMatchListCard: View {
+/// The next match to prepare, in the same row language as Current Match:
+/// one whole-row Button into the existing open-live-session behavior.
+struct NextMatchRow: View {
     let match: MatchListItem
-    var onPrepare: () -> Void
+
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(match.venue.shortLabel) \(match.opponentName)")
-                    .font(.title3.weight(.semibold))
-                Text("\(match.kickoff.matchDayText) · \(match.kickoff.matchTimeText)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if let competition = match.competition {
-                    Text(competition).font(.caption).foregroundStyle(.tertiary)
+        Button {
+            Task { await appModel.openLiveSession(matchID: match.id) }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(match.venue.shortLabel) \(match.opponentName)")
+                        .font(.headline)
+                    Text("\(match.kickoff.matchDayText) · \(match.kickoff.matchTimeText)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let competition = match.competition {
+                        Text(competition)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                Spacer()
+                Label("Prepare", systemImage: "list.clipboard")
+                    .font(.subheadline.weight(.semibold))
             }
-            Spacer()
-            Button(action: onPrepare) {
-                Label("Prepare Match", systemImage: "list.clipboard")
-                    .font(.headline)
-                    .frame(minHeight: 46)
-                    .padding(.horizontal, 10)
-            }
-            .programmePrimaryAction()
         }
-        .padding(.vertical, 6)
+        .accessibilityIdentifier("home.nextMatch")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Prepares the match for scoring")
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [
+            "\(match.venue.label) versus \(match.opponentName)",
+            match.kickoff.matchDayText,
+            match.kickoff.matchTimeText,
+        ]
+        if let competition = match.competition { parts.append(competition) }
+        return parts.joined(separator: ", ")
     }
 }
 
-// Compatibility wrappers so existing MatchModel-based previews keep working.
-struct ResumeMatchCard: View {
-    let match: MatchModel
-    var onResume: () -> Void
-    var body: some View {
-        ResumeMatchListCard(
-            match: MatchListItem(
-                id: match.matchID, opponentName: match.opponentName, kickoff: match.kickoff,
-                venue: match.venue, phase: match.phase,
-                score: SidePair(us: match.cachedScoreUs, opponent: match.cachedScoreOpponent),
-                result: match.result, eventCount: match.cachedEventCount,
-                needsReviewCount: match.cachedNeedsReviewCount, competition: match.competition,
-                seasonName: match.season?.name),
-            onResume: onResume)
-    }
-}
-
-struct NextMatchCard: View {
-    let match: MatchModel
-    var onPrepare: () -> Void
-    var body: some View {
-        NextMatchListCard(
-            match: MatchListItem(
-                id: match.matchID, opponentName: match.opponentName, kickoff: match.kickoff,
-                venue: match.venue, phase: match.phase,
-                score: SidePair(us: match.cachedScoreUs, opponent: match.cachedScoreOpponent),
-                result: match.result, eventCount: match.cachedEventCount,
-                needsReviewCount: match.cachedNeedsReviewCount, competition: match.competition,
-                seasonName: match.season?.name),
-            onPrepare: onPrepare)
-    }
-}
-
-struct MatchListRow: View {
+/// Match row content without any container behavior: NavigationLink (or any
+/// other semantic container) owns disclosure, so no chevron is drawn here.
+struct MatchRowContent: View {
     let match: MatchListItem
     var insets = EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
 
@@ -330,10 +305,6 @@ struct MatchListRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .padding(insets)
         .contentShape(Rectangle())
@@ -353,20 +324,19 @@ struct MatchListRow: View {
     }
 }
 
-struct MatchRow: View {
-    let match: MatchModel
-    var insets = EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
+struct SectionBox<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
 
     var body: some View {
-        MatchListRow(
-            match: MatchListItem(
-                id: match.matchID, opponentName: match.opponentName, kickoff: match.kickoff,
-                venue: match.venue, phase: match.phase,
-                score: SidePair(us: match.cachedScoreUs, opponent: match.cachedScoreOpponent),
-                result: match.result, eventCount: match.cachedEventCount,
-                needsReviewCount: match.cachedNeedsReviewCount, competition: match.competition,
-                seasonName: match.season?.name),
-            insets: insets)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .programmeSectionHeader()
+                .accessibilityIdentifier("section.\(title)")
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        }
     }
 }
 
