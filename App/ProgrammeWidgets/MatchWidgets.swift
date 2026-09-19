@@ -1,5 +1,6 @@
 import ProgrammeCore
 import ProgrammeUI
+import RelevanceKit
 import SwiftUI
 import WidgetKit
 
@@ -27,6 +28,28 @@ struct ProgrammeTimelineProvider: TimelineProvider {
         // thing that changes, so there is no reason to burn a budget on it.
         let refresh = snapshot?.live != nil ? 60.0 : 60 * 30
         completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(refresh))))
+    }
+
+    func relevance() async -> WidgetRelevance<Void> {
+        WidgetRelevance(ProgrammeWidgetRelevance.attributes(for: ProgrammeSharedContainer.read()))
+    }
+}
+
+/// RelevanceKit contexts for the Smart Stack: a live match is relevant
+/// right now; an upcoming kickoff becomes relevant in the half hour
+/// before it as a scheduled event. Pure function over the shared
+/// snapshot so the mapping stays testable without WidgetKit.
+enum ProgrammeWidgetRelevance {
+    static func attributes(for snapshot: ProgrammeWidgetSnapshot?) -> [WidgetRelevanceAttribute<Void>] {
+        guard let snapshot else { return [] }
+        if snapshot.live != nil {
+            return [WidgetRelevanceAttribute(context: .date(Date(), kind: .default))]
+        }
+        guard let upcoming = snapshot.upcoming else { return [] }
+        let window = DateInterval(
+            start: upcoming.kickoff.addingTimeInterval(-30 * 60),
+            end: upcoming.kickoff.addingTimeInterval(2 * 60 * 60))
+        return [WidgetRelevanceAttribute(context: .date(interval: window, kind: .scheduled))]
     }
 }
 

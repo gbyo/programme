@@ -121,6 +121,9 @@ final class AppModel {
     /// Device-local kickoff reminders. Permission is requested only from the
     /// explicit Remind Me action, never at launch.
     let reminderCenter = MatchReminderCenter()
+    /// Read-only Watch companion bridge. Activated at bootstrap; pushes
+    /// glanceable snapshots where the widget snapshot already refreshes.
+    let watchBridge = WatchBridge()
     /// Nearby read-only scoreboard. Lives for the app lifetime so the
     /// scoreboard window can display while no local session exists.
     let nearby = NearbyScoreboardService()
@@ -353,6 +356,39 @@ final class AppModel {
         self.journal = try RecoveryJournal(
             directory: FileManager.default.temporaryDirectory
                 .appending(path: "ProgrammeIntentTests/\(UUID().uuidString)"))
+    }
+
+    /// Builds the glanceable Watch snapshot from the same values the
+    /// widget snapshot uses, then pushes it over WatchConnectivity
+    /// application context. No per-second streaming: the Watch renders
+    /// its clock locally from the anchor.
+    private func pushWatchSnapshot(
+        teamName: String, teamShort: String, recordText: String, matches: [MatchListItem]
+    ) {
+        let refs = matches.map {
+            WatchMatchRef(
+                id: $0.id, opponentShortName: $0.opponentName,
+                venueLabel: $0.venue.shortLabel, kickoff: $0.kickoff, phase: $0.phase,
+                resultLetter: $0.result?.letter ?? "", scoreUs: $0.score.us,
+                scoreOpponent: $0.score.opponent)
+        }
+        let (upcoming, recent) = WatchSelection.select(from: refs)
+        let live: WatchSnapshot.Live? = liveSession.map { session in
+            WatchSnapshot.Live(
+                matchID: session.matchID,
+                teamShortName: session.descriptor.teamShortName,
+                opponentShortName: session.descriptor.opponentShortName,
+                scoreUs: session.snapshot.score.us, scoreOpponent: session.snapshot.score.opponent,
+                clock: session.context.clock, rules: session.context.rules,
+                phase: session.context.phase,
+                needsReviewCount: session.snapshot.needsReviewCount,
+                lastEventText: session.lastEventDescription?.oneLine)
+        }
+        let review = (live?.needsReviewCount ?? 0)
+        watchBridge.push(
+            WatchSnapshot(
+                teamName: teamName, teamShortName: teamShort, recordText: recordText,
+                live: live, upcoming: upcoming, recent: recent, reviewCount: review))
     }
 
     func bootstrap() async {
@@ -723,6 +759,10 @@ final class AppModel {
                     resultLetter: $0.result?.letter ?? "", scoreUs: $0.score.us,
                     scoreOpponent: $0.score.opponent, kickoff: $0.kickoff)
             }
+
+        pushWatchSnapshot(
+            teamName: teamName, teamShort: teamShort, recordText: season?.recordText ?? "0-0-0",
+            matches: matches)
 
         Task { await intentProvider?.reindexSpotlight() }
         ProgrammeSharedContainer.write(

@@ -30,6 +30,7 @@ struct ProgrammeApp: App {
                     ShareAcceptanceDelegate.onAccept = { metadata in
                         Task { await appModel.acceptShare(metadata) }
                     }
+                    appModel.watchBridge.activate()
                     await appModel.bootstrap()
                     let provider = ProgrammeIntentProvider(appModel: appModel)
                     appModel.intentProvider = provider
