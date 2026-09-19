@@ -156,7 +156,7 @@ struct MatchStatsInspector: View {
                 Text("\(keeper.saves) SV")
                 Text("\(keeper.goalsAllowed) GA")
                 if let percentage = keeper.savePercentage {
-                    Text(String(format: "%.0f%% SV", percentage * 100))
+                    Text("\(percentage.formatted(.percent.precision(.fractionLength(0)))) SV")
                 }
             }
             .font(.caption)

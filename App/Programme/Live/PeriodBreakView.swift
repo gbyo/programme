@@ -50,9 +50,10 @@ struct PeriodBreakView: View {
                     } label: {
                         Label("Review Issues", systemImage: "exclamationmark.triangle")
                             .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .frame(minHeight: 50)
                     }
                     .buttonStyle(.bordered)
+                    .buttonSizing(.flexible)
                 }
                 if shootoutIsNext {
                     Button {
@@ -60,27 +61,30 @@ struct PeriodBreakView: View {
                     } label: {
                         Label("Take the Shootout", systemImage: "circle.bottomhalf.filled")
                             .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .frame(minHeight: 50)
                     }
                     .programmePrimaryAction(in: .control)
+                    .buttonSizing(.flexible)
                 } else if session.canStartNextPeriod {
                     Button {
                         onContinue()
                     } label: {
                         Label("Start \(session.nextPeriodLabel)", systemImage: "play.fill")
                             .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .frame(minHeight: 50)
                     }
                     .programmePrimaryAction(in: .control)
+                    .buttonSizing(.flexible)
                 } else {
                     Button {
                         onFinalize()
                     } label: {
                         Label("Finalize Match", systemImage: "flag.checkered")
                             .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .frame(minHeight: 50)
                     }
                     .programmePrimaryAction(in: .control)
+                    .buttonSizing(.flexible)
                 }
             }
         }

@@ -263,6 +263,15 @@ Typical review items:
 
 Period breaks and finalization are natural moments to surface the queue more prominently.
 
+Review and correction keep their hierarchy inside the task that opened them. Choosing an
+unresolved event pushes **Assign Player** from Review, and choosing an event in Event Log pushes
+**Edit Event**. Resolving, deleting, or finishing naturally returns to the same Review or Event Log
+instead of replacing one sheet with another.
+
+Shootout entry uses a native single-value player picker. There is time between kicks, only one
+taker can be current, and the pushed choice list keeps the whole numbered roster readable on both
+iPhone and iPad without turning the live scoring palette into a generic form.
+
 ## Pitch
 
 The pitch is a scalable vector drawing and must earn its space.

@@ -78,12 +78,9 @@ struct TodayView: View {
             if !recentMatches.isEmpty {
                 Section {
                     ForEach(recentMatches) { match in
-                        Button {
-                            appModel.navigation.open(.match(match.matchID))
-                        } label: {
+                        NavigationLink(value: AppRoute.match(match.matchID)) {
                             MatchRow(match: match)
                         }
-                        .buttonStyle(.plain)
                     }
                 } header: {
                     sectionHeader("Recent")
@@ -134,22 +131,6 @@ struct TodayView: View {
 
     private var recentMatches: [MatchModel] {
         Array(matches.filter { $0.phase == .finalized }.prefix(5))
-    }
-}
-
-struct SectionBox<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .programmeSectionHeader()
-                .accessibilityIdentifier("section.\(title)")
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        }
     }
 }
 
@@ -255,10 +236,6 @@ struct MatchRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .padding(insets)
         .contentShape(Rectangle())
@@ -309,7 +286,9 @@ struct FirstRunView: View {
         ContentUnavailableView {
             Label("Welcome to Programme", systemImage: "book.closed")
         } description: {
-            Text("Create your team to start keeping statistics. Everything stays on this iPad — no account, and nothing needed during a match except the iPad itself.")
+            Text(
+                "Create your team to start keeping statistics. Everything stays on this iPad — no account, and nothing needed during a match except the iPad itself."
+            )
         } actions: {
             Button("Create Your First Team") { isCreatingTeam = true }
                 .programmePrimaryAction()

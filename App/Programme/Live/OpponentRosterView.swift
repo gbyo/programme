@@ -17,6 +17,7 @@ struct OpponentRosterView: View {
     @State private var newName = ""
     @State private var pastedText = ""
     @State private var isPasting = false
+    @State private var addFeedbackTrigger = 0
     @FocusState private var numberFieldIsFocused: Bool
 
     var body: some View {
@@ -45,7 +46,9 @@ struct OpponentRosterView: View {
                     ContentUnavailableView {
                         Label("No Opponent Players", systemImage: "person.2")
                     } description: {
-                        Text("Without a roster, opponent events are recorded as team totals — which is exactly what Our Team mode does.")
+                        Text(
+                            "Without a roster, opponent events are recorded as team totals — which is exactly what Our Team mode does."
+                        )
                     } actions: {
                         Button("Paste a List") { isPasting = true }
                     }
@@ -91,6 +94,7 @@ struct OpponentRosterView: View {
             players = session.context.opponentRoster.sortedByNumber
             numberFieldIsFocused = players.isEmpty
         }
+        .sensoryFeedback(.selection, trigger: addFeedbackTrigger)
     }
 
     private var pasteSheet: some View {
@@ -102,7 +106,9 @@ struct OpponentRosterView: View {
             } header: {
                 Text("Paste the opponent's roster")
             } footer: {
-                Text("One player per line, for example “9 Jalen Carter” or “9, Carter, Jalen”. Programme shows you the result before you save.")
+                Text(
+                    "One player per line, for example “9 Jalen Carter” or “9, Carter, Jalen”. Programme shows you the result before you save."
+                )
             }
         }
         .formStyle(.grouped)
@@ -156,6 +162,6 @@ struct OpponentRosterView: View {
         newNumber = ""
         newName = ""
         numberFieldIsFocused = true
-        Haptics.selectionChanged()
+        addFeedbackTrigger += 1
     }
 }

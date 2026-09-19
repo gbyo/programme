@@ -19,29 +19,31 @@ struct PlayerDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                if let player {
+        List {
+            if let player {
+                Section {
                     header(player)
+                        .padding(.vertical, 8)
                 }
-                if let season, let stats = season.players[playerID] {
-                    seasonSection(stats)
-                    if !matchLog.isEmpty { chartSection }
-                    matchLogSection
-                    if let keeper = season.keepers[playerID] { keeperSection(keeper) }
-                } else if season != nil {
+            }
+            if let season, let stats = season.players[playerID] {
+                seasonSection(stats)
+                if !matchLog.isEmpty { chartSection }
+                matchLogSection
+                if let keeper = season.keepers[playerID] { keeperSection(keeper) }
+            } else if season != nil {
+                Section {
                     EmptyHint(
                         title: "No statistics yet",
                         message: "This player hasn't appeared in a finalized match this season.")
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-                } else {
+                }
+            } else {
+                Section {
                     ProgressView()
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 860, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
+        .listStyle(.insetGrouped)
         .navigationTitle(player?.snapshot.displaySurname ?? "Player")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -80,7 +82,7 @@ struct PlayerDetailView: View {
     }
 
     private func seasonSection(_ stats: SeasonPlayerStats) -> some View {
-        SectionBox(title: "Season") {
+        Section("Season") {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 16)], spacing: 16) {
                 StatCell("Appearances", .count(stats.matchesPlayed), emphasis: true)
                 StatCell("Starts", .count(stats.starts), emphasis: true)
@@ -97,12 +99,12 @@ struct PlayerDetailView: View {
                 StatCell("Yellow Cards", stats.value(.cards, \.yellowCards))
                 StatCell("Red Cards", stats.value(.cards, \.redCards))
             }
-            .padding(16)
+            .padding(.vertical, 8)
         }
     }
 
     private var chartSection: some View {
-        SectionBox(title: "Contributions by Match") {
+        Section("Contributions by Match") {
             Chart(matchLog, id: \.matchID) { entry in
                 BarMark(
                     x: .value("Match", entry.opponent),
@@ -118,7 +120,7 @@ struct PlayerDetailView: View {
             .chartYAxis { AxisMarks(position: .leading) }
             .chartLegend(position: .top, alignment: .leading)
             .frame(height: 220)
-            .padding(16)
+            .padding(.vertical, 8)
             .accessibilityLabel("Goals and assists by match")
         }
     }
@@ -151,43 +153,33 @@ struct PlayerDetailView: View {
     }
 
     private var matchLogSection: some View {
-        SectionBox(title: "Match by Match") {
-            VStack(spacing: 0) {
-                ForEach(matchLog.reversed()) { entry in
-                    Button {
-                        appModel.navigation.open(.match(entry.matchID))
-                    } label: {
-                        HStack(spacing: 12) {
-                            if let result = entry.result {
-                                Text(result.letter)
-                                    .font(.caption.weight(.bold))
-                                    .frame(width: 22, height: 22)
-                                    .background(result.tint.opacity(0.18), in: Circle())
-                            }
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(entry.opponent).font(.body)
-                                Text(entry.date.matchDayText).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("\(entry.minutes)'")
-                                .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
-                            Text("\(entry.goals)G \(entry.assists)A")
-                                .font(.subheadline.weight(.medium)).monospacedDigit()
+        Section("Match by Match") {
+            ForEach(matchLog.reversed()) { entry in
+                NavigationLink(value: AppRoute.match(entry.matchID)) {
+                    HStack(spacing: 12) {
+                        if let result = entry.result {
+                            Text(result.letter)
+                                .font(.caption.weight(.bold))
+                                .frame(width: 22, height: 22)
+                                .background(result.tint.opacity(0.18), in: Circle())
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .contentShape(Rectangle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(entry.opponent).font(.body)
+                            Text(entry.date.matchDayText).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\(entry.minutes)'")
+                            .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                        Text("\(entry.goals)G \(entry.assists)A")
+                            .font(.subheadline.weight(.medium)).monospacedDigit()
                     }
-                    .buttonStyle(.plain)
-                    if entry.id != matchLog.first?.id { Divider() }
                 }
             }
-            .padding(.vertical, 6)
         }
     }
 
     private func keeperSection(_ keeper: SeasonKeeperStats) -> some View {
-        SectionBox(title: "Goalkeeping") {
+        Section("Goalkeeping") {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 16)], spacing: 16) {
                 StatCell("Minutes", .count(keeper.minutesPlayed), emphasis: true)
                 StatCell("Saves", .count(keeper.totals.saves), emphasis: true)
@@ -198,7 +190,7 @@ struct PlayerDetailView: View {
                 StatCell("Shared Shutouts", .count(keeper.totals.sharedShutouts))
                 StatCell("Record", .count(keeper.totals.wins))
             }
-            .padding(16)
+            .padding(.vertical, 8)
         }
     }
 }
