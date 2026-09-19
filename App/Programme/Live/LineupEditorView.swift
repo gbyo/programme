@@ -112,6 +112,10 @@ struct LineupEditorView: View {
 
         if #available(iOS 27.0, *) {
             ToolbarOverflowMenu { secondaryActions }
+            ToolbarSpacer(.fixed)
+            ToolbarItem(placement: .topBarPinnedTrailing) {
+                confirmButton
+            }
         } else {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -121,15 +125,17 @@ struct LineupEditorView: View {
                 }
                 .accessibilityIdentifier("lineup.actions")
             }
-        }
 
-        ToolbarItem(placement: .confirmationAction) {
-            Button("Confirm", action: confirm)
-                .disabled(!isValid)
-                .fontWeight(.semibold)
-                .accessibilityIdentifier("lineup.confirm")
-                .programmeConfirmationTint()
+            ToolbarItem(placement: .confirmationAction) {
+                confirmButton
+            }
         }
+    }
+
+    private var confirmButton: some View {
+        Button("Confirm", action: confirm)
+            .disabled(!isValid)
+            .accessibilityIdentifier("lineup.confirm")
     }
 
     @ViewBuilder
