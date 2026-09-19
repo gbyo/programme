@@ -167,9 +167,8 @@ CI uses that path and uploads the `.xcresult` only when the UI-test job fails.
 
 ## Intent tests
 
-`App/ProgrammeIntentTests` (`ProgrammeIntentTests` target in `project.yml`,
-run as part of the `Programme` scheme's test action) covers the App Intents
-layer in two layers:
+`App/ProgrammeIntentTests` and `App/ProgrammeUITests/AppIntentsTestingTests.swift`
+cover the App Intents layer in two layers:
 
 - `EntityQueryTests` / `IntentNavigationTests` exercise the real
   `ProgrammeIntentProvider` and the real `AppModel.open(_:)` routing against
