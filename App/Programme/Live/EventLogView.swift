@@ -7,7 +7,6 @@ import TipKit
 struct EventLogView: View {
     let session: LiveMatchSession
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var filter: LogFilter = .all
     @State private var showsVoided = false
     @State private var editingEvent: MatchEvent?
@@ -26,6 +25,10 @@ struct EventLogView: View {
 
     var body: some View {
         List {
+            // The editing tip lives in the scrolling content so it goes away
+            // on its own; it never takes a persistent bar above or below.
+            TipView(timeTip)
+
             ForEach(groupedByPeriod, id: \.period) { group in
                 Section(periodTitle(group.period)) {
                     ForEach(group.events, id: \.event.id) { pair in
@@ -69,32 +72,6 @@ struct EventLogView: View {
         .listStyle(.plain)
         .navigationTitle("Event Log")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaBar(edge: .top) {
-            if horizontalSizeClass != .compact {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(LogFilter.allCases) { option in
-                            FilterChip(
-                                title: option.rawValue,
-                                badge: option == .review && session.needsReviewCount > 0
-                                    ? "\(session.needsReviewCount)" : nil,
-                                isSelected: filter == option
-                            ) {
-                                filter = option
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 2)
-                }
-                .scrollIndicators(.hidden)
-            }
-        }
-        .safeAreaBar(edge: .bottom) {
-            TipView(timeTip)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
@@ -105,15 +82,23 @@ struct EventLogView: View {
                     .labelStyle(.iconOnly)
                     .accessibilityLabel("Show deleted events")
             }
-            if horizontalSizeClass == .compact {
-                ToolbarItem(placement: .secondaryAction) {
-                    Picker("Filter", selection: $filter) {
-                        ForEach(LogFilter.allCases) { option in
-                            Text(filterTitle(option)).tag(option)
+            ToolbarItem(placement: .secondaryAction) {
+                Menu {
+                    ForEach(LogFilter.allCases) { option in
+                        Button {
+                            filter = option
+                        } label: {
+                            if filter == option {
+                                Label(filterTitle(option), systemImage: "checkmark")
+                            } else {
+                                Text(filterTitle(option))
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
+                } label: {
+                    Label(filterTitle(filter), systemImage: "line.3.horizontal.decrease.circle")
                 }
+                .accessibilityLabel("Filter events")
             }
         }
         .navigationDestination(for: MatchEvent.self) { event in
@@ -232,28 +217,5 @@ struct EventLogRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(description.accessibilityLabel)
         .accessibilityHint(isEditable ? "Double tap to edit this event." : "")
-    }
-}
-
-struct FilterChip: View {
-    let title: String
-    var badge: String?
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                if let badge {
-                    Text(badge)
-                        .font(.caption2.weight(.bold))
-                        .monospacedDigit()
-                }
-            }
-        }
-        .programmeSelectable(isSelected: isSelected, shape: .capsule)
-        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }

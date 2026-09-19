@@ -6,8 +6,21 @@ import SwiftUI
 
 /// Team management. Team is workspace context: this list selects and edits
 /// teams but is never itself a tab.
+///
+/// Content is identical in both presentations; only dismissal differs, and
+/// the presentation is stated explicitly rather than inferred. Pushed inside
+/// Settings the system back button is the way out, so no extra control is
+/// shown. Presented as its own sheet the owner supplies a native Done path.
 struct ManageTeamsView: View {
+    enum Presentation {
+        case pushed
+        case sheet
+    }
+
+    var presentation: Presentation = .pushed
+
     @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
     @State private var isAddingTeam = false
 
     var body: some View {
@@ -47,11 +60,10 @@ struct ManageTeamsView: View {
         .navigationTitle("Manage Teams")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Settings", systemImage: "gearshape") {
-                    appModel.navigation.isPresentingSettings = true
+            if presentation == .sheet {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
-                .accessibilityIdentifier("manageTeams.settings")
             }
         }
         .sheet(isPresented: $isAddingTeam) {
