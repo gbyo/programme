@@ -65,6 +65,9 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         app.buttons["Finalize Match"].tap()
 
         XCTAssertTrue(app.navigationBars["Finalize Match"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            element(app, "finalize.action").exists,
+            "Finalize should be a native toolbar confirmation action")
         app.buttons["Not Yet"].tap()
 
         // Awaiting finalization is not a live phase, so closing needs no
