@@ -102,10 +102,14 @@ public actor TeamSyncService: Sendable {
         await coordinator.setZoneDeletedHandler { [weak self] _, _ in
             Task { await self?.zoneDeleted() }
         }
+        // Engines must exist before we enqueue zone creation.
+        // ensureTeamZone writes pending database changes into an engine's
+        // state, so doing this before coordinator.start() silently drops the
+        // request while still marking the zone as ensured locally.
+        await coordinator.start()
         for team in (try? await store.teams()) ?? [] {
             await ensureZone(for: team.id)
         }
-        await coordinator.start()
     }
 
     /// Accepts an invitation, then refreshes accepted-zone routing so

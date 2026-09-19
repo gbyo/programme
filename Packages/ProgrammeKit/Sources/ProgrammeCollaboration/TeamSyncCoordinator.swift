@@ -273,8 +273,13 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
         case .stateUpdate(let update):
             applyStateUpdate(update.stateSerialization, for: scope)
         case .accountChange(let change):
+            // Never call fetchChanges/sendChanges from inside a CKSyncEngine
+            // delegate callback. The engine serializes delegate events and
+            // those APIs can synchronously require more delegate callbacks,
+            // which CloudKit treats as a client reentrancy bug. CKSyncEngine
+            // already resumes automatic sync when an account becomes
+            // available, so status/local-state handling is all we need here.
             applyAccountChange(change.changeType)
-            await fetchNow()
         case .fetchedRecordZoneChanges(let fetched):
             await applyFetched(
                 saved: fetched.modifications.map(\.record),
