@@ -24,6 +24,28 @@ import SwiftData
 ///   finalization is filled in. Phase, clock, and rosters stay under the
 ///   authority of the event stream and the local session, so a stale record
 ///   can never regress a live match.
+extension MatchStore {
+    /// Runs remote-change application with outbound staging suppressed, so
+    /// applied changes never echo back to the outbox. Every `ensure` and
+    /// `writeEffects` body runs inside this.
+    func withoutOutboundStaging<T>(_ work: () throws -> T) rethrows -> T {
+        suppressOutbound = true
+        defer { suppressOutbound = false }
+        return try work()
+    }
+
+    /// The full Team record for outbound staging, including the creation
+    /// date the list summaries omit. Nil when the team is not local (a
+    /// mutation for a missing team stages nothing).
+    public func teamRecord(for teamID: TeamID) throws -> TeamRecord? {
+        guard let model = try teamModel(teamID) else { return nil }
+        return TeamRecord(
+            teamID: model.teamID, name: model.name, shortName: model.shortName,
+            mascot: model.mascot, primaryColorHex: model.primaryColorHex,
+            secondaryColorHex: model.secondaryColorHex, createdAt: model.createdAt)
+    }
+}
+
 extension MatchStore: SyncJournal {
     public func readEvents(for matchID: MatchID) throws -> [MatchEvent] {
         try context(for: matchID).events
@@ -42,7 +64,7 @@ extension MatchStore: SyncJournal {
     }
 
     public func writeEffects(_ effects: [MatchEffect], to matchID: MatchID) throws {
-        try apply(effects, to: matchID)
+        try withoutOutboundStaging { try apply(effects, to: matchID) }
         onMatchChanged?(matchID)
     }
 
@@ -64,6 +86,8 @@ extension MatchStore: SyncJournal {
     }
 
     public func ensureTeam(_ team: TeamRecord) throws {
+        suppressOutbound = true
+        defer { suppressOutbound = false }
         if try teams().contains(where: { $0.id == team.teamID }) {
             try updateTeam(
                 team.teamID, name: team.name, shortName: team.shortName, mascot: team.mascot,
@@ -79,6 +103,8 @@ extension MatchStore: SyncJournal {
     }
 
     public func ensureSeason(_ season: SeasonRecord) throws {
+        suppressOutbound = true
+        defer { suppressOutbound = false }
         guard try teamExists(season.teamID) else { throw StoreError.teamNotFound }
         let rawID = season.seasonID.rawValue
         if let existing = try modelContext.fetch(
@@ -103,6 +129,8 @@ extension MatchStore: SyncJournal {
     }
 
     public func ensurePlayer(_ player: PlayerRecord) throws {
+        suppressOutbound = true
+        defer { suppressOutbound = false }
         guard try teamExists(player.teamID) else { throw StoreError.teamNotFound }
         if try playerExists(player.playerID, inTeam: player.teamID) {
             try updatePlayer(player.snapshot)
@@ -112,6 +140,8 @@ extension MatchStore: SyncJournal {
     }
 
     public func ensureMatch(_ match: MatchRecord) throws {
+        suppressOutbound = true
+        defer { suppressOutbound = false }
         let d = match.descriptor
         guard try teamExists(d.teamID) else { throw StoreError.teamNotFound }
         let rawID = d.id.rawValue

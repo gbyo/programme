@@ -75,6 +75,17 @@ Owns optional CloudKit replication, never truth or recovery:
 - `CKSyncEngine` coordination with a durable file-backed outbox/inbox
 - deterministic event merge policy (revision wins; same-revision conflicts
   surface for review, never wall-clock)
+- zone-wide sharing (`CKShare(recordZoneID:)`): one team = one zone = at
+  most one share, invitation-only, no nominated root record, so preparing
+  a share never resaves Programme truth
+- applier materialization: Team/Season/Player/Match upsert by stable ID in
+  dependency order (deferred when parents are missing, never dropped);
+  only event deletions materialize, as voids; statistics always re-derive
+- production wiring in `TeamSyncService` (Persistence): starts engines,
+  stages outbound mutations reported by `MatchStore`, drains the inbox
+  through the applier, and routes participant writes into the sharer's
+  zone. Remote application runs echo-suppressed, and sync is inert until
+  started — scoring never waits on it.
 
 Cloud collaboration is optional replication. Recording and recovering a live
 match never depends on CloudKit.

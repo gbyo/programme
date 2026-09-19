@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import ProgrammeCore
 
 /// The CloudKit container for team collaboration. Provisioning it is a
 /// Developer Portal + Xcode capability step (see docs/ARCHITECTURE.md):
@@ -198,6 +199,40 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
     public func ensureTeamZone(_ zone: CKRecordZone, in scope: SyncDatabase) async {
         engines[scope]?.state.add(pendingDatabaseChanges: [.saveZone(zone)])
         await sendNow()
+    }
+
+    /// Drains fetched changes through the applier and re-buffers whatever
+    /// deferred (parents not local yet). The single consumption point for
+    /// the inbox: fetched server state advances in engine serializations,
+    /// so only this method may drain.
+    public func materialize(with applier: TeamSyncApplier) async -> DrainResult {
+        let changes: [IncomingChange]
+        do {
+            changes = try await inbox.drain()
+        } catch {
+            return DrainResult(applied: [], deferred: [], failed: [])
+        }
+        let result = await applier.drain(changes)
+        if !result.deferred.isEmpty {
+            try? await inbox.append(result.deferred)
+        }
+        return result
+    }
+
+    /// Team zones visible in the shared database, mapped to their owning
+    /// team and owner name. Lets the sync service route participant writes
+    /// into the sharer's zone instead of a same-named private zone — and
+    /// self-heals across devices, since acceptance on any device shows up
+    /// here rather than in a local-only pointer.
+    public func sharedZoneOwners() async -> [TeamID: String] {
+        let zones = (try? await makeContainer().sharedCloudDatabase.allRecordZones()) ?? []
+        var owners: [TeamID: String] = [:]
+        for zone in zones {
+            if let teamID = TeamZone.teamID(forZoneName: zone.zoneID.zoneName) {
+                owners[teamID] = zone.zoneID.ownerName
+            }
+        }
+        return owners
     }
 
     // MARK: - CKSyncEngineDelegate

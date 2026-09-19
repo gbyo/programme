@@ -176,10 +176,51 @@ final class AppModel {
     /// materializes here: shared content still lands through the applier, so
     /// review-gating applies unchanged.
     func acceptShare(_ metadata: CKShare.Metadata) async {
-        if let coordinator = try? sharing() {
+        if ShareAvailability.isICloudAvailable, let service = try? syncing() {
+            try? await service.accept(metadata)
+        } else if let coordinator = try? sharing() {
             try? await coordinator.accept(metadata)
         }
         await reloadWorkspace(selecting: workspace.selectedTeamID)
+        await startSyncIfAvailable()
+    }
+
+    // MARK: - Sync engine
+
+    /// Built lazily for the same reason as the share coordinator: launch
+    /// paths that never sync (previews, intent tests, iCloud-off devices)
+    /// never construct it.
+    private var syncService: TeamSyncService?
+
+    private func syncing() throws -> TeamSyncService {
+        if let syncService { return syncService }
+        guard let store else { throw TeamShareError.noLibrary }
+        let url = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        .appending(path: "Programme/Sync")
+        let service = try TeamSyncService(store: store, directory: url) { CKContainer.default() }
+        syncService = service
+        return service
+    }
+
+    /// Starts CloudKit replication when iCloud is available. Local scoring
+    /// never waits on this: the service is inert until started, and every
+    /// sync failure leaves local truth untouched.
+    func startSyncIfAvailable() async {
+        guard ShareAvailability.isICloudAvailable else { return }
+        guard let service = try? syncing() else { return }
+        await store?.setMutationHandler { [weak self] mutation in
+            Task { await self?.stageForSync(mutation) }
+        }
+        await service.setWorkspaceChangedHandler { [weak self] in
+            Task { await self?.reloadWorkspace(selecting: self?.workspace.selectedTeamID) }
+        }
+        await service.start()
+    }
+
+    private func stageForSync(_ mutation: OutboundMutation) async {
+        await syncService?.stage(mutation)
     }
 
     /// If the on-disk store cannot be opened at all, the app still launches into
@@ -291,6 +332,7 @@ final class AppModel {
         ])
 
         await reloadWorkspace(selecting: nil)
+        await startSyncIfAvailable()
         if launchOptions.opensLiveMatch {
             let items = (try? await store.matches(limit: 60)) ?? []
             if let live = items.first(where: \.isInterrupted) {
