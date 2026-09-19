@@ -31,16 +31,21 @@
         /// An app model whose own store holds the sample team, so browsing
         /// previews read the same container their views fetch through.
         static var appModel: AppModel {
+            makeAppModel()
+        }
+
+        static func makeAppModel(includeLiveMatch: Bool = false) -> AppModel {
             let model = AppModel()
             if let container = model.container {
-                try? ProgrammeStore.seedSampleData(into: container.mainContext)
+                try? ProgrammeStore.seedSampleData(
+                    into: container.mainContext, includeLiveMatch: includeLiveMatch)
             }
             return model
         }
 
         /// The sample team as the selected workspace, so section roots render.
-        static func seededAppModel() -> AppModel {
-            let model = appModel
+        static func seededAppModel(includeLiveMatch: Bool = false) -> AppModel {
+            let model = makeAppModel(includeLiveMatch: includeLiveMatch)
             Task { @MainActor in
                 guard let store = model.store else { return }
                 model.workspace.teams = (try? await store.teams()) ?? []
@@ -213,6 +218,11 @@
     #Preview("Home") {
         NavigationStack { HomeView(teamID: ProgrammeSample.teamID) }
             .environment(PreviewSupport.seededAppModel())
+    }
+
+    #Preview("Home · current match") {
+        NavigationStack { HomeView(teamID: ProgrammeSample.teamID) }
+            .environment(PreviewSupport.seededAppModel(includeLiveMatch: true))
     }
 
     #Preview("Matches") {

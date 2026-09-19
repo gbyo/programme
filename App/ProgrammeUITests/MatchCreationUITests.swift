@@ -25,11 +25,12 @@ final class MatchCreationUITests: ProgrammeUITestCase {
         app.buttons["Create"].tap()
 
         // Creating a team selects it: Home now shows the new, empty workspace.
-        let header = element(app, "home.header")
-        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        // The previous team owns matches, so the native empty state proves the
+        // new team was selected; team identity itself lives in the nav bar.
+        XCTAssertTrue(element(app, "home.content").waitForExistence(timeout: 10))
         XCTAssertTrue(
-            header.label.contains("JV Test Team"),
-            "Creating a team did not select it: \(header.label)")
+            app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
+            "Creating a team did not select it")
         XCTAssertFalse(
             element(app, "match.Emerald").exists,
             "The previous team's matches leaked into the new workspace")
