@@ -145,6 +145,7 @@ struct NewMatchView: View {
         }
         isSaving = true
         defer { isSaving = false }
+        ProgrammeStateReporter.reportWorkflow(.preparingMatch)
         do {
             let roster = try await store.roster(teamID: teamID)
             guard !roster.players.isEmpty else {
@@ -174,8 +175,10 @@ struct NewMatchView: View {
             if openingScorer {
                 // The scorer opens on the lineup editor when a match has no
                 // starting lineup, so this lands exactly where the work is.
+                // openLiveSession reports liveScoring itself.
                 await appModel.openLiveSession(matchID: matchID)
             } else {
+                ProgrammeStateReporter.reportWorkflow(.browsing)
                 await appModel.open(.match(matchID))
             }
         } catch {

@@ -124,12 +124,19 @@ struct ExportSheet: View {
     private func generate() {
         isWorking = true
         errorMessage = nil
+        ProgrammeStateReporter.reportOperation(.export)
+        defer {
+            ProgrammeStateReporter.reportOperation(nil)
+            isWorking = false
+        }
         var results: [GeneratedExport] = []
         var failures: [String] = []
 
         for exporter in exporters where selection.contains(exporter.id) {
             do {
-                let data = try exporter.export(payload)
+                let data = try ProgrammeSignposts.measure("generateExport") {
+                    try exporter.export(payload)
+                }
                 let directory = FileManager.default.temporaryDirectory
                     .appending(path: "ProgrammeExports", directoryHint: .isDirectory)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -145,7 +152,6 @@ struct ExportSheet: View {
         }
 
         generated = results
-        isWorking = false
         if !failures.isEmpty {
             // Never imply data loss: the match is untouched by a failed export.
             errorMessage =
@@ -313,7 +319,9 @@ struct DataTransferView: View {
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
-            let archive = try ProgrammeArchiveCoder.decode(data)
+            let archive = try ProgrammeSignposts.measure("archiveDecode") {
+                try ProgrammeArchiveCoder.decode(data)
+            }
             await importArchive(archive)
         } catch let error as ArchiveError {
             importResult = ImportOutcome(
@@ -333,10 +341,16 @@ struct DataTransferView: View {
                 message: "Programme needs a team to import matches into.", isError: true)
             return
         }
+        ProgrammeStateReporter.reportOperation(.archiveImport)
+        defer { ProgrammeStateReporter.reportOperation(nil) }
         let seasonID = try? await store.currentSeasonID(teamID: teamID)
         var imported = 0
         for match in archive.matches {
-            if (try? await store.importMatch(match.context, teamID: teamID, seasonID: seasonID)) != nil {
+            let context = match.context
+            let added = await ProgrammeSignposts.measure("archiveImport") {
+                try? await store.importMatch(context, teamID: teamID, seasonID: seasonID)
+            }
+            if added != nil {
                 imported += 1
             }
         }

@@ -165,6 +165,31 @@ PROGRAMME_XCRESULT_PATH=/tmp/ProgrammeUITests.xcresult make test-ui
 
 CI uses that path and uploads the `.xcresult` only when the UI-test job fails.
 
+## Intent tests
+
+`App/ProgrammeIntentTests` (`ProgrammeIntentTests` target in `project.yml`,
+run as part of the `Programme` scheme's test action) covers the App Intents
+layer in two layers:
+
+- `EntityQueryTests` / `IntentNavigationTests` exercise the real
+  `ProgrammeIntentProvider` and the real `AppModel.open(_:)` routing against
+  an ephemeral two-team store. They run on every deployment target, because
+  `@Dependency`-bound query/intent types trap when called directly
+  in-process outside the intent perform flow.
+- `AppIntentsTestingTests` runs the same behaviors through Apple's
+  `AppIntentsTesting` framework (iOS 27+) where the dependency context
+  exists, including Spotlight/Siri query paths.
+
+Known environment limitation: in the Xcode 27.0 simulator runtime Apple's
+own `AppIntentsLiveEntityService` XPC service traps
+(`__XPC_API_MISUSE__` in `XPCPeerRequirement.hasEntitlement`, visible in
+`~/Library/Logs/DiagnosticReports`) as soon as a test client connects, with
+ad-hoc and real Apple Development signing alike. Framework calls that fail
+with that transport error skip loudly instead of failing; the
+provider-level tests above still prove the behavior. Wherever the platform
+service works (newer runtime, real device), the framework tests execute for
+real — no test changes needed.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes to `main` and pull requests.
