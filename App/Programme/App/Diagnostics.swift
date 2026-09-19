@@ -15,7 +15,7 @@ import os
 /// runs its work inline and returns (or rethrows) exactly what the work
 /// produced, so removing diagnostics could never change match behavior.
 enum ProgrammeSignposts {
-    private static let signposter = OSSignposter(subsystem: "org.programme", category: "scoring")
+    private static let signposter = OSSignposter(subsystem: "com.gbyo.programme", category: "scoring")
 
     /// Runs `work` inside a signpost interval named `name`.
     ///
@@ -125,7 +125,7 @@ private final class LaunchGuard: @unchecked Sendable {
 }
 
 enum ProgrammeMetrics {
-    private static let log = Logger(subsystem: "org.programme", category: "diagnostics")
+    private static let log = Logger(subsystem: "com.gbyo.programme", category: "diagnostics")
     private static let launchGuard = LaunchGuard()
 
     /// Called once from `ProgrammeApp.init`, next to the other launch-time
