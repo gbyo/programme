@@ -193,12 +193,14 @@ final class AppIntentsTestingTests: XCTestCase {
         _ = try await viaFramework {
             try await definitions.intents["ShowSeasonStatsIntent"].makeIntent().run()
         }
-        XCTAssertEqual(try await readState(definitions).section, "stats")
+        let seasonState = try await readState(definitions)
+        XCTAssertEqual(seasonState.section, "stats")
 
         _ = try await viaFramework {
             try await definitions.intents["NewMatchIntent"].makeIntent().run()
         }
-        XCTAssertTrue(try await readState(definitions).isPresentingNewMatch)
+        let newMatchState = try await readState(definitions)
+        XCTAssertTrue(newMatchState.isPresentingNewMatch)
     }
 
     func testFrameworkCurrentScoreRuns() async throws {
