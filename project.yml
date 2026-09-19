@@ -149,7 +149,11 @@ schemes:
     test:
       config: Debug
       targets:
-        - ProgrammeUITests
+        - name: ProgrammeUITests
+          # XCTest distributes parallel UI tests at the class level, so the
+          # iPad coverage lives in several small XCTestCase classes that can
+          # run concurrently across simulator clones.
+          parallelizable: true
         - ProgrammeIntentTests
   ProgrammeWatch:
     build:

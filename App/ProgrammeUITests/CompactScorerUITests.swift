@@ -5,16 +5,13 @@ import XCTest
 /// sheet over the top of it.
 ///
 /// These skip on iPad, where the composer lives in a column instead and is
-/// covered by `ProgrammeUITests`. Run them against an iPhone destination:
+/// covered by the iPad suites in this target. Run them against an iPhone
+/// destination:
 ///
 ///     xcodebuild test -scheme Programme \
 ///         -destination 'platform=iOS Simulator,name=Programme iPhone 17' \
 ///         -only-testing:ProgrammeUITests/CompactScorerUITests
-final class CompactScorerUITests: XCTestCase {
-
-    override func setUp() {
-        continueAfterFailure = false
-    }
+final class CompactScorerUITests: ProgrammeUITestCase {
 
     private func launchCompactScorer(extraArguments: [String] = []) throws -> XCUIApplication {
         try XCTSkipUnless(
@@ -24,14 +21,8 @@ final class CompactScorerUITests: XCTestCase {
         app.launchArguments = ["-programme-uitest", "-programme-open-live"] + extraArguments
         app.launch()
         XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(
-            element(app, "live.score").waitForExistence(timeout: 20),
-            "The scoring workspace did not appear")
+        waitForScorer(app)
         return app
-    }
-
-    private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
     /// On a phone the bottom bar cannot show every secondary control, so the
@@ -41,21 +32,7 @@ final class CompactScorerUITests: XCTestCase {
     private func tapPossiblyOverflowed(
         _ app: XCUIApplication, identifier: String, label: String
     ) {
-        let direct = element(app, identifier)
-        if direct.exists && direct.isHittable {
-            direct.tap()
-            return
-        }
-        let overflow = app.buttons.matching(
-            NSPredicate(format: "identifier CONTAINS 'Overflow'")
-        ).firstMatch
-        XCTAssertTrue(overflow.waitForExistence(timeout: 5), "No overflow menu to look in")
-        overflow.tap()
-        // The system rebuilds overflowed items as menu entries, which keep their
-        // label but not the identifier the bar button carried.
-        let inMenu = app.buttons[label].firstMatch
-        XCTAssertTrue(inMenu.waitForExistence(timeout: 5), "\(label) is not reachable at all")
-        inMenu.tap()
+        tapToolbarButton(app, identifier, label: label)
     }
 
     /// The scoreboard is always visible, so it is the reliable evidence in a
@@ -542,12 +519,5 @@ final class CompactScorerUITests: XCTestCase {
         attachScreenshot(named: "Compact stats inspector")
         close.tap()
         XCTAssertTrue(element(app, "palette.goal").waitForExistence(timeout: 5))
-    }
-
-    private func attachScreenshot(named name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }
