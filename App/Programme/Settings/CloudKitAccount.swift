@@ -1,6 +1,7 @@
 import CloudKit
 import Foundation
 import Observation
+import ProgrammeCollaboration
 
 /// Programme's CloudKit availability, derived from Apple's account state —
 /// never from `ubiquityIdentityToken`, which answers a different question
@@ -48,7 +49,11 @@ final class CloudKitAccountMonitor {
     private var started = false
     private var observer: (any NSObjectProtocol)?
 
-    init(makeContainer: @escaping @Sendable () -> CKContainer = { CKContainer.default() }) {
+    init(
+        makeContainer: @escaping @Sendable () -> CKContainer = {
+            CKContainer(identifier: CollaborationEnvironment.containerIdentifier)
+        }
+    ) {
         self.makeContainer = makeContainer
     }
 

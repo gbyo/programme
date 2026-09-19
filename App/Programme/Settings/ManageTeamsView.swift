@@ -369,7 +369,7 @@ struct TeamDetailView: View {
             errorMessage = nil
         } catch {
             errorMessage =
-                (error as? LocalizedError)?.errorDescription
+                (error as? any LocalizedError)?.errorDescription
                 ?? "Programme couldn't prepare that share. Nothing was changed. Try again."
         }
     }

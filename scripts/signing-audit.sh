@@ -32,6 +32,13 @@ require_literal project.yml "PRODUCT_BUNDLE_IDENTIFIER: $THUMBNAIL_ID"
 require_literal project.yml "PRODUCT_BUNDLE_IDENTIFIER: $UI_TEST_ID"
 require_literal project.yml "PRODUCT_BUNDLE_IDENTIFIER: $INTENT_TEST_ID"
 require_literal project.yml "$ICLOUD_ID"
+require_literal Packages/ProgrammeKit/Sources/ProgrammeCollaboration/TeamSyncCoordinator.swift \
+    "public static let containerIdentifier = \"$ICLOUD_ID\""
+
+if grep -R -nF 'CKContainer.default()' App/Programme --include='*.swift' >/tmp/programme-default-cloudkit.txt; then
+    cat /tmp/programme-default-cloudkit.txt >&2
+    fail "app CloudKit code must use the configured container identifier, not CKContainer.default()"
+fi
 
 companion="$(/usr/libexec/PlistBuddy -c 'Print :WKCompanionAppBundleIdentifier' App/ProgrammeWatch/Info.plist)"
 [[ "$companion" == "$APP_ID" ]] || fail "Watch companion is $companion, expected $APP_ID"

@@ -71,7 +71,7 @@ final class LocationSearchModel {
             onUpdate(completer.results)
         }
 
-        func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: any Error) {
             onUpdate([])
         }
     }
