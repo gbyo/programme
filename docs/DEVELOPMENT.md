@@ -86,7 +86,7 @@ use an ad-hoc signature automatically, and CI passes `CODE_SIGNING_ALLOWED=NO`, 
 only verification remains independent of signing assets. Contributors who need to sign with
 another team can override `DEVELOPMENT_TEAM` locally for their build.
 
-Programme's signing namespace is `com.gbyo.programme`; CloudKit uses
+Programme's registered App ID is `com.gbyo.Programme` (keep this exact spelling in generated signing settings); CloudKit uses
 `iCloud.com.gbyo.programme`, which must be created and assigned to the app identifier in
 the Apple Developer portal before device sync can work.
 
