@@ -95,6 +95,8 @@ jobs:
           mint bootstrap --mintfile Mintfile
       - name: Generate project
         run: bash scripts/xcodegen.sh generate --spec project.yml
+      - name: Audit signing configuration
+        run: bash scripts/signing-audit.sh
       - name: Build
         run: |
           set -o pipefail
