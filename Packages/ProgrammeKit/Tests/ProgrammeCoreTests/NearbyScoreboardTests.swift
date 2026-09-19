@@ -59,6 +59,32 @@ struct NearbyScoreboardTests {
         #expect(final.isStale(at: Date(timeIntervalSinceReferenceDate: 99999)) == false)
     }
 
+    @Test("Link freshness is receiver-local: heartbeat receipts keep the display fresh")
+    func receiverLocalFreshness() {
+        let live = snapshot()
+        let receivedAt = Date(timeIntervalSinceReferenceDate: 2000)
+        // A heartbeat 10s later keeps the link fresh even though the wire
+        // sentAt never moved.
+        #expect(live.isLinkStale(lastReceivedAt: receivedAt, now: receivedAt.addingTimeInterval(10)) == false)
+        // A real gap goes stale.
+        #expect(live.isLinkStale(lastReceivedAt: receivedAt, now: receivedAt.addingTimeInterval(16)) == true)
+        // No frame yet means waiting, not reconnecting.
+        #expect(live.isLinkStale(lastReceivedAt: nil, now: receivedAt.addingTimeInterval(999)) == false)
+        // Final scores never go stale, however old the last receipt.
+        var final = snapshot()
+        final.finalized = true
+        #expect(final.isLinkStale(lastReceivedAt: receivedAt, now: receivedAt.addingTimeInterval(99999)) == false)
+    }
+
+    @Test("Oversized snapshots throw instead of crashing the scorer")
+    func oversizedFailsHarmlessly() {
+        var huge = snapshot()
+        huge.lastEventSummary = String(repeating: "Goal! ", count: 20_000)
+        #expect(throws: ScoreboardWireError.self) { try ScoreboardWire.encode(huge) }
+        // And a normal snapshot still encodes fine afterwards.
+        #expect(throws: Never.self) { try ScoreboardWire.encode(snapshot()) }
+    }
+
     @Test("There is no command vocabulary on the display path")
     func readOnlyByConstruction() throws {
         // The wire decodes exactly one type. Anything else — including a

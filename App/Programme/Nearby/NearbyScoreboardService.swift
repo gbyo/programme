@@ -14,15 +14,27 @@ import ProgrammeCore
 /// off the scoring path.
 ///
 /// The clock is an anchor, not a stream. Displays render time locally
-/// from the anchor; a slow heartbeat only keeps `sentAt` fresh so live
-/// matches do not look stale. Scorer backgrounding suspends delivery and
-/// displays go stale rather than wrong.
+/// from the anchor; a slow heartbeat only keeps the receiver-local receipt
+/// time fresh so live matches do not look stale (sender clocks may differ,
+/// so the wire `sentAt` is never a freshness source). Scorer backgrounding
+/// suspends delivery and displays go stale rather than wrong.
 @MainActor
 @Observable
 final class NearbyScoreboardService {
-    static let serviceType = "_programme-sb._tcp"
+    nonisolated static let serviceType = "_programme-sb._tcp"
     /// Heartbeat keeps live displays fresh without per-second streaming.
     private static let heartbeatInterval: Duration = .seconds(10)
+
+    /// The one native service description for both sides: the scorer's
+    /// `DevicePairingView` and the serving `NWListener` are built from this
+    /// same provider, so discoverability and transport can never disagree
+    /// about what is advertised. The transport stays plain Bonjour TCP:
+    /// the SDK offers no `BrowserProvider` for application services, so
+    /// `DevicePicker` can only discover Bonjour endpoints — and `.tcp` is
+    /// the correct parameters object for a Bonjour-discovered TCP service.
+    nonisolated static var pairingProvider: BonjourListenerProvider {
+        BonjourListenerProvider.bonjour(type: Self.serviceType)
+    }
 
     enum Advertising: Equatable {
         case off
@@ -40,8 +52,12 @@ final class NearbyScoreboardService {
     private(set) var advertising: Advertising = .off
     private(set) var displayLink: DisplayLink = .idle
     /// Latest received snapshot on a display. Kept across disconnects so
-    /// the display goes stale rather than blank.
+    /// the display goes stale rather than blank; a new connection replaces
+    /// it.
     private(set) var received: ScoreboardSnapshot?
+    /// Receiver-local receipt time of the last valid frame. Link freshness
+    /// is always `now - lastFrameReceivedAt`, never the wire `sentAt`.
+    private(set) var lastFrameReceivedAt: Date?
 
     private var listener: NWListener?
     private var displays: [NWConnection] = []
@@ -55,9 +71,7 @@ final class NearbyScoreboardService {
     /// restarts cleanly.
     func startAdvertising() {
         stopAdvertising()
-        guard
-            let listener = try? NWListener(
-                service: NWListener.Service(type: Self.serviceType), using: .tcp)
+        guard let listener = try? NWListener(service: Self.pairingProvider.service, using: .tcp)
         else { return }
         listener.newConnectionHandler = { [weak self] connection in
             MainActor.assumeIsolated { self?.serve(connection) }
@@ -100,6 +114,8 @@ final class NearbyScoreboardService {
     /// Anything received decodes through the snapshot wire or is dropped.
     func connect(to endpoint: Network.Bonjour.Endpoint) {
         disconnectDisplay()
+        received = nil
+        lastFrameReceivedAt = nil
         let connection = NWConnection(to: endpoint.nwEndpoint, using: .tcp)
         displayConnection = connection
         displayLink = .connecting
@@ -114,7 +130,9 @@ final class NearbyScoreboardService {
         displayConnection?.cancel()
         displayConnection = nil
         displayLink = .idle
-        received = nil
+        // `received` and its receipt time survive: the display shows the
+        // last snapshot with a stale banner instead of going blank. A new
+        // connection replaces both.
     }
 
     // MARK: - Private
@@ -176,6 +194,7 @@ final class NearbyScoreboardService {
                 if let data, !data.isEmpty {
                     for snapshot in decoder.append(data) {
                         self?.received = snapshot
+                        self?.lastFrameReceivedAt = Date()
                         self?.displayLink = .live
                     }
                 }

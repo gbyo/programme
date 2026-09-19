@@ -13,15 +13,27 @@ struct ScoreboardWindow: View {
             if let session = appModel.liveSession {
                 content(session: session)
             } else if let received = appModel.nearby.received {
-                NearbyDisplayView(snapshot: received)
-                    .overlay(alignment: .topTrailing) {
+                NearbyDisplayView(
+                    snapshot: received,
+                    lastFrameReceivedAt: appModel.nearby.lastFrameReceivedAt
+                )
+                .overlay(alignment: .topTrailing) {
+                    if appModel.nearby.displayLink == .live {
                         Button("Disconnect", systemImage: "wifi.slash") {
                             appModel.nearby.disconnectDisplay()
                         }
                         .labelStyle(.iconOnly)
                         .accessibilityIdentifier("scoreboard.disconnectNearby")
                         .padding()
+                    } else {
+                        Button("Reconnect…", systemImage: "wifi") {
+                            isConnectingNearby = true
+                        }
+                        .labelStyle(.iconOnly)
+                        .accessibilityIdentifier("scoreboard.reconnectNearby")
+                        .padding()
                     }
+                }
             } else {
                 ContentUnavailableView(
                     "No Match Being Scored",
@@ -40,7 +52,9 @@ struct ScoreboardWindow: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
-        .sheet(isPresented: $isConnectingNearby) {
+        // Apple's DevicePicker documentation presents the picker as a
+        // full-screen modal, not a sheet.
+        .fullScreenCover(isPresented: $isConnectingNearby) {
             NearbyConnectSheet()
                 .environment(appModel.nearby)
         }
