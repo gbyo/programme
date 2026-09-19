@@ -1,5 +1,7 @@
+import CloudKit
 import Foundation
 import Observation
+import ProgrammeCollaboration
 import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
@@ -119,6 +121,54 @@ final class AppModel {
     /// Device-local kickoff reminders. Permission is requested only from the
     /// explicit Remind Me action, never at launch.
     let reminderCenter = MatchReminderCenter()
+
+    // MARK: - Team sharing
+
+    /// Built lazily so the app never constructs a CloudKit container on
+    /// launch paths (previews, intent tests, iCloud-off devices) that never
+    /// share.
+    private var shareCoordinator: TeamShareCoordinator?
+
+    private func sharing() throws -> TeamShareCoordinator {
+        if let shareCoordinator { return shareCoordinator }
+        let url = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        )
+        .appending(path: "Programme/Sharing/shared-zones.json")
+        let coordinator = TeamShareCoordinator(
+            makeContainer: { CKContainer.default() }, sharedZones: try SharedZoneStore(url: url))
+        shareCoordinator = coordinator
+        return coordinator
+    }
+
+    /// Resolves the SwiftUI share item for a team. Pre-resolves the live
+    /// zone-wide share when one exists so the system presents it directly
+    /// (`.existing`); otherwise the item's prepare handler creates and saves
+    /// it on demand. Throws a human-readable error when iCloud is
+    /// unavailable or the library is not ready.
+    func teamShareItem(teamID: TeamID) async throws -> TeamShareItem {
+        guard ShareAvailability.isICloudAvailable else { throw TeamShareError.iCloudUnavailable }
+        guard let store else { throw TeamShareError.noLibrary }
+        let details = try await store.teamDetails(teamID: teamID)
+        let coordinator = try sharing()
+        let prepared = await coordinator.existingShare(teamID: teamID)
+        return TeamShareItem(
+            teamID: teamID, teamName: details.name, prepared: prepared,
+            coordinator: coordinator
+        ) {
+            CKContainer.default()
+        }
+    }
+
+    /// Accepts an invitation, then reloads the workspace. Nothing
+    /// materializes here: shared content still lands through the applier, so
+    /// review-gating applies unchanged.
+    func acceptShare(_ metadata: CKShare.Metadata) async {
+        if let coordinator = try? sharing() {
+            try? await coordinator.accept(metadata)
+        }
+        await reloadWorkspace(selecting: workspace.selectedTeamID)
+    }
 
     /// If the on-disk store cannot be opened at all, the app still launches into
     /// an in-memory one so it can explain what happened instead of crashing.

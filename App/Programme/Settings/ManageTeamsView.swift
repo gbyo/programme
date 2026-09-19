@@ -79,6 +79,7 @@ struct TeamDetailView: View {
     @State private var color = Color.accentColor
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var shareItem: TeamShareItem?
     @State private var isAddingSeason = false
     @State private var newSeasonName = ""
     @State private var newSeasonMakeCurrent = true
@@ -140,6 +141,33 @@ struct TeamDetailView: View {
                 )
             }
 
+            Section {
+                if let shareItem {
+                    ShareLink(
+                        item: shareItem,
+                        preview: SharePreview(
+                            Text("Share \(shareItem.teamName)"),
+                            image: Image(systemName: "person.2"))
+                    ) {
+                        Label("Share \(shareItem.teamName)…", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("teamDetail.share")
+                } else {
+                    HStack {
+                        Text("Preparing Share…")
+                        Spacer()
+                        ProgressView()
+                    }
+                    .accessibilityIdentifier("teamDetail.share.loading")
+                }
+            } header: {
+                Text("Sharing")
+            } footer: {
+                Text(
+                    "Shares the whole team workspace by invitation only — there is no public link. Shared changes still need review when they contradict local scoring, and statistics always re-derive on this device."
+                )
+            }
+
             if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -181,7 +209,25 @@ struct TeamDetailView: View {
                 }
             }
         }
-        .task(id: teamID) { await load() }
+        .task(id: teamID) {
+            await load()
+            await loadShareItem()
+        }
+    }
+
+    /// Resolves the share item without creating anything: an already-shared
+    /// team presents its live share, otherwise the item prepares the share
+    /// on first use. Failures (e.g. iCloud signed out) surface here, never
+    /// as a dead Share button.
+    private func loadShareItem() async {
+        do {
+            shareItem = try await appModel.teamShareItem(teamID: teamID)
+            errorMessage = nil
+        } catch {
+            errorMessage =
+                (error as? LocalizedError)?.errorDescription
+                ?? "Programme couldn't prepare that share. Nothing was changed. Try again."
+        }
     }
 
     private func load() async {

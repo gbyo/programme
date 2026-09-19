@@ -29,7 +29,7 @@ targets:
       - path: App/Programme
     dependencies:
       - package: ProgrammeKit
-        products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI]
+        products: [ProgrammeCore, ProgrammePersistence, ProgrammeExport, ProgrammeUI, ProgrammeCollaboration]
       - target: ProgrammeWidgets
     # CloudKit container for team collaboration. Provisioning the
     # iCloud.org.programme.Programme container in the Developer Portal and
