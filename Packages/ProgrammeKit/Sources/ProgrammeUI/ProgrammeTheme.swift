@@ -6,8 +6,9 @@ import SwiftUI
 /// The rules here are deliberately restrictive. Semantic colour stays semantic:
 /// red means destructive or a sending-off, amber means caution, green means
 /// confirmed. Team identity is an accent — a bar, a dot, a label tint — and never
-/// a background wash, because a scorer reading a score at arm's length needs
-/// contrast, not decoration.
+/// a background wash in the working interface, because a scorer reading a score
+/// at arm's length needs contrast, not decoration. The one-time first-run welcome
+/// may use the brand colour as a full-screen arrival surface.
 public enum Programme {
 
     public enum Metrics {
@@ -24,11 +25,11 @@ public enum Programme {
     public enum Palette {
         /// Programme's brand lime, taken from the app icon.
         ///
-        /// It means one thing: *this is the primary Programme action*. It is a
-        /// fill colour and never a text colour — at roughly 1.2:1 against white
-        /// it cannot carry a label, a link, a focus ring or a tinted selection,
-        /// which is why the app's accent stays a legible colour and the lime is
-        /// reserved for prominent filled controls.
+        /// It is Programme's branded fill: primarily for prominent actions, plus
+        /// the one-time first-run welcome surface. It is never a text colour — at
+        /// roughly 1.2:1 against white it cannot carry a label, a link, a focus
+        /// ring or a tinted selection, which is why the app's accent stays a
+        /// legible colour and content shown on the lime uses `onBrand`.
         public static let brand = Color(
             .displayP3, red: 0.759_19, green: 0.967_83, blue: 0.181_74, opacity: 1)
 
