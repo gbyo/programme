@@ -45,7 +45,7 @@ struct RootView: View {
             SettingsView()
         }
         .sheet(isPresented: $navigation.isPresentingManageTeams) {
-            NavigationStack { ManageTeamsView() }
+            NavigationStack { ManageTeamsView(presentation: .sheet) }
         }
         .sheet(isPresented: $navigation.isPresentingNewTeam) {
             NavigationStack { TeamSetupView() }
