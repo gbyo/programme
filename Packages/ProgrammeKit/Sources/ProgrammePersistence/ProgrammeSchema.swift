@@ -6,19 +6,36 @@ public enum ProgrammeSchemaV1: VersionedSchema {
     public static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
 
     public static var models: [any PersistentModel.Type] {
+        [
+            SchemaV1Models.TeamModel.self, SchemaV1Models.SeasonModel.self,
+            SchemaV1Models.PlayerModel.self, SchemaV1Models.MatchModel.self,
+            SchemaV1Models.MatchEventModel.self,
+        ]
+    }
+}
+
+/// V2 adds the optional `locationData` column on matches. Every match created
+/// before locations existed migrates with a nil location, which the domain
+/// reads as "no location chosen" — scoring never requires one.
+public enum ProgrammeSchemaV2: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
+
+    public static var models: [any PersistentModel.Type] {
         [TeamModel.self, SeasonModel.self, PlayerModel.self, MatchModel.self, MatchEventModel.self]
     }
 }
 
-/// Programme ships with a migration plan from its first release so that adding a
-/// stage later is a one-line change rather than a store rebuild.
 public enum ProgrammeMigrationPlan: SchemaMigrationPlan {
-    public static var schemas: [any VersionedSchema.Type] { [ProgrammeSchemaV1.self] }
-    public static var stages: [MigrationStage] { [] }
+    public static var schemas: [any VersionedSchema.Type] {
+        [ProgrammeSchemaV1.self, ProgrammeSchemaV2.self]
+    }
+    public static var stages: [MigrationStage] {
+        [.lightweight(fromVersion: ProgrammeSchemaV1.self, toVersion: ProgrammeSchemaV2.self)]
+    }
 }
 
 public enum ProgrammeStore {
-    public static var schema: Schema { Schema(versionedSchema: ProgrammeSchemaV1.self) }
+    public static var schema: Schema { Schema(versionedSchema: ProgrammeSchemaV2.self) }
 
     /// The on-disk container. Local-first: no account, no network, no CloudKit
     /// requirement. Scoring a match never touches any of those.

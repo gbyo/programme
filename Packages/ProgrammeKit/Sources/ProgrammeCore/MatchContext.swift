@@ -1,6 +1,28 @@
 import Foundation
 
 /// The immutable identity and configuration of a match, as a value type.
+/// Where a match is played. Deliberately separate from `Venue`: home/away/
+/// neutral is a match relationship, not a postal or geographic place.
+///
+/// Optional everywhere: a scorer can always create and score a match offline
+/// without choosing a location.
+public struct MatchLocation: Codable, Hashable, Sendable {
+    public var name: String
+    public var address: String?
+    public var latitude: Double?
+    public var longitude: Double?
+
+    public init(name: String, address: String? = nil, latitude: Double? = nil, longitude: Double? = nil) {
+        self.name = name
+        self.address = address
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+
+    /// True when the location can be shown on a map or opened for directions.
+    public var hasCoordinates: Bool { latitude != nil && longitude != nil }
+}
+
 public struct MatchDescriptor: Identifiable, Codable, Hashable, Sendable {
     public var id: MatchID
     public var teamID: TeamID
@@ -11,6 +33,7 @@ public struct MatchDescriptor: Identifiable, Codable, Hashable, Sendable {
     public var opponentShortName: String
     public var kickoff: Date
     public var venue: Venue
+    public var location: MatchLocation?
     public var rules: MatchRules
     public var statProfile: StatProfile
     public var tracking: OpponentTrackingMode
@@ -26,6 +49,7 @@ public struct MatchDescriptor: Identifiable, Codable, Hashable, Sendable {
         opponentShortName: String? = nil,
         kickoff: Date,
         venue: Venue = .home,
+        location: MatchLocation? = nil,
         rules: MatchRules = .highSchool,
         statProfile: StatProfile = .maxPreps,
         tracking: OpponentTrackingMode = .ourTeam,
@@ -40,6 +64,7 @@ public struct MatchDescriptor: Identifiable, Codable, Hashable, Sendable {
         self.opponentShortName = opponentShortName ?? opponentName
         self.kickoff = kickoff
         self.venue = venue
+        self.location = location
         self.rules = rules
         self.statProfile = statProfile
         self.tracking = tracking
