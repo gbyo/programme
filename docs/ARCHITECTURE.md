@@ -100,6 +100,24 @@ subscription code: `CKSyncEngine` discovers or creates the database
 subscription itself; the engine also syncs on launch, foreground, and
 after staging.
 
+### Nearby read-only scoreboard
+
+Separate from CloudKit collaboration (which shares persistent Team data,
+this answers which nearby device displays this live match right now):
+
+- `ScoreboardSnapshot` in ProgrammeCore: presentation data only
+  (short names, score, clock anchor, phase, last-event summary). No
+  command vocabulary exists on this path, so displays are read-only by
+  construction.
+- Transport is `Network` (TCP over Bonjour `_programme-sb._tcp`);
+  pairing UI is `DeviceDiscoveryUI` (`DevicePicker` on the display,
+  scorer advertising with a waiting/serving indicator). No Multipeer
+  Connectivity, no broad local-network access beyond Bonjour.
+- The clock travels as an anchor and renders locally on the display; a
+  slow heartbeat only keeps `sentAt` fresh. Disconnects and scorer
+  backgrounding surface as staleness on the display and never affect
+  scoring.
+
 ## App shell
 
 Programme is iPad-first, with one adaptive `TabView` (`.sidebarAdaptable`, modern
