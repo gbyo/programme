@@ -130,7 +130,8 @@ struct SettingsView: View {
 
     private func loadTeamDefaults() {
         guard let selectedTeamID else { return }
-        let saved = TeamMatchDefaults.load(teamID: selectedTeamID)
+        let saved = TeamMatchDefaults.load(
+            teamID: selectedTeamID, managed: appModel.managed.configuration)
         defaultProfileID = saved.profileID
         defaultRulesName = saved.rulesName
         defaultTrackingID = saved.tracking.rawValue

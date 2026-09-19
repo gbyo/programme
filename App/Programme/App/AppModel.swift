@@ -19,19 +19,21 @@ enum TeamMatchDefaults {
         "programme.team.\(teamID.rawValue.uuidString).\(field)"
     }
 
-    static func load(teamID: TeamID) -> (
-        profileID: String, rulesName: String, tracking: OpponentTrackingMode
-    ) {
+    static func load(
+        teamID: TeamID, managed: ManagedProgrammeConfiguration = .unmanaged
+    ) -> (profileID: String, rulesName: String, tracking: OpponentTrackingMode) {
         let defaults = UserDefaults.standard
         let profile =
             defaults.string(forKey: key("statProfile", teamID: teamID))
             ?? StatProfile.maxPreps.id
         let rules =
             defaults.string(forKey: key("rulesPreset", teamID: teamID))
+            ?? managed.defaultRulesName
             ?? MatchRules.highSchool.name
         let trackingRaw = defaults.string(forKey: key("opponentTracking", teamID: teamID))
         let tracking =
             trackingRaw.flatMap(OpponentTrackingMode.init(rawValue:))
+            ?? managed.defaultTrackingMode
             ?? .ourTeam
         return (profile, rules, tracking)
     }
@@ -124,6 +126,9 @@ final class AppModel {
     /// Read-only Watch companion bridge. Activated at bootstrap; pushes
     /// glanceable snapshots where the widget snapshot already refreshes.
     let watchBridge = WatchBridge()
+    /// Optional MDM-delivered suggestions and policy. Unmanaged devices
+    /// rest at `.unmanaged`: no suggestions, everything allowed.
+    let managed = ManagedConfigurationService()
     /// Nearby read-only scoreboard. Lives for the app lifetime so the
     /// scoreboard window can display while no local session exists.
     let nearby = NearbyScoreboardService()
@@ -395,6 +400,7 @@ final class AppModel {
         guard !isReady else { return }
         defer { isReady = true }
         guard let container, let store else { return }
+        managed.start()
 
         // Keep pending reminder notifications in sync with kickoff changes
         // and deletions, whoever initiates them.
@@ -442,7 +448,12 @@ final class AppModel {
         if let preferred, teams.contains(where: { $0.id == preferred }) {
             restored = preferred
         } else {
-            restored = TeamWorkspace.restoredSelection(from: teams) ?? teams.first?.id
+            // An MDM suggestion only fills in for a device with no stored
+            // selection; it never overrides an explicit choice.
+            let ids = teams.map(\.id)
+            restored =
+                TeamWorkspace.restoredSelection(from: teams)
+                ?? managed.configuration.suggestedTeam(from: ids) ?? teams.first?.id
         }
         workspace.selectedTeamID = restored
         workspace.persistSelection()

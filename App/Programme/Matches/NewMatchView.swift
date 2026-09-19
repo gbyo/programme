@@ -126,7 +126,8 @@ struct NewMatchView: View {
     }
 
     private func loadDefaults() {
-        let saved = TeamMatchDefaults.load(teamID: teamID)
+        let saved = TeamMatchDefaults.load(
+            teamID: teamID, managed: appModel.managed.configuration)
         rulesPresetName = saved.rulesName
         profileID = saved.profileID
         tracking = saved.tracking
