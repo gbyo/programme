@@ -89,14 +89,19 @@ struct RootView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabViewSidebarHeader {
+            // Workspace context, not a fifth destination: the team scopes
+            // every tab, so it sits in the sidebar header above them. The
+            // header only appears when the TabView shows a sidebar, and owns
+            // its own spacing — no manual padding, backgrounds, or icons.
             Menu {
                 TeamSwitcherMenu()
             } label: {
-                Label(
-                    appModel.workspace.selectedTeam?.name ?? "Programme",
-                    systemImage: "person.3")
+                Text(appModel.workspace.selectedTeam?.name ?? "Programme")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .padding(.vertical, 4)
+            .accessibilityIdentifier("sidebar.teamSwitcher")
+            .accessibilityHint("Switches teams")
         }
         .id(appModel.workspace.selectedTeamID)
     }

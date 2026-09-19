@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Top-level navigation, match detail, and exports.
@@ -98,6 +99,97 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'events recorded'"))
                 .firstMatch.exists,
             "Recovery reassurance leaked into everyday Home content")
+    }
+
+    /// Creates a team through Settings → Manage Teams, leaving it selected
+    /// with its native empty Home. Shared by the sidebar-header tests, which
+    /// each need a second workspace to switch between.
+    private func createTeam(
+        _ app: XCUIApplication, name: String, shortName: String
+    ) {
+        tapToolbarButton(app, "home.settings", label: "Settings")
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.staticTexts["Manage Teams…"].tap()
+        XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
+        app.buttons["Add Team…"].tap()
+        XCTAssertTrue(app.navigationBars["New Team"].waitForExistence(timeout: 5))
+        replaceText(app, app.textFields["Team name"], with: name)
+        replaceText(app, app.textFields["Short name for the scoreboard"], with: shortName)
+        app.buttons["Create"].tap()
+        XCTAssertTrue(
+            app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
+            "Creating a team did not select it")
+    }
+
+    /// Taps a sidebar-header menu entry, which can surface as either a menu
+    /// item or a button depending on how the popover renders.
+    private func tapSidebarMenuEntry(_ app: XCUIApplication, _ label: String) {
+        if app.menuItems[label].waitForExistence(timeout: 5) {
+            app.menuItems[label].tap()
+            return
+        }
+        let button = app.buttons[label].firstMatch
+        XCTAssertTrue(
+            button.waitForExistence(timeout: 5),
+            "No sidebar menu entry for \(label)")
+        button.tap()
+    }
+
+    /// The sidebar header is workspace context, not a fifth destination:
+    /// opening it offers the team menu, and picking another team switches
+    /// the workspace Home shows.
+    func testSidebarTeamMenuSwitchesWorkspace() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "The sidebar header only exists in a regular-width sidebar.")
+        let app = launch()
+        waitForHome(app)
+        createTeam(app, name: "JV Test Team", shortName: "JV Test")
+
+        let switcher = element(app, "sidebar.teamSwitcher")
+        XCTAssertTrue(switcher.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            switcher.label.contains("JV Test Team"),
+            "The sidebar header does not name the current team: \(switcher.label)")
+        switcher.tap()
+        tapSidebarMenuEntry(app, "Ninety Six Boys Soccer")
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10),
+            "Switching teams from the sidebar menu did not change the workspace")
+
+        // Reopening the header offers the team list again instead of
+        // navigating anywhere: it is a menu, not a destination.
+        element(app, "sidebar.teamSwitcher").tap()
+        XCTAssertTrue(
+            app.menuItems["Manage Teams…"].waitForExistence(timeout: 5)
+                || app.buttons["Manage Teams…"].firstMatch.waitForExistence(timeout: 5),
+            "The sidebar header did not open the team menu")
+        attachScreenshot(named: "Sidebar team menu")
+    }
+
+    /// A long team name stays on one truncated line: the four destinations
+    /// remain reachable instead of being pushed out by a giant header.
+    func testLongTeamNameKeepsFourDestinations() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "The sidebar header only exists in a regular-width sidebar.")
+        let app = launch()
+        waitForHome(app)
+        createTeam(
+            app,
+            name: "Springfield Heights Junior Varsity Exhibition Squad",
+            shortName: "Springfield")
+
+        let switcher = element(app, "sidebar.teamSwitcher")
+        XCTAssertTrue(switcher.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            switcher.label.contains("Springfield Heights"),
+            "The sidebar header lost the long team name: \(switcher.label)")
+        for section in ["Home", "Matches", "Roster", "Stats"] {
+            openSection(app, section)
+        }
+        XCTAssertTrue(element(app, "home.content").waitForExistence(timeout: 10))
+        attachScreenshot(named: "Sidebar long team name")
     }
 
     func testTopLevelDestinationsAreHomeMatchesRosterStats() {
