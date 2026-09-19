@@ -19,6 +19,7 @@ struct LiveMatchView: View {
 
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     /// The platform's own answer to "is there room for more than one pane?".
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -39,8 +40,9 @@ struct LiveMatchView: View {
         case composer
         case eventLog
         case review
-        case options
         case lineup
+        case opponentRoster
+        case adjustClock
         case periodBreak
         case finalize
         case shootout
@@ -54,8 +56,9 @@ struct LiveMatchView: View {
             case .composer: "composer"
             case .eventLog: "log"
             case .review: "review"
-            case .options: "options"
             case .lineup: "lineup"
+            case .opponentRoster: "opponent-roster"
+            case .adjustClock: "adjust-clock"
             case .periodBreak: "break"
             case .finalize: "finalize"
             case .shootout: "shootout"
@@ -149,7 +152,16 @@ struct LiveMatchView: View {
                 .toolbar {
                     MatchControlsToolbar(
                         session: session,
-                        onMenu: { activeSheet = .options },
+                        onClose: closeScorer,
+                        onShowStats: { isShowingInspector = true },
+                        onEditLineup: { activeSheet = .lineup },
+                        onEditOpponentRoster: { activeSheet = .opponentRoster },
+                        onAdjustClock: { activeSheet = .adjustClock },
+                        onOpenScoreboard: {
+                            openWindow(id: ProgrammeScene.scoreboard.rawValue)
+                        },
+                        onShootout: { activeSheet = .shootout },
+                        onFinalize: { activeSheet = .finalize },
                         onToggleClock: { session.toggleClock() },
                         onEndPeriod: { endPeriod() },
                         onStartPeriod: { startPeriod() }
@@ -262,26 +274,14 @@ struct LiveMatchView: View {
         case .review:
             NavigationStack { ReviewView(session: session) }
 
-        case .options:
-            NavigationStack {
-                MatchOptionsSheet(
-                    session: session,
-                    onEditLineup: { activeSheet = .lineup },
-                    onShootout: { activeSheet = .shootout },
-                    onFinalize: { activeSheet = .finalize },
-                    onClose: {
-                        activeSheet = nil
-                        Task { await appModel.closeLiveSession() }
-                    },
-                    onShowStats: {
-                        activeSheet = nil
-                        isShowingInspector = true
-                    }
-                )
-            }
-
         case .lineup:
             NavigationStack { LineupEditorView(session: session) }
+
+        case .opponentRoster:
+            NavigationStack { OpponentRosterView(session: session) }
+
+        case .adjustClock:
+            NavigationStack { ClockAdjustmentView(session: session) }
 
         case .periodBreak:
             NavigationStack {
@@ -312,6 +312,11 @@ struct LiveMatchView: View {
                 NavigationStack { EventEditView(session: session, event: event) }
             }
         }
+    }
+
+    private func closeScorer() {
+        activeSheet = nil
+        Task { await appModel.closeLiveSession() }
     }
 
     // MARK: - Layout
