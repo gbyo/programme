@@ -29,6 +29,9 @@ struct LiveMatchView: View {
     /// a content swap rather than a dismiss-and-present race.
     @State private var activeSheet: LiveSheet?
     @State private var compactPane: CompactPane = .palette
+    /// Compact layouts show the newly recorded event briefly above the toolbar
+    /// instead of making passive status compete with the toolbar's controls.
+    @State private var compactLastEventID: EventID?
     @State private var isAddingNote = false
     @State private var note = ""
 
@@ -109,6 +112,17 @@ struct LiveMatchView: View {
         static let twoColumnMinimum: CGFloat = workspaceUsable + recordMinimum
     }
 
+    /// The phone and any genuinely narrow iPad window use Programme's compact
+    /// scoring layout. Keeping this as one product rule means the composer and
+    /// the bottom toolbar adapt at the same point instead of inventing separate
+    /// width thresholds for each feature.
+    private var usesCompactScoringLayout: Bool {
+        #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .phone { return true }
+        #endif
+        return horizontalSizeClass == .compact
+    }
+
     /// Whether the composer takes over the screen in a sheet rather than living
     /// in a column.
     ///
@@ -119,10 +133,7 @@ struct LiveMatchView: View {
     /// A narrow iPad window — Stage Manager, Split View — reaches the same
     /// behaviour through the platform's own compact environment.
     private var composerUsesSheet: Bool {
-        #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom == .phone { return true }
-        #endif
-        return horizontalSizeClass == .compact
+        usesCompactScoringLayout
     }
 
     var body: some View {
@@ -133,14 +144,24 @@ struct LiveMatchView: View {
                     LiveHeader(session: session)
                 }
                 .overlay(alignment: .bottom) {
-                    if let notice = session.notice {
-                        NoticeBanner(notice: notice) { session.dismissNotice() }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 10)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    Group {
+                        if let notice = session.notice {
+                            NoticeBanner(notice: notice) { session.dismissNotice() }
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        } else if usesCompactScoringLayout,
+                            compactLastEventID == session.lastEventDescription?.id
+                        {
+                            CompactLastEventConfirmation(session: session)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
                 }
                 .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
+                .animation(
+                    reduceMotion ? nil : .snappy(duration: 0.22),
+                    value: compactLastEventID)
                 .sensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
                 .navigationBarTitleDisplayMode(.inline)
@@ -157,6 +178,7 @@ struct LiveMatchView: View {
 
                     ScoringToolbar(
                         session: session,
+                        showsInlineLastEvent: !usesCompactScoringLayout,
                         onSubstitute: beginSubstitution,
                         onEdit: { editLastEvent() },
                         onLog: { activeSheet = .eventLog },
@@ -211,6 +233,19 @@ struct LiveMatchView: View {
             guard let request else { return }
             session.requestedAction = nil
             perform(request)
+        }
+        .onChange(of: session.lastEventDescription?.id) { oldID, newID in
+            guard usesCompactScoringLayout, let newID, newID != oldID else { return }
+            compactLastEventID = newID
+        }
+        .onChange(of: usesCompactScoringLayout) { _, isCompact in
+            if !isCompact { compactLastEventID = nil }
+        }
+        .task(id: compactLastEventID) {
+            guard compactLastEventID != nil else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            compactLastEventID = nil
         }
         .onAppear {
             if !session.hasStartingLineup { activeSheet = .lineup }
