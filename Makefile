@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: bootstrap doctor generate open test test-ui build format lint lint-all verify verify-fast clean
+.PHONY: bootstrap doctor generate signing-audit open test test-ui build format lint lint-all verify verify-fast clean
 
 bootstrap:
 	bash scripts/bootstrap.sh
@@ -10,6 +10,9 @@ doctor:
 
 generate:
 	bash scripts/xcodegen.sh generate --spec project.yml
+
+signing-audit: generate
+	bash scripts/signing-audit.sh
 
 open: generate
 	open Programme.xcodeproj

@@ -1,6 +1,6 @@
 name: Programme
 options:
-  bundleIdPrefix: com.gbyo.programme
+  bundleIdPrefix: com.gbyo.Programme
   createIntermediateGroups: true
   deploymentTarget:
     iOS: "26.0"
@@ -17,6 +17,10 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
+    # Programme is owned and signed by the gbyo Apple Developer team.
+    # Keeping this in the XcodeGen source of truth prevents regenerated
+    # projects from losing the team selection before physical-device runs.
+    DEVELOPMENT_TEAM: 57CW34C9J4
     SWIFT_EMIT_LOC_STRINGS: "YES"
     ENABLE_USER_SCRIPT_SANDBOXING: "YES"
     GENERATE_INFOPLIST_FILE: "NO"
@@ -51,7 +55,7 @@ targets:
           - CloudKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme
         PRODUCT_NAME: Programme
         INFOPLIST_FILE: App/Programme/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -74,7 +78,7 @@ targets:
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeUI]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme.widgets
         PRODUCT_NAME: ProgrammeWidgets
         INFOPLIST_FILE: App/ProgrammeWidgets/Info.plist
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -91,7 +95,7 @@ targets:
         products: [ProgrammeCore]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme.watchkitapp
         PRODUCT_NAME: ProgrammeWatch
         INFOPLIST_FILE: App/ProgrammeWatch/Info.plist
         SKIP_INSTALL: "YES"
@@ -105,7 +109,7 @@ targets:
       - path: App/ProgrammeThumbnails
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.thumbnails
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme.thumbnails
         PRODUCT_NAME: ProgrammeThumbnails
         INFOPLIST_FILE: App/ProgrammeThumbnails/Info.plist
         CURRENT_PROJECT_VERSION: "1"
@@ -120,7 +124,7 @@ targets:
       - target: Programme
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme.uitests
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
         FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks
@@ -134,7 +138,7 @@ targets:
       - target: Programme
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.programme.intenttests
+        PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme.intenttests
         TEST_TARGET_NAME: Programme
         GENERATE_INFOPLIST_FILE: "YES"
         FRAMEWORK_SEARCH_PATHS: $(SDKROOT)/Developer/Library/Frameworks

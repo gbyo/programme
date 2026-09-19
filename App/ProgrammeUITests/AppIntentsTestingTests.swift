@@ -71,7 +71,7 @@ final class AppIntentsTestingTests: XCTestCase {
 
     @available(iOS 27, *)
     private func definitions() -> IntentDefinitions {
-        IntentDefinitions(bundleIdentifier: "com.gbyo.programme")
+        IntentDefinitions(bundleIdentifier: "com.gbyo.Programme")
     }
 
     /// Converts the known Xcode 27.0 AppIntentsTesting service crash into an

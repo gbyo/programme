@@ -24,6 +24,9 @@ swift test --package-path Packages/ProgrammeKit
 printf '\n==> Generate project\n'
 bash "$ROOT/scripts/xcodegen.sh" generate --spec "$ROOT/project.yml"
 
+printf '\n==> Signing configuration\n'
+bash "$ROOT/scripts/signing-audit.sh"
+
 printf '\n==> App + widget build\n'
 xcodebuild build \
     -project Programme.xcodeproj \
