@@ -105,7 +105,9 @@ struct RosterImportView: View {
                             .foregroundStyle(.secondary)
                         }
                     } else if let reason = RosterInterpreter.unavailabilityMessage {
-                        Text("\(reason) File and paste import still work.")
+                        // The message already names the deterministic
+                        // fallback; appending it again would repeat it.
+                        Text(reason)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

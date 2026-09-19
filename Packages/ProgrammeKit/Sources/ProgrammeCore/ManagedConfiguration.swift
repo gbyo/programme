@@ -53,6 +53,10 @@ public struct ManagedProgrammeConfiguration: Decodable, Hashable, Sendable {
         case defaultTrackingMode
         case allowCollaboration
         case allowAutomatedRosterExtraction
+        /// Pre-rename key. Still honored so deployed profiles that disable
+        /// roster automation keep working; the new key wins when both are
+        /// present. See docs/MANAGED_CONFIGURATION.md.
+        case allowRosterRecognition
     }
 
     /// Validates supplied values so a misconfigured profile fails loudly.
@@ -102,13 +106,16 @@ public struct ManagedProgrammeConfiguration: Decodable, Hashable, Sendable {
         }
         do {
             allowCollaboration = try container.decodeIfPresent(Bool.self, forKey: .allowCollaboration)
-            allowAutomatedRosterExtraction = try container.decodeIfPresent(
+            let current = try container.decodeIfPresent(
                 Bool.self, forKey: .allowAutomatedRosterExtraction)
+            let legacy = try container.decodeIfPresent(
+                Bool.self, forKey: .allowRosterRecognition)
+            allowAutomatedRosterExtraction = current ?? legacy
         } catch {
             throw ManagedConfigurationValueError(
                 kind: .typeMismatch,
                 message:
-                    "allowCollaboration and allowAutomatedRosterExtraction must be booleans. \(error.localizedDescription)"
+                    "allowCollaboration, allowAutomatedRosterExtraction and allowRosterRecognition must be booleans. \(error.localizedDescription)"
             )
         }
     }

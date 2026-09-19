@@ -151,7 +151,8 @@ struct TeamDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("teamDetail.syncState")
-                if !appModel.managed.configuration.isCollaborationAllowed {
+                let collaborationAllowed = appModel.managed.configuration.isCollaborationAllowed
+                if !collaborationAllowed {
                     Label(
                         "Team sharing is disabled by this device's management.",
                         systemImage: "lock.circle"
@@ -160,31 +161,30 @@ struct TeamDetailView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("teamDetail.share.disabled")
                 }
-                if appModel.managed.configuration.isCollaborationAllowed {
+                // An existing share is always manageable through the system
+                // UI — revoking (owner) or leaving (participant) stays
+                // available under any policy. Only creating a share is
+                // gated, so ShareLink and its loading state live strictly
+                // inside the collaboration-allowed branch.
+                if let prepared = shareItem?.prepared, let shareItem {
+                    if case .shared = shareItem.scope {
+                        // Shared with me: the sharer's share through the
+                        // system UI. Leaving happens there; Programme
+                        // never offers a second private share.
+                        Text("Shared with you")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    CollaborationView(
+                        share: prepared, container: shareItem.container(),
+                        teamName: shareItem.teamName
+                    )
+                    .frame(height: 48)
+                    .accessibilityIdentifier("teamDetail.collaboration")
+                } else if collaborationAllowed {
                     if let shareItem {
-                        switch (shareItem.scope, shareItem.prepared) {
-                        case (.owned, .some(let prepared)):
-                            // Owned and shared: system Manage Share UI.
-                            CollaborationView(
-                                share: prepared, container: shareItem.container(),
-                                teamName: shareItem.teamName
-                            )
-                            .frame(height: 48)
-                            .accessibilityIdentifier("teamDetail.collaboration")
-                        case (.shared, .some(let prepared)):
-                            // Shared with me: the sharer's share through the
-                            // system UI. Leaving happens there; Programme
-                            // never offers a second private share.
-                            Text("Shared with you")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            CollaborationView(
-                                share: prepared, container: shareItem.container(),
-                                teamName: shareItem.teamName
-                            )
-                            .frame(height: 48)
-                            .accessibilityIdentifier("teamDetail.collaboration")
-                        case (.shared, _):
+                        switch shareItem.scope {
+                        case .shared:
                             // Shared scope whose share hasn't re-fetched:
                             // wait, don't offer to share someone else's team.
                             HStack {
@@ -193,7 +193,7 @@ struct TeamDetailView: View {
                                 ProgressView()
                             }
                             .accessibilityIdentifier("teamDetail.share.loading")
-                        case (.owned, .none):
+                        case .owned:
                             ShareLink(
                                 item: shareItem,
                                 preview: SharePreview(
@@ -236,11 +236,12 @@ struct TeamDetailView: View {
                     }
                 }
                 // Owner-only destructive action: revokes the share for
-                // everyone without touching local truth. Participants manage
-                // (and leave) through the system collaboration UI above —
-                // Programme never offers them "Stop Sharing".
-                if appModel.managed.configuration.isCollaborationAllowed,
-                    shareItem?.scope == .owned,
+                // everyone without touching local truth. Revocation stays
+                // available when collaboration is disabled — only creating
+                // new shares is gated. Participants manage (and leave)
+                // through the system collaboration UI above — Programme
+                // never offers them "Stop Sharing".
+                if shareItem?.scope == .owned,
                     shareItem?.prepared != nil
                 {
                     Button("Stop Sharing…", systemImage: "person.2.slash", role: .destructive) {
@@ -327,8 +328,14 @@ struct TeamDetailView: View {
         }
         // Reloads when the collaboration policy flips, so disabling or
         // re-enabling sharing applies immediately without reopening the view.
-        .task(id: teamShareReloadKey) {
+        // Team fields load only when the team changes: reloading them on
+        // every policy or account flip would discard unsaved edits.
+        .task(id: teamID) {
             await load()
+        }
+        // Sharing state refreshes independently when the collaboration
+        // policy or the iCloud account state changes.
+        .task(id: teamShareReloadKey) {
             await loadShareItem()
         }
         .confirmationDialog(
@@ -350,7 +357,7 @@ struct TeamDetailView: View {
     /// on first use. Failures (e.g. iCloud signed out) surface here, never
     /// as a dead Share button.
     private var teamShareReloadKey: String {
-        "\(teamID.rawValue.uuidString)#\(appModel.managed.configuration.hashValue)"
+        "\(teamID.rawValue.uuidString)#\(appModel.managed.configuration.hashValue)#\(appModel.cloudAccount.state)"
     }
 
     private func loadShareItem() async {
@@ -359,12 +366,6 @@ struct TeamDetailView: View {
         do {
             shareItem = try await appModel.teamShareItem(teamID: teamID)
             participants = await appModel.teamParticipants(teamID: teamID)
-            errorMessage = nil
-        } catch TeamShareError.collaborationDisabled {
-            // The management restriction label in the Sharing section
-            // already says this; no error banner on top of it.
-            shareItem = nil
-            participants = []
             errorMessage = nil
         } catch {
             errorMessage =

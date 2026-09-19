@@ -34,6 +34,22 @@ struct ManagedConfigurationTests {
         #expect(decoded.isAutomatedRosterExtractionAllowed)
     }
 
+    @Test("Legacy roster key stays a disable when the new key is absent")
+    func legacyRosterRecognitionAlias() throws {
+        let decoded = try JSONDecoder().decode(
+            ManagedProgrammeConfiguration.self,
+            from: #"{"allowRosterRecognition": false}"#.data(using: .utf8)!)
+        #expect(!decoded.isAutomatedRosterExtractionAllowed)
+    }
+
+    @Test("New roster key wins when both keys are supplied")
+    func rosterKeyPrecedence() throws {
+        let json = #"{"allowRosterRecognition": false, "allowAutomatedRosterExtraction": true}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ManagedProgrammeConfiguration.self, from: json)
+        #expect(decoded.isAutomatedRosterExtractionAllowed)
+    }
+
     @Test("Full MDM payload decodes")
     func fullPayload() throws {
         let id = UUID()
