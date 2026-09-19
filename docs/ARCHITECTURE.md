@@ -75,16 +75,30 @@ Owns optional CloudKit replication, never truth or recovery:
 - `CKSyncEngine` coordination with a durable file-backed outbox/inbox
 - deterministic event merge policy (revision wins; same-revision conflicts
   surface for review, never wall-clock)
+- zone-wide sharing (`CKShare(recordZoneID:)`): one team = one zone = at
+  most one share, invitation-only, no nominated root record, so preparing
+  a share never resaves Programme truth
+- applier materialization: Team/Season/Player/Match upsert by stable ID in
+  dependency order (deferred when parents are missing, never dropped);
+  only event deletions materialize, as voids; statistics always re-derive
+- production wiring in `TeamSyncService` (Persistence): starts engines,
+  stages outbound mutations reported by `MatchStore`, drains the inbox
+  through the applier, and routes participant writes into the sharer's
+  zone. Remote application runs echo-suppressed, and sync is inert until
+  started — scoring never waits on it.
 
 Cloud collaboration is optional replication. Recording and recovering a live
 match never depends on CloudKit.
 
 Signed/provisioned builds are required before any device syncs: the
 `iCloud.org.programme.Programme` container must exist in the Developer
-Portal with the Xcode iCloud capability enabled. Until then the sync
-coordinator reports unavailable and every local behavior is unchanged.
-Push-notification subscriptions for timely sync are future work; the engine
-syncs on launch, foreground, and after staging without them.
+Portal with the Xcode iCloud and Push Notifications capabilities enabled
+(`aps-environment` is written by Xcode at signing time, never stored in
+the repo). Until then the sync coordinator reports unavailable and every
+local behavior is unchanged. Remote-change notifications need no custom
+subscription code: `CKSyncEngine` discovers or creates the database
+subscription itself; the engine also syncs on launch, foreground, and
+after staging.
 
 ## App shell
 
