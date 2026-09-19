@@ -37,6 +37,7 @@ Swift formatting comes from the active Xcode toolchain (`xcrun swift-format`) ra
 make bootstrap     set up a fresh checkout
 make doctor        diagnose Xcode, Swift, Mint, XcodeGen and simulator setup
 make generate      regenerate Programme.xcodeproj from project.yml
+make signing-audit verify generated bundle IDs, team and entitlements
 make open          generate and open the project
 make test          run the fast ProgrammeKit package tests
 make test-ui       run ProgrammeUITests on an available iPad simulator
@@ -94,7 +95,12 @@ After adding/moving targets or changing project settings:
 
 ```bash
 make generate
+make signing-audit
 ```
+
+The signing audit intentionally checks the registered App ID spelling, embedded-target bundle
+IDs, Watch companion link, development team, and generated CloudKit entitlements so a
+regeneration cannot silently drop or mutate signing configuration again.
 
 Source files under configured source directories are discovered by XcodeGen, so ordinary new Swift files generally need no project-file edit.
 
