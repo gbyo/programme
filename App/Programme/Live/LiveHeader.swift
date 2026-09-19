@@ -115,7 +115,11 @@ struct LiveHeader: View {
         VStack(alignment: .trailing, spacing: 0) {
             Text(session.clock.displayText)
                 .font(.programmeClock(isCompact ? 24 : 32))
-                .contentTransition(.numericText(countsDown: true))
+                .contentTransition(.numericText(countsDown: session.clock.countsDown))
+                .animation(
+                    reduceMotion ? nil : .snappy(duration: 0.20),
+                    value: session.clock.displayText
+                )
             Text(periodText)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
