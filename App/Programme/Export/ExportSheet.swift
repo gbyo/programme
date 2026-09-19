@@ -2,6 +2,7 @@ import ProgrammeCore
 import ProgrammeExport
 import ProgrammePersistence
 import ProgrammeUI
+import QuickLook
 import SwiftUI
 
 /// A produced file, held on disk so it can be shared, saved or previewed.
@@ -27,32 +28,23 @@ struct ExportSheet: View {
     @State private var generated: [GeneratedExport] = []
     @State private var isWorking = false
     @State private var errorMessage: String?
+    @State private var previewURL: URL?
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             Section {
                 ForEach(exporters, id: \.id) { exporter in
-                    Button {
-                        toggle(exporter.id)
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: selection.contains(exporter.id) ? "checkmark.circle.fill" : "circle")
-                                .font(.title3)
-                                .foregroundStyle(
-                                    selection.contains(exporter.id)
-                                        ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
-                            Image(systemName: exporter.symbolName)
-                                .frame(width: 24)
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(exporter.name).font(.body.weight(.medium))
-                                Text(exporter.detail).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
+                    HStack(spacing: 14) {
+                        Image(systemName: exporter.symbolName)
+                            .frame(width: 24)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(exporter.name).font(.body.weight(.medium))
+                            Text(exporter.detail).font(.caption).foregroundStyle(.secondary)
                         }
-                        .contentShape(Rectangle())
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
+                    .tag(exporter.id)
                 }
             } header: {
                 Text("Formats")
@@ -66,29 +58,41 @@ struct ExportSheet: View {
                 Section("Ready to Share") {
                     ForEach(generated) { file in
                         HStack(spacing: 14) {
-                            Image(systemName: file.symbolName)
-                                .frame(width: 24)
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(file.name).font(.body.weight(.medium))
-                                Text("\(file.url.lastPathComponent) · \(byteText(file.byteCount))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            Button {
+                                previewURL = file.url
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Image(systemName: file.symbolName)
+                                        .frame(width: 24)
+                                        .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(file.name).font(.body.weight(.medium))
+                                        Text("\(file.url.lastPathComponent) · \(byteText(file.byteCount))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
                             }
-                            Spacer()
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens a Quick Look preview")
                             ShareLink(item: file.url) {
                                 Image(systemName: "square.and.arrow.up")
                                     .frame(width: 34, height: 34)
                             }
                             .buttonStyle(.bordered)
                         }
+                        .selectionDisabled()
                     }
                     if generated.count > 1 {
                         ShareLink(items: generated.map(\.url)) {
                             Label("Share All \(generated.count) Files", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity, minHeight: 40)
+                                .frame(minHeight: 40)
                         }
                         .programmePrimaryAction()
+                        .buttonSizing(.flexible)
+                        .selectionDisabled()
                     }
                 }
             }
@@ -102,6 +106,8 @@ struct ExportSheet: View {
         }
         .navigationTitle("Export")
         .navigationBarTitleDisplayMode(.inline)
+        .environment(\.editMode, .constant(.active))
+        .quickLookPreview($previewURL, in: generated.map(\.url))
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
@@ -113,10 +119,6 @@ struct ExportSheet: View {
         .onAppear {
             if selection.isEmpty, let first = exporters.first { selection = [first.id] }
         }
-    }
-
-    private func toggle(_ id: String) {
-        if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
     }
 
     private func generate() {
@@ -229,7 +231,9 @@ struct ExportsView: View {
             guard let item = items.first else { return false }
             Task { await importArchive(item.archive) }
             return true
-        } isTargeted: { isTargeted = $0 }
+        } isTargeted: {
+            isTargeted = $0
+        }
         .overlay {
             if isTargeted {
                 RoundedRectangle(cornerRadius: 16)
@@ -258,10 +262,10 @@ struct ExportsView: View {
                     isError: true)
             }
         }
-        .alert(item: $importResult) { outcome in
-            Alert(
-                title: Text(outcome.title), message: Text(outcome.message),
-                dismissButton: .default(Text("OK")))
+        .alert(importResult?.title ?? "", isPresented: importOutcomeIsPresented, presenting: importResult) { _ in
+            Button("OK") { importResult = nil }
+        } message: { outcome in
+            Text(outcome.message)
         }
         .task { await load() }
     }
@@ -274,6 +278,12 @@ struct ExportsView: View {
             if let context = try? await store.context(for: item.id) { loaded.append(context) }
         }
         contexts = loaded.sorted { $0.descriptor.kickoff < $1.descriptor.kickoff }
+    }
+
+    private var importOutcomeIsPresented: Binding<Bool> {
+        Binding(
+            get: { importResult != nil },
+            set: { if !$0 { importResult = nil } })
     }
 
     private func importFile(at url: URL) async {
