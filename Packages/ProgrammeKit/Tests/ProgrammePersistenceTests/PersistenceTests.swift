@@ -808,6 +808,56 @@ struct MatchReminderPreferenceTests {
     }
 }
 
+private func temporaryReadinessURL(_ name: String) -> URL {
+    URL.temporaryDirectory.appending(path: "programme-tests-\(UUID().uuidString)").appending(path: name)
+}
+
+@Suite("Zone readiness persists across launches")
+struct ZoneReadinessTests {
+    @Test("First claim is new; repeats are not")
+    func claimOnce() async throws {
+        let readiness = try ZoneReadiness(url: temporaryReadinessURL("zone-readiness.json"))
+        #expect(try await readiness.claim("team_a") == true)
+        #expect(try await readiness.claim("team_a") == false)
+        #expect(await readiness.isReady("team_a") == true)
+        #expect(await readiness.isReady("team_b") == false)
+    }
+
+    @Test("Readiness survives relaunch, so repeat startups enqueue nothing")
+    func persistsAcrossInstances() async throws {
+        let url = temporaryReadinessURL("zone-readiness.json")
+        let first = try ZoneReadiness(url: url)
+        #expect(try await first.claim("team_a") == true)
+        let second = try ZoneReadiness(url: url)
+        #expect(await second.isReady("team_a") == true)
+        #expect(try await second.claim("team_a") == false)
+    }
+
+    @Test("Removing one zone re-arms only that zone")
+    func removeRearms() async throws {
+        let readiness = try ZoneReadiness(url: temporaryReadinessURL("zone-readiness.json"))
+        #expect(try await readiness.claim("team_a") == true)
+        #expect(try await readiness.claim("team_b") == true)
+        try await readiness.remove("team_a")
+        #expect(await readiness.isReady("team_a") == false)
+        #expect(try await readiness.claim("team_a") == true)
+        #expect(try await readiness.claim("team_b") == false)
+    }
+
+    @Test("Resetting forgets every zone after an account switch")
+    func resetAll() async throws {
+        let url = temporaryReadinessURL("zone-readiness.json")
+        let readiness = try ZoneReadiness(url: url)
+        #expect(try await readiness.claim("team_a") == true)
+        #expect(try await readiness.claim("team_b") == true)
+        try await readiness.resetAll()
+        #expect(await readiness.isReady("team_a") == false)
+        let reopened = try ZoneReadiness(url: url)
+        #expect(try await reopened.claim("team_a") == true)
+        #expect(try await reopened.claim("team_b") == true)
+    }
+}
+
 @Suite("Match fetching filters in the store, before any limit")
 struct MatchFetchPredicateTests {
 

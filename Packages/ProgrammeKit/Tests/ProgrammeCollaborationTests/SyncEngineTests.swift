@@ -252,6 +252,18 @@ struct TeamSyncCoordinatorTests {
         #expect(changes[0].archivedRecord != nil)
     }
 
+    @Test("Account changes forward to the registered hook with their type")
+    func accountChangeHook() async throws {
+        let coordinator = try makeCoordinator()
+        let seen = Mutex(false)
+        await coordinator.setAccountChangeHandler { _ in seen.withLock { $0 = true } }
+        await coordinator.applyAccountChange(
+            .switchAccounts(
+                previousUser: CKRecord.ID(recordName: "u"),
+                currentUser: CKRecord.ID(recordName: "v")))
+        #expect(seen.withLock { $0 } == true)
+    }
+
     @Test("Account loss reports attention and deletes nothing local")
     func accountLossIsNonDestructive() async throws {
         let coordinator = try makeCoordinator()

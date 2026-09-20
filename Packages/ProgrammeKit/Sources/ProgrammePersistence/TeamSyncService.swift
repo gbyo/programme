@@ -43,7 +43,7 @@ public actor TeamSyncService: Sendable {
     /// drive cache replacement and removal without CloudKit.
     let owners: SharedZoneOwners
     private var started = false
-    private var ensuredZones: Set<String> = []
+    private let readiness: ZoneReadiness
 
     /// Called after inbound structure lands so the workspace lists reload.
     /// Event-only changes already fan out through the store's own
@@ -79,6 +79,8 @@ public actor TeamSyncService: Sendable {
         let conflicts = try TeamConflictStore(
             url: directory.appendingPathComponent("conflicts.json"))
         self.conflicts = conflicts
+        self.readiness = try ZoneReadiness(
+            url: directory.appendingPathComponent("zone-readiness.json"))
         self.owners = try SharedZoneOwners(
             url: directory.appendingPathComponent("shared-zone-owners.json"))
         self.coordinator = TeamSyncCoordinator(
@@ -92,29 +94,24 @@ public actor TeamSyncService: Sendable {
 
     // MARK: - Lifecycle
 
-    /// Starts both engines and ensures private zones for local teams.
-    /// Idempotent. Safe offline: engines report through status events and
-    /// the outbox keeps everything staged.
+    /// Starts both engines. Zones ensure lazily when their teams first
+    /// stage sync work (see `ensureZoneIfNeeded`), consulting the durable
+    /// readiness record — a routine launch with established zones enqueues
+    /// nothing. Idempotent. Safe offline: engines report through status
+    /// events and the outbox keeps everything staged.
     public func start() async {
         guard !started else { return }
         started = true
         await coordinator.setIncomingHandler { [weak self] _ in
             Task { await self?.materialize() }
         }
-        await coordinator.setZoneDeletedHandler { [weak self] _, _ in
-            Task { await self?.zoneDeleted() }
+        await coordinator.setZoneDeletedHandler { [weak self] scope, zoneID in
+            Task { await self?.zoneDeleted(scope: scope, zoneID: zoneID) }
         }
         await coordinator.setAccountChangeHandler { [weak self] change in
             Task { await self?.handleAccountChange(change) }
         }
-        // Engines must exist before we enqueue zone creation.
-        // ensureTeamZone writes pending database changes into an engine's
-        // state, so doing this before coordinator.start() silently drops the
-        // request while still marking the zone as ensured locally.
         await coordinator.start()
-        for team in (try? await store.teamIdentities()) ?? [] {
-            await ensureZone(for: team.id)
-        }
     }
 
     /// Accepts an invitation, then refreshes accepted-zone routing so
@@ -151,14 +148,21 @@ public actor TeamSyncService: Sendable {
     /// Bounded cache maintenance for account transitions. Sign-in refreshes
     /// from the zone list; sign-out or account switch drops every cached
     /// owner so a new account never inherits the old account's scopes.
+    /// Sign-ins keep existing zone readiness: the same account's zones are
+    /// still established.
     func handleAccountChange(_ change: CKSyncEngine.Event.AccountChange.ChangeType) async {
         switch change {
         case .signIn:
             await refreshOwners()
         case .signOut, .switchAccounts:
             await owners.reset()
+            // An iCloud account switch invalidates every readiness claim: the
+            // new account's zones ensure lazily the next time their teams
+            // stage work.
+            try? await readiness.resetAll()
         @unknown default:
             await owners.reset()
+            try? await readiness.resetAll()
         }
     }
 
@@ -373,8 +377,7 @@ public actor TeamSyncService: Sendable {
 
     private func ensureZone(for teamID: TeamID) async {
         let name = TeamZone.zoneName(for: teamID)
-        guard !ensuredZones.contains(name) else { return }
-        ensuredZones.insert(name)
+        guard (try? await readiness.claim(name)) == true else { return }
         await coordinator.ensureTeamZone(CKRecordZone(zoneID: TeamZone.zoneID(for: teamID)), in: .private)
     }
 
@@ -382,10 +385,15 @@ public actor TeamSyncService: Sendable {
         await owners.remember(await coordinator.sharedZoneOwners())
     }
 
-    private func zoneDeleted() async {
+    private func zoneDeleted(scope: SyncDatabase, zoneID: CKRecordZone.ID) async {
+        // A deleted team zone must re-ensure before its team stages again.
+        if scope == .private, zoneID.zoneName.hasPrefix("team_") {
+            try? await readiness.remove(zoneID.zoneName)
+        }
         await refreshOwners()
         onWorkspaceChanged?()
     }
+
 }
 
 /// Which accepted-share zones route to the shared database, by owner name.
