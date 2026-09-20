@@ -237,6 +237,47 @@ final class LiveMatchSession {
         edit(.replacePayload(eventID, .shot(shot), summary: "Shot location added"))
     }
 
+    /// Add optional Advanced metadata to a shot that already exists.
+    func resolveShotBodyPart(_ bodyPart: BodyPart?, on eventID: EventID) {
+        guard let bodyPart, var shot = shotPayload(of: eventID) else { return }
+        shot.bodyPart = bodyPart
+        edit(.replacePayload(eventID, .shot(shot), summary: "Body part set to \(bodyPart.label)"))
+    }
+
+    /// Refine the phase of play on an already-recorded shot.
+    ///
+    /// Changing a goal to a penalty removes assist credit because penalty goals
+    /// are never assisted. Changing a penalty goal back to another phase marks
+    /// the assist unresolved so Programme never silently invents "unassisted."
+    func resolveShotPhase(_ phase: PlayPhase?, on eventID: EventID) {
+        guard let phase, var shot = shotPayload(of: eventID), shot.phase != phase else { return }
+        let previousPhase = shot.phase
+        shot.phase = phase
+        if shot.outcome.isGoal, !shot.isOwnGoal {
+            if phase == .penaltyKick {
+                shot.assist = nil
+            } else if previousPhase == .penaltyKick,
+                shot.assist == nil,
+                profile.prompts.assistOnGoal
+            {
+                shot.assist = .unidentified
+            }
+        }
+        edit(.replacePayload(eventID, .shot(shot), summary: "Phase set to \(phase.label)"))
+    }
+
+    /// Add the optional Advanced reason to a card that is already recorded.
+    func resolveCardReason(_ reason: String?, on eventID: EventID) {
+        guard let reason else { return }
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+            let event = context.events.first(where: { $0.id == eventID }),
+            case .card(var card) = event.payload
+        else { return }
+        card.reason = trimmed
+        edit(.replacePayload(eventID, .card(card), summary: "Card reason added"))
+    }
+
     /// Whether an already-recorded goal still has an unsettled assist.
     func awaitsAssist(_ eventID: EventID) -> Bool {
         shotPayload(of: eventID)?.assist == .unidentified

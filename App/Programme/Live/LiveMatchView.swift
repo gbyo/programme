@@ -622,17 +622,17 @@ struct LiveMatchView: View {
                     .filter { $0.id != scorerID(of: goalID) },
                 onPick: { assist in
                     // `nil` is "unassisted" and settles the goal; `.unidentified`
-                    // deliberately leaves it in Review. Either way, Standard and
-                    // Advanced still have one optional enrichment question left:
-                    // where the goal was struck.
+                    // deliberately leaves it in Review. Either way, the goal
+                    // still has optional enrichment left, starting with where
+                    // it was struck.
                     session.resolveAssist(assist, on: goalID)
-                    continueAfterAssist(goalID: goalID, scorerName: scorerName, side: side)
+                    continueAfterAssist(goalID: goalID, side: side)
                 },
                 onSkip: {
-                    // Deferring the assist must not also suppress a shot-location
-                    // prompt. The goal remains unresolved for Review while the
-                    // scorer can still place it on the map.
-                    continueAfterAssist(goalID: goalID, scorerName: scorerName, side: side)
+                    // Deferring the assist must not suppress the remaining
+                    // optional enrichment. The goal stays in Review while the
+                    // scorer can keep filling in Advanced detail.
+                    continueAfterAssist(goalID: goalID, side: side)
                 }
             )
 
@@ -644,6 +644,37 @@ struct LiveMatchView: View {
                 presentation: composerUsesSheet ? .compactSheet : .inline,
                 onCommit: { location in
                     session.resolveShotLocation(location, on: shotID)
+                    continueShotEnrichment(shotID: shotID, after: .location)
+                }
+            )
+
+        case .shotBodyPart(let shotID, let shooterName, let outcome):
+            ShotBodyPartStage(
+                shooterName: shooterName,
+                outcome: outcome,
+                onCommit: { bodyPart in
+                    session.resolveShotBodyPart(bodyPart, on: shotID)
+                    continueShotEnrichment(shotID: shotID, after: .bodyPart)
+                }
+            )
+
+        case .shotPhase(let shotID, let shooterName, let outcome, let currentPhase):
+            ShotPhaseStage(
+                shooterName: shooterName,
+                outcome: outcome,
+                currentPhase: currentPhase,
+                onCommit: { phase in
+                    session.resolveShotPhase(phase, on: shotID)
+                    composer.finish()
+                }
+            )
+
+        case .cardReason(let cardID, let playerName, let type):
+            CardReasonStage(
+                playerName: playerName,
+                type: type,
+                onCommit: { reason in
+                    session.resolveCardReason(reason, on: cardID)
                     composer.finish()
                 }
             )
@@ -707,7 +738,9 @@ struct LiveMatchView: View {
     private func handle(action: PaletteAction) {
         switch action.id {
         case "save":
-            session.recordSave()
+            recordShot(
+                ShotEvent(side: .opponent, shooter: .untracked, outcome: .saved),
+                side: .opponent)
             session.armedPlayer = nil
         default:
             guard let pending = action.pending else { return }
@@ -720,13 +753,9 @@ struct LiveMatchView: View {
         case .pending(let action):
             begin(action)
         case .opponentPenalty:
-            session.run(
-                .recordShot(
-                    ShotEvent(
-                        side: .opponent, shooter: .untracked, outcome: .goal, phase: .penaltyKick)),
-                feedback: .goal)
+            recordGoal(shooter: .untracked, phase: .penaltyKick, side: .opponent)
         case .opponentCard:
-            session.run(.recordCard(CardEvent(side: .opponent, player: .untracked, card: .yellow)))
+            complete(.card(.yellow), side: .opponent, with: .untracked)
         case .addNote:
             activeSheet = .addNote
         }
@@ -813,7 +842,9 @@ struct LiveMatchView: View {
         case .goal: begin(.goal(.openPlay))
         case .shot: begin(.shotAttempt(.openPlay))
         case .save:
-            session.recordSave()
+            recordShot(
+                ShotEvent(side: .opponent, shooter: .untracked, outcome: .saved),
+                side: .opponent)
             session.armedPlayer = nil
         case .corner: begin(.corner)
         case .substitution: beginSubstitution()
@@ -836,10 +867,12 @@ struct LiveMatchView: View {
             recordGoal(shooter: ref, phase: phase, side: side)
 
         case .ownGoal:
-            _ = session.recordReturningID(
-                .recordShot(ShotEvent(side: side, shooter: ref, outcome: .goal, isOwnGoal: true)),
-                feedback: .goal)
-            composer.finish()
+            let shot = ShotEvent(side: side, shooter: ref, outcome: .goal, isOwnGoal: true)
+            guard let shotID = session.recordReturningID(.recordShot(shot), feedback: .goal) else {
+                composer.finish()
+                return
+            }
+            offerShotEnrichment(for: shot, id: shotID, side: side)
 
         case .shot(let outcome):
             recordShot(ShotEvent(side: side, shooter: ref, outcome: outcome), side: side)
@@ -861,8 +894,18 @@ struct LiveMatchView: View {
             composer.finish()
 
         case .card(let type):
-            session.run(.recordCard(CardEvent(side: side, player: ref, card: type)))
-            composer.finish()
+            guard
+                let cardID = session.recordReturningID(
+                    .recordCard(CardEvent(side: side, player: ref, card: type)))
+            else {
+                composer.finish()
+                return
+            }
+            composer.offerCardReason(
+                card: cardID,
+                playerName: session.context.roster(for: side).label(for: ref),
+                type: type,
+                profile: session.profile)
 
         case .goalkeeper:
             session.run(.changeGoalkeeper(side: side, goalkeeper: ref))
@@ -917,7 +960,7 @@ struct LiveMatchView: View {
         guard asksAssist else {
             // Nothing to attribute, so the optional map is the only thing left
             // worth offering — the same enrichment every other shot gets.
-            offerShotLocation(for: shot, id: goalID, side: side)
+            offerShotEnrichment(for: shot, id: goalID, side: side)
             return
         }
         composer.ask(
@@ -934,32 +977,58 @@ struct LiveMatchView: View {
             composer.finish()
             return
         }
-        offerShotLocation(for: shot, id: shotID, side: side)
+        offerShotEnrichment(for: shot, id: shotID, side: side)
     }
 
-    /// Optional enrichment on an event that already exists, offered on the same
-    /// terms whatever the outcome was. Walking away leaves the shot recorded.
-    private func offerShotLocation(for shot: ShotEvent, id: EventID, side: TeamSide) {
-        composer.offerShotLocation(
+    /// Optional enrichment on an event that already exists. Walking away from
+    /// any of these questions leaves the primary shot intact.
+    private func offerShotEnrichment(
+        for shot: ShotEvent,
+        id: EventID,
+        side: TeamSide,
+        startingAt step: ShotEnrichmentStep = .location
+    ) {
+        composer.offerShotEnrichment(
             shot: id,
             shooterName: session.context.roster(for: side).label(for: shot.shooter),
             outcome: shot.outcome,
+            currentPhase: shot.phase,
             side: side,
             tracking: session.descriptor.tracking,
-            profile: session.profile)
+            profile: session.profile,
+            startingAt: step)
     }
 
-    /// An assist is enrichment on a goal that already exists. Finishing or
-    /// deferring that question therefore advances to the same optional location
-    /// step as every other shot instead of prematurely ending the composer.
-    private func continueAfterAssist(goalID: EventID, scorerName: String, side: TeamSide) {
-        composer.offerShotLocation(
-            shot: goalID,
-            shooterName: scorerName,
-            outcome: .goal,
-            side: side,
-            tracking: session.descriptor.tracking,
-            profile: session.profile)
+    private func continueShotEnrichment(shotID: EventID, after step: ShotEnrichmentStep) {
+        guard
+            let event = session.context.events.first(where: { $0.id == shotID }),
+            case .shot(let shot) = event.payload
+        else {
+            composer.finish()
+            return
+        }
+
+        let next: ShotEnrichmentStep
+        switch step {
+        case .location: next = .bodyPart
+        case .bodyPart: next = .playPhase
+        case .playPhase:
+            composer.finish()
+            return
+        }
+        offerShotEnrichment(for: shot, id: shotID, side: shot.side, startingAt: next)
+    }
+
+    /// Assist attribution is only the first optional detail on an Advanced goal.
+    private func continueAfterAssist(goalID: EventID, side: TeamSide) {
+        guard
+            let event = session.context.events.first(where: { $0.id == goalID }),
+            case .shot(let shot) = event.payload
+        else {
+            composer.finish()
+            return
+        }
+        offerShotEnrichment(for: shot, id: goalID, side: side)
     }
 
     private func startPeriod() {
