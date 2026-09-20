@@ -252,7 +252,7 @@ final class ProgrammeIntentProvider {
     /// switch. The selected team's matches come first for ranking.
     func matches() async throws -> [MatchEntity] {
         guard let store = appModel.store else { return [] }
-        let teams = try await store.teams()
+        let teams = try await store.teamIdentities()
         var entities: [MatchEntity] = []
         for team in teams {
             let items = try await store.matches(teamID: team.id, limit: 60)
@@ -270,7 +270,7 @@ final class ProgrammeIntentProvider {
 
     func players() async throws -> [PlayerEntity] {
         guard let store = appModel.store else { return [] }
-        let teams = try await store.teams()
+        let teams = try await store.teamIdentities()
         var entities: [PlayerEntity] = []
         for team in teams {
             let roster = try await store.roster(teamID: team.id)

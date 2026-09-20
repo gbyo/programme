@@ -539,6 +539,32 @@ struct TeamWorkspaceTests {
         #expect(details.name == "Varsity Renamed")
         #expect(details.shortName == "VAR")
     }
+
+    @Test("Identity projections match summaries without the counts")
+    func identityProjections() async throws {
+        let store = try makeStore()
+        let varsity = try await store.createTeam(name: "Varsity", shortName: "VAR")
+        let season = try await store.createSeason(
+            teamID: varsity, name: "2026", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        try await store.addPlayers(teamID: varsity, ProgrammeSample.roster.players)
+
+        let identities = try await store.teamIdentities()
+        #expect(identities.map(\.id) == [varsity])
+        #expect(identities.first?.name == "Varsity")
+        #expect(identities.first?.shortName == "VAR")
+
+        let seasonIdentities = try await store.seasonIdentities(teamID: varsity)
+        #expect(seasonIdentities.map(\.id) == [season])
+        #expect(seasonIdentities.first?.name == "2026")
+        #expect(seasonIdentities.first?.isCurrent == true)
+
+        // Summaries still carry the counts for management UI.
+        let summaries = try await store.teams()
+        #expect(summaries.first?.playerCount == ProgrammeSample.roster.players.count)
+        #expect(summaries.first?.seasonCount == 1)
+        #expect(try await store.seasons(teamID: varsity).first?.matchCount == 0)
+    }
 }
 
 @Suite("Match locations are optional metadata, never scoring truth")

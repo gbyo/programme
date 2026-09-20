@@ -12,7 +12,7 @@ struct MatchesView: View {
 
     @Environment(AppModel.self) private var appModel
     @State private var matches: [MatchListItem] = []
-    @State private var seasons: [SeasonListItem] = []
+    @State private var seasons: [SeasonIdentity] = []
     @State private var seasonFilter: SeasonFilter = .current
     @State private var matchToDelete: MatchListItem?
 
@@ -138,7 +138,7 @@ struct MatchesView: View {
 
     private func reload() async {
         guard let store = appModel.store else { return }
-        seasons = (try? await store.seasons(teamID: teamID)) ?? []
+        seasons = (try? await store.seasonIdentities(teamID: teamID)) ?? []
         // Fetch scoped to this team at fetch time; season filtering narrows it.
         switch seasonFilter {
         case .current:

@@ -19,7 +19,7 @@ struct SeasonStatsView: View {
     @State private var roster: RosterSnapshot = .empty
     @State private var isExporting = false
     @State private var contexts: [MatchContext] = []
-    @State private var seasons: [SeasonListItem] = []
+    @State private var seasons: [SeasonIdentity] = []
     @State private var teamDetails: TeamDetails?
 
     private var viewedSeasonID: SeasonID? {
@@ -95,7 +95,7 @@ struct SeasonStatsView: View {
 
     private func load() async {
         guard let store = appModel.store else { return }
-        seasons = (try? await store.seasons(teamID: teamID)) ?? []
+        seasons = (try? await store.seasonIdentities(teamID: teamID)) ?? []
         teamDetails = try? await store.teamDetails(teamID: teamID)
         let summaries =
             (try? await store.seasonSummaries(teamID: teamID, seasonID: viewedSeasonID)) ?? []
