@@ -19,11 +19,25 @@ struct PlayerPickerStage: View {
     var onPick: (PlayerRef) -> Void
     var onExtra: (() -> Void)?
     var onCancel: () -> Void
+    var presentation: StagePresentation
 
     @ScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 86
     private let unknownTip = UnknownPlayerTip()
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .inline:
+                inlineContent
+            case .compactSheet:
+                sheetContent
+            }
+        }
+    }
+
+    /// The workspace has no modal navigation bar, so the step keeps its own
+    /// title and Cancel.
+    private var inlineContent: some View {
         VStack(spacing: 14) {
             HStack {
                 Text(title)
@@ -35,6 +49,30 @@ struct PlayerPickerStage: View {
                     .keyboardShortcut(.escape, modifiers: [])
             }
 
+            contentStack
+        }
+        .padding(16)
+    }
+
+    /// The compact sheet's NavigationStack owns the title, so the content
+    /// starts at the players and Cancel moves to the semantic toolbar
+    /// placement. Nothing here records anything, so Cancel stays Cancel.
+    private var sheetContent: some View {
+        VStack(spacing: 14) {
+            contentStack
+        }
+        .padding(16)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { onCancel() }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityHint("Discards this question. Nothing has been recorded yet.")
+            }
+        }
+    }
+
+    private var contentStack: some View {
+        Group {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(players) { player in
@@ -96,7 +134,6 @@ struct PlayerPickerStage: View {
                 }
             }
         }
-        .padding(16)
     }
 
     private var columns: [GridItem] {
@@ -142,21 +179,28 @@ struct AssistPickerStage: View {
     let players: [PlayerSnapshot]
     var onPick: (PlayerRef?) -> Void
     var onSkip: () -> Void
+    var presentation: StagePresentation
 
     @ScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 82
     @ScaledMetric(relativeTo: .title3) private var unassistedHeight: CGFloat = 72
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .inline:
+                inlineContent
+            case .compactSheet:
+                sheetContent
+            }
+        }
+    }
+
+    /// The workspace has no modal navigation bar, so the step keeps its own
+    /// question header and Not now.
+    private var inlineContent: some View {
         VStack(spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Who assisted?")
-                        .font(.title3.weight(.semibold))
-                    Label("Goal recorded · \(scorerName)", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Programme.Palette.confirmed)
-                        .accessibilityIdentifier("assist.recordedConfirmation")
-                }
+                statusHeader(showQuestion: true)
                 Spacer()
                 Button("Not now") { onSkip() }
                     .buttonStyle(.bordered)
@@ -165,6 +209,48 @@ struct AssistPickerStage: View {
                     .accessibilityHint("Leaves the assist for Review. The goal stays recorded.")
             }
 
+            answers
+        }
+        .padding(16)
+    }
+
+    /// The compact sheet's NavigationStack owns the "Who assisted?" title.
+    /// The escape stays "Not now" rather than "Cancel" because the goal is
+    /// already safely recorded — there is nothing to cancel — and it moves
+    /// to the semantic toolbar placement.
+    private var sheetContent: some View {
+        VStack(spacing: 12) {
+            statusHeader(showQuestion: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            answers
+        }
+        .padding(16)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Not now") { onSkip() }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("assist.notNow")
+                    .accessibilityHint("Leaves the assist for Review. The goal stays recorded.")
+            }
+        }
+    }
+
+    private func statusHeader(showQuestion: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if showQuestion {
+                Text("Who assisted?")
+                    .font(.title3.weight(.semibold))
+            }
+            Label("Goal recorded · \(scorerName)", systemImage: "checkmark.circle.fill")
+                .font(.subheadline)
+                .foregroundStyle(Programme.Palette.confirmed)
+                .accessibilityIdentifier("assist.recordedConfirmation")
+        }
+    }
+
+    private var answers: some View {
+        Group {
             Button {
                 onPick(nil)
             } label: {
@@ -219,8 +305,16 @@ struct AssistPickerStage: View {
             .accessibilityIdentifier("assist.unknown")
             .accessibilityHint("Records the assist now and collects it under Review.")
         }
-        .padding(16)
     }
+}
+
+/// How a single-question composer step is presented. Inline keeps its own
+/// header chrome because the workspace has no modal navigation bar; in a
+/// compact sheet the NavigationStack owns the title and the modal decisions,
+/// so the step drops its header row and supplies semantic toolbar actions.
+enum StagePresentation {
+    case inline
+    case compactSheet
 }
 
 /// Optional shot placement, for a shot that is **already recorded**.
@@ -232,56 +326,126 @@ struct ShotLocationStage: View {
     let shooterName: String
     let outcome: ShotOutcome
     var markers: [ShotMarker]
+    var presentation: StagePresentation
     @State private var location: PitchPoint?
     var onCommit: (PitchPoint?) -> Void
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .inline:
+                inlineContent
+            case .compactSheet:
+                sheetContent
+            }
+        }
+        .programmeSensoryFeedback(.selection, trigger: location)
+    }
+
+    private var inlineContent: some View {
         VStack(spacing: 10) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Where was it struck?")
-                        .font(.title3.weight(.semibold))
-                    Label("\(outcome.label) recorded · \(shooterName)", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Programme.Palette.confirmed)
-                }
+                recordedStatus(showQuestion: true)
                 Spacer()
                 if location != nil {
-                    Button("Clear") { location = nil }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("shotLocation.clear")
-                        .accessibilityHint("Clears the proposed shot location. Apple Pencil double-tap does the same.")
+                    clearButton
                 }
                 Button("Skip") { onCommit(nil) }
                     .buttonStyle(.bordered)
-                    .keyboardShortcut(.escape, modifiers: [])
+                    .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("shotLocation.skip")
                 Button("Record") { onCommit(location) }
                     .programmePrimaryAction()
                     .disabled(location == nil)
-                    .keyboardShortcut(.return, modifiers: [])
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("shotLocation.record")
             }
-            PitchView(
-                markers: markers,
-                pendingLocation: location,
-                isPlacementActive: true,
-                onPlace: { point in
-                    location = point
-                },
-                onClearPendingLocation: {
-                    location = nil
-                },
-                onConfirmPendingLocation: {
-                    // Mirrors the Record button, which stays disabled with no
-                    // pending point, so squeeze with nothing proposed is quiet.
-                    if location != nil {
-                        onCommit(location)
-                    }
-                }
-            )
+            pitch
         }
         .padding(16)
-        .programmeSensoryFeedback(.selection, trigger: location)
+    }
+
+    /// In a compact sheet the NavigationStack owns the modal decisions. Skip and
+    /// Record use SwiftUI's semantic toolbar placements so the system decides
+    /// their position and appearance; Clear remains contextual to the pitch
+    /// because it only changes the pending point.
+    private var sheetContent: some View {
+        VStack(spacing: 12) {
+            recordedStatus(showQuestion: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            pitch
+                .overlay(alignment: .topTrailing) {
+                    if location != nil {
+                        clearButton
+                            .padding(10)
+                    }
+                }
+        }
+        .padding(16)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Skip") { onCommit(nil) }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("shotLocation.skip")
+                    .accessibilityHint("Leaves this recorded shot without a location.")
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Record") { onCommit(location) }
+                    .disabled(location == nil)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("shotLocation.record")
+                    .accessibilityHint("Records the selected shot location.")
+            }
+        }
+    }
+
+    private var clearButton: some View {
+        Button("Clear", systemImage: "xmark.circle") {
+            location = nil
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("shotLocation.clear")
+        .accessibilityHint(
+            "Clears the proposed shot location. Apple Pencil double-tap does the same.")
+    }
+
+    @ViewBuilder
+    private func recordedStatus(showQuestion: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if showQuestion {
+                Text("Where was it struck?")
+                    .font(.title3.weight(.semibold))
+            }
+            Label(
+                "\(outcome.label) recorded · \(shooterName)",
+                systemImage: "checkmark.circle.fill"
+            )
+            .font(.subheadline)
+            .foregroundStyle(Programme.Palette.confirmed)
+            .accessibilityIdentifier("shotLocation.recordedConfirmation")
+        }
+    }
+
+    private var pitch: some View {
+        PitchView(
+            markers: markers,
+            pendingLocation: location,
+            isPlacementActive: true,
+            onPlace: { point in
+                location = point
+            },
+            onClearPendingLocation: {
+                location = nil
+            },
+            onConfirmPendingLocation: {
+                // Mirrors Record: Pencil squeeze is quiet until there is a
+                // concrete pending point.
+                if location != nil {
+                    onCommit(location)
+                }
+            }
+        )
     }
 }
 
@@ -302,26 +466,28 @@ struct ShotOutcomeStage: View {
     let context: ShotOutcomeContext
     var onPick: (ShotOutcome) -> Void
     var onCancel: () -> Void
+    var presentation: StagePresentation
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @ScaledMetric(relativeTo: .title3) private var outcomeHeight: CGFloat = 66
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .inline:
+                inlineContent
+            case .compactSheet:
+                sheetContent
+            }
+        }
+    }
+
+    /// The workspace has no modal navigation bar, so the step keeps its own
+    /// question header and Cancel.
+    private var inlineContent: some View {
         VStack(spacing: 16) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("What happened?")
-                        .font(.title3.weight(.semibold))
-                    Text("\(context.label) · \(shooterName)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                // One heading that says both what is being asked and what it is
-                // about, so VoiceOver does not read the question without the
-                // shooter it belongs to.
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("outcome.prompt")
+                promptHeader(showQuestion: true)
                 Spacer()
                 Button("Cancel") { onCancel() }
                     .buttonStyle(.bordered)
@@ -330,20 +496,64 @@ struct ShotOutcomeStage: View {
                     .accessibilityHint("Discards this attempt. Nothing has been recorded yet.")
             }
 
-            // Deliberately no default and no Return shortcut. There is no safe
-            // guess about what happened to a shot, and the distance between two
-            // of these answers is a goal.
-            ScrollView {
-                VStack(spacing: 10) {
-                    ForEach(context.choices) { choice in
-                        outcomeButton(choice)
-                    }
-                }
-                .padding(.bottom, 4)
-            }
-            .scrollBounceBehavior(.basedOnSize)
+            choices
         }
         .padding(16)
+    }
+
+    /// The compact sheet's NavigationStack owns the "What happened?" title,
+    /// so the content keeps the context line and the answers while Cancel
+    /// moves to the semantic toolbar placement.
+    private var sheetContent: some View {
+        VStack(spacing: 16) {
+            promptHeader(showQuestion: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            choices
+        }
+        .padding(16)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { onCancel() }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("outcome.cancel")
+                    .accessibilityHint("Discards this attempt. Nothing has been recorded yet.")
+            }
+        }
+    }
+
+    /// One heading that says both what is being asked and what it is about,
+    /// so VoiceOver does not read the question without the shooter it
+    /// belongs to. In a sheet the navigation title already asks the
+    /// question, leaving the context line.
+    private func promptHeader(showQuestion: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if showQuestion {
+                Text("What happened?")
+                    .font(.title3.weight(.semibold))
+            }
+            Text("\(context.label) · \(shooterName)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("outcome.prompt")
+    }
+
+    private var choices: some View {
+        // Deliberately no default and no Return shortcut. There is no safe
+        // guess about what happened to a shot, and the distance between two
+        // of these answers is a goal.
+        ScrollView {
+            VStack(spacing: 10) {
+                ForEach(context.choices) { choice in
+                    outcomeButton(choice)
+                }
+            }
+            .padding(.bottom, 4)
+        }
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     @ViewBuilder
