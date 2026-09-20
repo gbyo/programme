@@ -126,6 +126,14 @@ struct MatchesView: View {
         .task(id: [teamID.rawValue.uuidString, "\(seasonFilter)", "\(appModel.storeRevision)"]) {
             await reload()
         }
+        .onChange(of: teamID) {
+            // A specific season of the old team is meaningless for the new
+            // one, and a pending delete belongs to it too. The shell no
+            // longer resets our identity on team switches, so team-relative
+            // state resets here where it lives.
+            seasonFilter = .current
+            matchToDelete = nil
+        }
     }
 
     private var activeSeasonID: SeasonID? {
