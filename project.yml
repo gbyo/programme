@@ -55,6 +55,9 @@ targets:
     # (Xcode writes aps-environment itself at signing time; it is never
     # hard-coded here). Until then sync reports unavailable and all local
     # behavior is unchanged.
+    # The App Group below must also be registered in the Developer Portal
+    # (or let automatic signing create it) so the widget extension can
+    # read the snapshot Programme writes via ProgrammeSharedContainer.
     entitlements:
       path: App/Programme/Programme.entitlements
       properties:
@@ -62,6 +65,8 @@ targets:
           - iCloud.com.gbyo.programme
         com.apple.developer.icloud-services:
           - CloudKit
+        com.apple.security.application-groups:
+          - group.com.gbyo.programme
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme
@@ -85,6 +90,15 @@ targets:
     dependencies:
       - package: ProgrammeKit
         products: [ProgrammeCore, ProgrammePersistence, ProgrammeUI]
+    # Shared snapshot container, declared in
+    # App/ProgrammeWidgets/ProgrammeWidgets.entitlements. Must match the
+    # App Group on the Programme target so the widget extension can read
+    # the snapshot the app writes via ProgrammeSharedContainer.
+    entitlements:
+      path: App/ProgrammeWidgets/ProgrammeWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.gbyo.programme
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gbyo.Programme.widgets

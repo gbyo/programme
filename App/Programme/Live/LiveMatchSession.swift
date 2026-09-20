@@ -64,7 +64,7 @@ final class LiveMatchSession {
         self.snapshot = StatEngine.snapshot(context: context)
         self.issues = []
         self.issues = ValidationEngine.issues(context: context, snapshot: snapshot)
-        self.lastEventDescription = Self.describeLastMeaningfulEvent(in: context)
+        self.lastEventDescription = Self.describeLastMeaningfulEvent(in: context, scoreAfter: snapshot.score)
         clock.configure(anchor: context.clock, rules: context.rules)
         try? journal.open(
             matchID: matchID, descriptor: context.descriptor, roster: context.roster,
@@ -235,6 +235,47 @@ final class LiveMatchSession {
         guard let location, var shot = shotPayload(of: eventID) else { return }
         shot.location = location
         edit(.replacePayload(eventID, .shot(shot), summary: "Shot location added"))
+    }
+
+    /// Add optional Advanced metadata to a shot that already exists.
+    func resolveShotBodyPart(_ bodyPart: BodyPart?, on eventID: EventID) {
+        guard let bodyPart, var shot = shotPayload(of: eventID) else { return }
+        shot.bodyPart = bodyPart
+        edit(.replacePayload(eventID, .shot(shot), summary: "Body part set to \(bodyPart.label)"))
+    }
+
+    /// Refine the phase of play on an already-recorded shot.
+    ///
+    /// Changing a goal to a penalty removes assist credit because penalty goals
+    /// are never assisted. Changing a penalty goal back to another phase marks
+    /// the assist unresolved so Programme never silently invents "unassisted."
+    func resolveShotPhase(_ phase: PlayPhase?, on eventID: EventID) {
+        guard let phase, var shot = shotPayload(of: eventID), shot.phase != phase else { return }
+        let previousPhase = shot.phase
+        shot.phase = phase
+        if shot.outcome.isGoal, !shot.isOwnGoal {
+            if phase == .penaltyKick {
+                shot.assist = nil
+            } else if previousPhase == .penaltyKick,
+                shot.assist == nil,
+                profile.prompts.assistOnGoal
+            {
+                shot.assist = .unidentified
+            }
+        }
+        edit(.replacePayload(eventID, .shot(shot), summary: "Phase set to \(phase.label)"))
+    }
+
+    /// Add the optional Advanced reason to a card that is already recorded.
+    func resolveCardReason(_ reason: String?, on eventID: EventID) {
+        guard let reason else { return }
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+            let event = context.events.first(where: { $0.id == eventID }),
+            case .card(var card) = event.payload
+        else { return }
+        card.reason = trimmed
+        edit(.replacePayload(eventID, .card(card), summary: "Card reason added"))
     }
 
     /// Whether an already-recorded goal still has an unsettled assist.
@@ -426,10 +467,17 @@ final class LiveMatchSession {
         ProgrammeSignposts.measure("deriveSnapshot") {
             snapshot = StatEngine.snapshot(context: context, at: Date())
             issues = ValidationEngine.issues(context: context, snapshot: snapshot)
-            lastEventDescription = Self.describeLastMeaningfulEvent(in: context)
+            lastEventDescription = Self.describeLastMeaningfulEvent(in: context, scoreAfter: snapshot.score)
         }
         clock.configure(anchor: context.clock, rules: context.rules)
         startOrUpdateActivity()
+
+        // Companion presentation follows authoritative in-memory match state,
+        // not the later SwiftData history notification. This keeps Watch/shared
+        // state current on iOS 26 too, while avoiding heavyweight derived work.
+        Task { [weak self] in
+            await self?.appModel?.refreshLiveCompanionSnapshot()
+        }
     }
 
     private func enqueueStoreWrite(_ effects: [MatchEffect]) {
@@ -513,24 +561,24 @@ final class LiveMatchSession {
         notice = nil
     }
 
-    private static func describeLastMeaningfulEvent(in context: MatchContext) -> EventDescription? {
-        let events = context.activeEvents
+    private static func describeLastMeaningfulEvent(
+        in context: MatchContext,
+        scoreAfter: SidePair<Int>
+    ) -> EventDescription? {
+        // Only `.note` and `.clockAdjusted` events can follow the last
+        // meaningful event, and neither affects the score, so the already
+        // derived final score is the score as it stood after that event.
+        // Replaying every scoring event here would rescan history for the
+        // identical number on every commit.
         guard
-            let last = events.last(where: {
+            let last = context.activeEvents.last(where: {
                 switch $0.payload {
                 case .note, .clockAdjusted: false
                 default: true
                 }
             })
         else { return nil }
-        var score = SidePair(repeating: 0)
-        for event in events {
-            if case .shot(let shot) = event.payload, shot.outcome.isGoal {
-                score[shot.scoringSide] += 1
-            }
-            if event.id == last.id { break }
-        }
-        return MatchNarrator.describe(last, context: context, scoreAfter: score)
+        return MatchNarrator.describe(last, context: context, scoreAfter: scoreAfter)
     }
 
     // MARK: - Live Activity

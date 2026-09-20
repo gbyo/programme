@@ -35,7 +35,6 @@
     </dict>
     <key>UIBackgroundModes</key>
     <array>
-        <string>processing</string>
         <string>remote-notification</string>
     </array>
     <key>CKSharingSupported</key>
@@ -46,10 +45,6 @@
     </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Programme looks for nearby matches to show a read-only scoreboard on this display. Scoring stays on the scorer's device.</string>
-    <key>BGTaskSchedulerPermittedIdentifiers</key>
-    <array>
-        <string>com.gbyo.programme.maintenance</string>
-    </array>
     <key>UILaunchScreen</key>
     <dict>
         <key>UIColorName</key>
