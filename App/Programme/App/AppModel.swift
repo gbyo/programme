@@ -590,9 +590,17 @@ final class AppModel {
         await refreshWidgetSnapshot()
 
         storeObserver.start(container: container) { [weak self] in
-            self?.noteStoreChanged()
-            await self?.refreshWidgetSnapshot()
-            await self?.refreshRecoveryCandidates()
+            guard let self else { return }
+
+            // Live scoring owns its own lightweight companion refresh path.
+            // SwiftData history is a persistence signal, not a reason to
+            // recompute season stats, recovery journals, Spotlight, or widgets
+            // after every event.
+            guard self.liveSession == nil else { return }
+
+            self.noteStoreChanged()
+            await self.refreshWidgetSnapshot()
+            await self.refreshRecoveryCandidates()
         }
     }
 
@@ -893,6 +901,7 @@ final class AppModel {
                 LiveMatchSession(context: context, store: store, journal: journal, appModel: self)
             }
             liveSession = session
+            await refreshLiveCompanionSnapshot()
             ProgrammeStateReporter.reportWorkflow(.liveScoring)
             dismissRecovery(for: matchID)
             navigation.presentLiveMatch()
@@ -910,7 +919,13 @@ final class AppModel {
         nearby.stopAdvertising()
         ProgrammeStateReporter.reportWorkflow(.browsing)
         navigation.isShowingLiveMatch = false
+
+        // Live event writes deliberately do not churn browsing projections.
+        // Publish one revision when the scorer closes, then rebuild the
+        // heavyweight derived surfaces once from the final local state.
+        noteStoreChanged()
         await refreshWidgetSnapshot()
+        await refreshRecoveryCandidates()
     }
 
     // MARK: - Scene phase
@@ -918,12 +933,101 @@ final class AppModel {
     func scenePhaseChanged(to phase: ScenePhase) {
         guard phase == .background || phase == .inactive else { return }
         // Make sure everything recorded has reached the database before the app
-        // can be suspended or killed.
-        Task { await liveSession?.flush() }
+        // can be suspended or killed. When actually backgrounding, request one
+        // Match widget reload after writing the latest live snapshot; WidgetKit
+        // can then budget the refresh rather than Programme requesting one for
+        // every event while it is in the foreground.
+        Task { [weak self] in
+            guard let self else { return }
+            await self.liveSession?.flush()
+            if phase == .background, self.liveSession != nil {
+                await self.refreshLiveCompanionSnapshot(reloadWidget: true)
+            }
+        }
         if phase == .background { MaintenanceScheduler.scheduleIfNeeded() }
     }
 
     // MARK: - Widgets (selected-team scoped)
+
+    /// Refresh only live companion presentation. The expensive season/recovery
+    /// projections stay unchanged until the scorer leaves the match.
+    func refreshLiveCompanionSnapshot(reloadWidget: Bool = false) async {
+        guard let session = liveSession,
+            workspace.selectedTeamID == session.descriptor.teamID
+        else { return }
+
+        guard var snapshot = ProgrammeSharedContainer.read() else {
+            await refreshWidgetSnapshot()
+            return
+        }
+
+        snapshot.live = ProgrammeWidgetSnapshot.LiveMatch(
+            matchID: session.matchID.rawValue.uuidString,
+            teamShortName: session.descriptor.teamShortName,
+            opponentShortName: session.descriptor.opponentShortName,
+            scoreUs: session.snapshot.score.us,
+            scoreOpponent: session.snapshot.score.opponent,
+            periodLabel: session.context.currentPeriod?.shortLabel ?? "",
+            clockText: session.clock.displayText,
+            isClockRunning: session.clock.isRunning,
+            needsReviewCount: session.snapshot.needsReviewCount,
+            lastEventText: session.lastEventDescription?.oneLine)
+        snapshot.updatedAt = Date()
+        ProgrammeSharedContainer.write(snapshot)
+
+        let syncReviewCount: Int
+        if let syncService {
+            let conflicts = await syncService.unresolvedConflicts(teamID: session.descriptor.teamID)
+            syncReviewCount = conflicts.count
+        } else {
+            syncReviewCount = 0
+        }
+
+        let watchLive = WatchSnapshot.Live(
+            matchID: session.matchID,
+            teamShortName: session.descriptor.teamShortName,
+            opponentShortName: session.descriptor.opponentShortName,
+            scoreUs: session.snapshot.score.us,
+            scoreOpponent: session.snapshot.score.opponent,
+            clock: session.context.clock,
+            rules: session.context.rules,
+            phase: session.context.phase,
+            needsReviewCount: session.snapshot.needsReviewCount,
+            lastEventText: session.lastEventDescription?.oneLine)
+
+        let watchUpcoming = snapshot.upcoming.flatMap { item -> WatchSnapshot.Upcoming? in
+            guard let uuid = UUID(uuidString: item.matchID) else { return nil }
+            return WatchSnapshot.Upcoming(
+                matchID: MatchID(uuid),
+                opponentShortName: item.opponentShortName,
+                venueLabel: item.venueLabel,
+                kickoff: item.kickoff)
+        }
+        let watchRecent = snapshot.recent.compactMap { item -> WatchSnapshot.Recent? in
+            guard let uuid = UUID(uuidString: item.matchID) else { return nil }
+            return WatchSnapshot.Recent(
+                matchID: MatchID(uuid),
+                opponentShortName: item.opponentShortName,
+                resultLetter: item.resultLetter,
+                scoreUs: item.scoreUs,
+                scoreOpponent: item.scoreOpponent,
+                kickoff: item.kickoff)
+        }
+
+        watchBridge.push(
+            WatchSnapshot(
+                teamName: snapshot.teamName,
+                teamShortName: snapshot.teamShortName,
+                recordText: snapshot.recordText,
+                live: watchLive,
+                upcoming: watchUpcoming,
+                recent: watchRecent,
+                reviewCount: session.snapshot.needsReviewCount + syncReviewCount))
+
+        if reloadWidget {
+            WidgetRefresher.reloadMatchStatus()
+        }
+    }
 
     /// The widget snapshot represents the currently selected team. While a
     /// match is live, its team identity comes from the live session's

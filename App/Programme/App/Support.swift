@@ -182,6 +182,12 @@ enum WidgetRefresher {
             WidgetCenter.shared.reloadAllTimelines()
         #endif
     }
+
+    static func reloadMatchStatus() {
+        #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadTimelines(ofKind: "com.gbyo.programme.matchStatus")
+        #endif
+    }
 }
 
 /// Background work is only ever maintenance. Nothing about a match's
