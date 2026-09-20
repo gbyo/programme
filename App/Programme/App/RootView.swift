@@ -93,8 +93,8 @@ struct RootView: View {
             // every tab, so it sits pinned in the sidebar's bottom
             // workspace area. The bottom bar only appears when the TabView
             // shows a sidebar, and owns its own spacing — no manual
-            // padding, backgrounds, icons, or selected-state chrome.
-            TeamSwitcherControl()
+            // padding, backgrounds, or selected-state chrome.
+            SidebarTeamSwitcher()
                 .accessibilityIdentifier("sidebar.teamSwitcher")
         }
         .id(appModel.workspace.selectedTeamID)
@@ -134,35 +134,50 @@ struct RootView: View {
     }
 }
 
-/// Native team switching. Team is workspace context, not a destination: the
-/// section title owns the navigation bar, and one shared Menu switches teams
-/// from the sidebar bottom bar (sidebar visible) or the toolbar (otherwise).
-/// Used at the root of each section.
+/// Native team switching. Team is workspace context, not a destination, and
+/// each adaptive presentation gets the interaction that fits its space —
+/// all driven by `tabBarPlacement`, which tells content how the TabView is
+/// currently represented. Used at the root of each section.
 struct TeamSwitcherTitle: ViewModifier {
+    @Environment(AppModel.self) private var appModel
     @Environment(\.tabBarPlacement) private var tabBarPlacement
     let sectionTitle: String
 
+    private var teamName: String { appModel.workspace.selectedTeam?.name ?? "" }
+
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .navigationTitle(sectionTitle)
-            // Keep the root title in the toolbar from the first frame so the
-            // section title is stable without requiring a scroll to collapse
-            // a large navigation title first.
-            .toolbarTitleDisplayMode(.inlineLarge)
-            .toolbar {
-                // The sidebar bottom bar owns team switching while the
-                // TabView shows a sidebar. In every other presentation —
-                // the collapsed iPad top bar, iPhone bottom tabs — that bar
-                // is gone, so the same Menu lives in the toolbar instead.
-                // Leading is free at every section root (no back button),
-                // so the switcher never competes with section actions.
-                if tabBarPlacement != .sidebar {
+        if tabBarPlacement == .sidebar {
+            // The sidebar bottom bar owns team switching; the navigation
+            // bar carries only the section title with default title
+            // behavior.
+            content
+                .navigationTitle(sectionTitle)
+        } else if tabBarPlacement == .topBar {
+            // Collapsed iPad top bar: the adaptive tabs and section actions
+            // already fill the bar, so team switching is a compact
+            // icon-only Menu. Default title behavior otherwise.
+            content
+                .navigationTitle(sectionTitle)
+                .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        TeamSwitcherControl()
-                            .accessibilityIdentifier("toolbar.teamSwitcher")
+                        TopBarTeamSwitcher()
                     }
                 }
-            }
+        } else {
+            // Bottom tabs, nil, and any other placement: the native title
+            // context pattern. `navigationSubtitle` is the documented place
+            // for context alongside a title, and `toolbarTitleMenu` opens
+            // from a tap on that title — destination on top, workspace
+            // beneath it. Default display mode lets SwiftUI own the
+            // large-to-compact scroll transition.
+            content
+                .navigationTitle(sectionTitle)
+                .navigationSubtitle(teamName)
+                .toolbarTitleMenu {
+                    TeamSwitcherMenu()
+                }
+        }
     }
 }
 
@@ -172,24 +187,51 @@ extension View {
     }
 }
 
-/// One shared workspace switcher for the sidebar bottom bar and the toolbar
-/// fallback. Presentation-only: the Menu label names the current team on one
-/// truncated line with the native menu indicator (no hand-drawn chevron, no
-/// SF Symbol), and `TeamSwitcherMenu` owns the entries. Native Menu semantics
-/// keep VoiceOver on "team name, menu" instead of passive text.
-struct TeamSwitcherControl: View {
+/// Sidebar workspace switcher: a native Label-style Menu (icon, one
+/// truncated line, native menu indicator) so the pinned bottom item reads
+/// as interactive, not passive text. Presentation-only; `TeamSwitcherMenu`
+/// owns the entries. VoiceOver hears the team name as a menu plus the
+/// switch hint. The soccerball symbol is the workspace mark: it is already
+/// used for the first-run identity and stays distinct from the Home,
+/// Matches, Roster, and Stats destination icons.
+struct SidebarTeamSwitcher: View {
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
         Menu {
             TeamSwitcherMenu()
         } label: {
-            Text(appModel.workspace.selectedTeam?.name ?? "Programme")
-                .lineLimit(1)
-                .truncationMode(.tail)
+            Label(
+                appModel.workspace.selectedTeam?.name ?? "Programme",
+                systemImage: "soccerball"
+            )
+            .lineLimit(1)
+            .truncationMode(.tail)
         }
         .menuIndicator(.visible)
         .accessibilityHint("Switch team")
+    }
+}
+
+/// Collapsed-top-bar workspace switcher: the same menu entries behind a
+/// compact icon-only control, so long team names can never consume toolbar
+/// width beside the adaptive tabs. The visible label is icon-only; the full
+/// "Switch team, <name>" semantics ride on the accessibility label, and the
+/// opened Menu still checkmarks the current team.
+struct TopBarTeamSwitcher: View {
+    @Environment(AppModel.self) private var appModel
+
+    private var teamName: String? { appModel.workspace.selectedTeam?.name }
+
+    var body: some View {
+        Menu {
+            TeamSwitcherMenu()
+        } label: {
+            Label("Switch Team", systemImage: "soccerball")
+                .labelStyle(.iconOnly)
+        }
+        .accessibilityLabel(teamName.map { "Switch team, \($0)" } ?? "Switch team")
+        .accessibilityIdentifier("topbar.teamSwitcher")
     }
 }
 

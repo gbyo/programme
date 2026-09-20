@@ -143,40 +143,6 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
             "Recovery reassurance leaked into everyday Home content")
     }
 
-    /// Creates a team through Settings → Manage Teams, leaving it selected
-    /// with its native empty Home. Shared by the team-switcher tests, which
-    /// each need a second workspace to switch between.
-    private func createTeam(
-        _ app: XCUIApplication, name: String, shortName: String
-    ) {
-        tapToolbarButton(app, "home.settings", label: "Settings")
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
-        app.staticTexts["Manage Teams…"].tap()
-        XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
-        app.buttons["Add Team…"].tap()
-        XCTAssertTrue(app.navigationBars["New Team"].waitForExistence(timeout: 5))
-        replaceText(app, app.textFields["Team name"], with: name)
-        replaceText(app, app.textFields["Short name for the scoreboard"], with: shortName)
-        app.buttons["Create"].tap()
-        XCTAssertTrue(
-            app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
-            "Creating a team did not select it")
-    }
-
-    /// Taps a team-switcher menu entry, which can surface as either a menu
-    /// item or a button depending on how the popover renders.
-    private func tapTeamMenuEntry(_ app: XCUIApplication, _ label: String) {
-        if app.menuItems[label].waitForExistence(timeout: 5) {
-            app.menuItems[label].tap()
-            return
-        }
-        let button = app.buttons[label].firstMatch
-        XCTAssertTrue(
-            button.waitForExistence(timeout: 5),
-            "No sidebar menu entry for \(label)")
-        button.tap()
-    }
-
     /// The sidebar bottom bar is workspace context, not a fifth destination:
     /// opening it offers the team menu, and picking another team switches
     /// the workspace Home shows.
@@ -194,10 +160,10 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
             switcher.label.contains("JV Test Team"),
             "The sidebar switcher does not name the current team: \(switcher.label)")
         // One switcher per presentation: with the sidebar visible, the
-        // toolbar fallback stays out of the hierarchy.
+        // collapsed-top-bar icon stays out of the hierarchy.
         XCTAssertFalse(
-            element(app, "toolbar.teamSwitcher").exists,
-            "The toolbar switcher is shown alongside the sidebar switcher")
+            element(app, "topbar.teamSwitcher").exists,
+            "The top-bar switcher is shown alongside the sidebar switcher")
         switcher.tap()
         tapTeamMenuEntry(app, "Ninety Six Boys Soccer")
         XCTAssertTrue(
@@ -212,40 +178,6 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
                 || app.buttons["Manage Teams…"].firstMatch.waitForExistence(timeout: 5),
             "The sidebar switcher did not open the team menu")
         attachScreenshot(named: "Sidebar team menu")
-    }
-
-    /// Without a sidebar the same team menu lives in the navigation toolbar:
-    /// opening it offers the team list, and picking another team switches
-    /// the workspace Home shows.
-    func testToolbarTeamMenuSwitchesWorkspace() throws {
-        try XCTSkipUnless(
-            UIDevice.current.userInterfaceIdiom == .phone,
-            "The toolbar switcher only appears where no sidebar is shown.")
-        let app = launch()
-        waitForHome(app)
-        createTeam(app, name: "JV Test Team", shortName: "JV Test")
-
-        let switcher = element(app, "toolbar.teamSwitcher")
-        XCTAssertTrue(switcher.waitForExistence(timeout: 10))
-        XCTAssertTrue(
-            switcher.label.contains("JV Test Team"),
-            "The toolbar switcher does not name the current team: \(switcher.label)")
-        // The sidebar-only switcher is absent outside a sidebar presentation.
-        XCTAssertFalse(
-            element(app, "sidebar.teamSwitcher").exists,
-            "The sidebar switcher appears where no sidebar is shown")
-        switcher.tap()
-        tapTeamMenuEntry(app, "Ninety Six Boys Soccer")
-        XCTAssertTrue(
-            element(app, "match.Emerald").waitForExistence(timeout: 10),
-            "Switching teams from the toolbar menu did not change the workspace")
-
-        element(app, "toolbar.teamSwitcher").tap()
-        XCTAssertTrue(
-            app.menuItems["Manage Teams…"].waitForExistence(timeout: 5)
-                || app.buttons["Manage Teams…"].firstMatch.waitForExistence(timeout: 5),
-            "The toolbar switcher did not open the team menu")
-        attachScreenshot(named: "Toolbar team menu")
     }
 
     /// A long team name stays on one truncated line: the four destinations
