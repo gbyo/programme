@@ -19,6 +19,7 @@ struct ShotLocationCorrectionTests {
         let event = try #require(fixture.lastEvent)
         let shotsBefore = fixture.snapshot.player(ProgrammeSample.carter).shots
         let onGoalBefore = fixture.snapshot.player(ProgrammeSample.carter).shotsOnGoal
+        let eventCountBefore = fixture.context.activeEvents.count
 
         guard case .shot(var shot) = event.payload else {
             Issue.record("Expected a shot event")
@@ -62,6 +63,6 @@ struct ShotLocationCorrectionTests {
         #expect(final.location == nil)
         #expect(fixture.snapshot.player(ProgrammeSample.carter).shots == shotsBefore)
         #expect(fixture.snapshot.player(ProgrammeSample.carter).shotsOnGoal == onGoalBefore)
-        #expect(fixture.context.activeEvents.count == 2) // lineup + shot; edits append no events
+        #expect(fixture.context.activeEvents.count == eventCountBefore)
     }
 }
