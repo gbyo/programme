@@ -350,9 +350,11 @@ struct RosterImportView: View {
         guard let store = appModel.store, let preview else { return }
         do {
             try await store.addPlayers(teamID: teamID, preview.players)
+            Haptics.success()
             dismiss()
         } catch {
             errorMessage = "Programme couldn't save those players. Nothing was changed. Try again."
+            Haptics.error()
         }
     }
 }
