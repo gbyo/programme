@@ -105,7 +105,16 @@ struct MatchesView: View {
         ) { match in
             Button("Delete Match", role: .destructive) {
                 Task {
-                    try? await appModel.store?.deleteMatch(match.id)
+                    do {
+                        try await appModel.store?.deleteMatch(match.id)
+                        Haptics.success()
+                    } catch {
+                        Haptics.error()
+                        appModel.navigation.errorToShow = ProgrammeError(
+                            title: "Couldn't delete match",
+                            message: "Nothing was changed. Try again.",
+                            underlying: error)
+                    }
                     await reload()
                 }
             }
