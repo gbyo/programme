@@ -887,6 +887,7 @@ struct LiveMatchView: View {
             shooterName: session.context.roster(for: side).label(for: shot.shooter),
             outcome: shot.outcome,
             side: side,
+            tracking: session.descriptor.tracking,
             profile: session.profile)
     }
 
@@ -899,6 +900,7 @@ struct LiveMatchView: View {
             shooterName: scorerName,
             outcome: .goal,
             side: side,
+            tracking: session.descriptor.tracking,
             profile: session.profile)
     }
 

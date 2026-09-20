@@ -15,6 +15,7 @@ final class EventComposerTests: XCTestCase {
             shooterName: "#9 Carter",
             outcome: .goal,
             side: .us,
+            tracking: .ourTeam,
             profile: .standard)
 
         XCTAssertEqual(
@@ -32,12 +33,13 @@ final class EventComposerTests: XCTestCase {
             shooterName: "#9 Carter",
             outcome: .goal,
             side: .us,
+            tracking: .ourTeam,
             profile: .maxPreps)
 
         XCTAssertNil(composer.step)
     }
 
-    func testStandardDoesNotAskForOpponentShotLocation() {
+    func testOurTeamModeDoesNotAskForOpponentShotLocation() {
         let goalID = EventID()
         var composer = EventComposer(
             step: .assist(goal: goalID, scorerName: "Opponent", side: .opponent))
@@ -47,8 +49,27 @@ final class EventComposerTests: XCTestCase {
             shooterName: "Opponent",
             outcome: .goal,
             side: .opponent,
+            tracking: .ourTeam,
             profile: .standard)
 
         XCTAssertNil(composer.step)
+    }
+
+    func testBothTeamsModeAsksForOpponentShotLocation() {
+        let goalID = EventID()
+        var composer = EventComposer(
+            step: .assist(goal: goalID, scorerName: "Opponent", side: .opponent))
+
+        composer.offerShotLocation(
+            shot: goalID,
+            shooterName: "Opponent",
+            outcome: .goal,
+            side: .opponent,
+            tracking: .bothTeams,
+            profile: .standard)
+
+        XCTAssertEqual(
+            composer.step,
+            .shotLocation(shot: goalID, shooterName: "Opponent", outcome: .goal))
     }
 }

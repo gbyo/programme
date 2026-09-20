@@ -119,15 +119,19 @@ struct EventComposer: Equatable {
     /// Offer optional location enrichment for a shot that is already recorded.
     ///
     /// This is shared by ordinary shots and by goals after their assist question,
-    /// so the profile policy cannot drift between those two paths.
+    /// so the profile policy cannot drift between those two paths. Both Teams
+    /// mode tracks opponent shots symmetrically with ours; Our Team mode keeps
+    /// the opponent one-tap shot a single tap, so no location step is offered
+    /// there.
     mutating func offerShotLocation(
         shot: EventID,
         shooterName: String,
         outcome: ShotOutcome,
         side: TeamSide,
+        tracking: OpponentTrackingMode,
         profile: StatProfile
     ) {
-        guard profile.prompts.shotLocation, side == .us else {
+        guard profile.prompts.shotLocation, side == .us || tracking == .bothTeams else {
             finish()
             return
         }
