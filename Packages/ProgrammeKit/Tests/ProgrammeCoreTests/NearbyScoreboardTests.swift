@@ -76,6 +76,36 @@ struct NearbyScoreboardTests {
         #expect(final.isLinkStale(lastReceivedAt: receivedAt, now: receivedAt.addingTimeInterval(99999)) == false)
     }
 
+    @Test("Stale deadline is exactly one threshold past the last receipt")
+    func staleDeadline() {
+        let live = snapshot()
+        let receivedAt = Date(timeIntervalSinceReferenceDate: 2000)
+        // The one-shot deadline the display waits on.
+        #expect(
+            live.staleDeadline(lastReceivedAt: receivedAt)
+                == receivedAt.addingTimeInterval(ScoreboardSnapshot.staleAfter))
+        // Every frame moves the deadline: no polling, just a new wait.
+        let later = receivedAt.addingTimeInterval(10)
+        #expect(
+            live.staleDeadline(lastReceivedAt: later)
+                == later.addingTimeInterval(ScoreboardSnapshot.staleAfter))
+        // The deadline agrees with the banner predicate on both sides.
+        #expect(
+            live.isLinkStale(
+                lastReceivedAt: receivedAt,
+                now: live.staleDeadline(lastReceivedAt: receivedAt)!.addingTimeInterval(-1)) == false)
+        #expect(
+            live.isLinkStale(
+                lastReceivedAt: receivedAt,
+                now: live.staleDeadline(lastReceivedAt: receivedAt)!.addingTimeInterval(1)) == true)
+        // No frame yet means waiting: nothing to schedule.
+        #expect(live.staleDeadline(lastReceivedAt: nil) == nil)
+        // Final scores never schedule stale work.
+        var final = snapshot()
+        final.finalized = true
+        #expect(final.staleDeadline(lastReceivedAt: receivedAt) == nil)
+    }
+
     @Test("Oversized snapshots throw instead of crashing the scorer")
     func oversizedFailsHarmlessly() {
         var huge = snapshot()

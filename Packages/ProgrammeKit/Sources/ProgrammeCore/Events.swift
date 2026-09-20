@@ -21,6 +21,14 @@ public enum ShotOutcome: String, Codable, Hashable, Sendable, CaseIterable {
     public var isOnTarget: Bool { self == .saved || self == .goal }
     public var isGoal: Bool { self == .goal }
 
+    /// Whether this outcome can occur in the selected phase of play.
+    ///
+    /// A penalty kick cannot be blocked by an outfield defender because every
+    /// other outfield player is behind the ball when it is taken.
+    public func isValid(for phase: PlayPhase) -> Bool {
+        !(phase == .penaltyKick && self == .blocked)
+    }
+
     public var label: String {
         switch self {
         case .offTarget: "Off Target"
