@@ -60,11 +60,13 @@ enum ComposerStep: Equatable {
     }
 
     /// Whether a compact-sheet step supplies the sheet's semantic actions
-    /// itself instead of using the composer's generic Done affordance.
+    /// itself instead of using the composer's generic Done affordance. Every
+    /// single-question step owns its escape so the sheet never shows both a
+    /// generic Done and the step's own Cancel / Not now / Skip.
     var ownsSheetActions: Bool {
         switch self {
-        case .shotLocation: true
-        default: false
+        case .choosePlayer, .shotOutcome, .assist, .shotLocation: true
+        case .substitution: false
         }
     }
 

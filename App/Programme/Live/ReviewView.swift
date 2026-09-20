@@ -139,7 +139,10 @@ struct AttributionResolverView: View {
                     session.attribute(eventID: event.id, slot: slot, to: ref)
                     dismiss()
                 },
-                onCancel: { dismiss() }
+                onCancel: { dismiss() },
+                // Review owns its own navigation toolbar, so the stage keeps
+                // its inline header exactly as before.
+                presentation: .inline
             )
         }
         .navigationTitle("Assign Player")

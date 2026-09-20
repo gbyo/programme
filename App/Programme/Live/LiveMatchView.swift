@@ -521,7 +521,8 @@ struct LiveMatchView: View {
                     ? "Record now, attribute later" : "Count it for the team only",
                 showsTips: session.showsContextualTips,
                 onPick: { complete(prompt.action, side: prompt.side, with: $0) },
-                onCancel: { composer.finish() }
+                onCancel: { composer.finish() },
+                presentation: composerUsesSheet ? .compactSheet : .inline
             )
 
         case .shotOutcome(let shooter, let side, let context):
@@ -531,7 +532,8 @@ struct LiveMatchView: View {
                 onPick: { outcome in
                     resolve(outcome: outcome, shooter: shooter, side: side, context: context)
                 },
-                onCancel: { composer.finish() }
+                onCancel: { composer.finish() },
+                presentation: composerUsesSheet ? .compactSheet : .inline
             )
 
         case .assist(let goalID, let scorerName, let side):
@@ -552,7 +554,8 @@ struct LiveMatchView: View {
                     // prompt. The goal remains unresolved for Review while the
                     // scorer can still place it on the map.
                     continueAfterAssist(goalID: goalID, scorerName: scorerName, side: side)
-                }
+                },
+                presentation: composerUsesSheet ? .compactSheet : .inline
             )
 
         case .shotLocation(let shotID, let shooterName, let outcome):
