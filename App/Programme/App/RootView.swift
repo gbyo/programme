@@ -88,20 +88,14 @@ struct RootView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
-        .tabViewSidebarHeader {
+        .tabViewSidebarBottomBar {
             // Workspace context, not a fifth destination: the team scopes
-            // every tab, so it sits in the sidebar header above them. The
-            // header only appears when the TabView shows a sidebar, and owns
-            // its own spacing — no manual padding, backgrounds, or icons.
-            Menu {
-                TeamSwitcherMenu()
-            } label: {
-                Text(appModel.workspace.selectedTeam?.name ?? "Programme")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .accessibilityIdentifier("sidebar.teamSwitcher")
-            .accessibilityHint("Switches teams")
+            // every tab, so it sits pinned in the sidebar's bottom
+            // workspace area. The bottom bar only appears when the TabView
+            // shows a sidebar, and owns its own spacing — no manual
+            // padding, backgrounds, icons, or selected-state chrome.
+            TeamSwitcherControl()
+                .accessibilityIdentifier("sidebar.teamSwitcher")
         }
         .id(appModel.workspace.selectedTeamID)
     }
@@ -140,22 +134,34 @@ struct RootView: View {
     }
 }
 
-/// Native team switching. Team is context shown as subtitle/title-menu, not a
-/// destination. Used at the root of each section.
+/// Native team switching. Team is workspace context, not a destination: the
+/// section title owns the navigation bar, and one shared Menu switches teams
+/// from the sidebar bottom bar (sidebar visible) or the toolbar (otherwise).
+/// Used at the root of each section.
 struct TeamSwitcherTitle: ViewModifier {
-    @Environment(AppModel.self) private var appModel
+    @Environment(\.tabBarPlacement) private var tabBarPlacement
     let sectionTitle: String
 
     func body(content: Content) -> some View {
         content
             .navigationTitle(sectionTitle)
-            .navigationSubtitle(appModel.workspace.selectedTeam?.name ?? "")
             // Keep the root title in the toolbar from the first frame so the
-            // title menu (team switcher) is available without requiring a
-            // scroll to collapse a large navigation title first.
+            // section title is stable without requiring a scroll to collapse
+            // a large navigation title first.
             .toolbarTitleDisplayMode(.inlineLarge)
-            .toolbarTitleMenu {
-                TeamSwitcherMenu()
+            .toolbar {
+                // The sidebar bottom bar owns team switching while the
+                // TabView shows a sidebar. In every other presentation —
+                // the collapsed iPad top bar, iPhone bottom tabs — that bar
+                // is gone, so the same Menu lives in the toolbar instead.
+                // Leading is free at every section root (no back button),
+                // so the switcher never competes with section actions.
+                if tabBarPlacement != .sidebar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        TeamSwitcherControl()
+                            .accessibilityIdentifier("toolbar.teamSwitcher")
+                    }
+                }
             }
     }
 }
@@ -163,6 +169,27 @@ struct TeamSwitcherTitle: ViewModifier {
 extension View {
     func teamWorkspaceTitle(_ title: String) -> some View {
         modifier(TeamSwitcherTitle(sectionTitle: title))
+    }
+}
+
+/// One shared workspace switcher for the sidebar bottom bar and the toolbar
+/// fallback. Presentation-only: the Menu label names the current team on one
+/// truncated line with the native menu indicator (no hand-drawn chevron, no
+/// SF Symbol), and `TeamSwitcherMenu` owns the entries. Native Menu semantics
+/// keep VoiceOver on "team name, menu" instead of passive text.
+struct TeamSwitcherControl: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        Menu {
+            TeamSwitcherMenu()
+        } label: {
+            Text(appModel.workspace.selectedTeam?.name ?? "Programme")
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .menuIndicator(.visible)
+        .accessibilityHint("Switch team")
     }
 }
 
