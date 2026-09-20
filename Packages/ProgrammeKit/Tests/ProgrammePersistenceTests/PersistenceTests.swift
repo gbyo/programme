@@ -138,6 +138,65 @@ struct RecoveryJournalTests {
     }
 }
 
+@Suite("Closed-journal upkeep policy")
+struct JournalUpkeepPolicyTests {
+
+    private func makeJournal() throws -> (RecoveryJournal, URL) {
+        let directory = URL.temporaryDirectory.appending(path: "programme-upkeep-tests-\(UUID().uuidString)")
+        return (try RecoveryJournal(directory: directory), directory)
+    }
+
+    private func closedJournal(in journal: RecoveryJournal) throws {
+        var context = MatchContext(descriptor: ProgrammeSample.descriptor(), roster: ProgrammeSample.roster)
+        try journal.open(
+            matchID: context.descriptor.id, descriptor: context.descriptor,
+            roster: context.roster, opponentRoster: .empty)
+        let effects = try MatchEngine.perform(
+            .setLineup(
+                LineupEvent(
+                    side: .us, onField: ProgrammeSample.startingEleven, goalkeeper: ProgrammeSample.keeper)),
+            on: context, at: Date())
+        MatchEngine.apply(effects, to: &context)
+        try journal.append(effects, for: context.descriptor.id)
+        try journal.close(matchID: context.descriptor.id)
+    }
+
+    @Test("Upkeep is due when it has never run, then throttled by interval")
+    func dueThenThrottled() {
+        let policy = JournalUpkeepPolicy(minimumInterval: 60 * 60 * 24)
+        let now = Date()
+        #expect(policy.isDue(now: now, lastRunAt: nil))
+        #expect(!policy.isDue(now: now, lastRunAt: now))
+        #expect(
+            !policy.isDue(now: now, lastRunAt: now.addingTimeInterval(-60 * 60 * 23)))
+        #expect(policy.isDue(now: now, lastRunAt: now.addingTimeInterval(-60 * 60 * 25)))
+    }
+
+    @Test("Upkeep preserves the retention window and never prunes open journals")
+    func performRespectsRetentionAndOpenJournals() throws {
+        let (journal, directory) = try makeJournal()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try closedJournal(in: journal)
+
+        // Open journal that must survive every upkeep run. A distinct seed
+        // keeps its file separate from the closed journal above.
+        let openContext = MatchContext(
+            descriptor: ProgrammeSample.descriptor(seed: "match.upkeep-open"),
+            roster: ProgrammeSample.roster)
+        try journal.open(
+            matchID: openContext.descriptor.id, descriptor: openContext.descriptor,
+            roster: openContext.roster, opponentRoster: .empty)
+
+        // Freshly closed journal is inside the retention window.
+        #expect(JournalUpkeepPolicy(retention: 60 * 60 * 24 * 30).perform(on: journal) == 0)
+        #expect(journal.openJournals().count == 1)
+
+        // Past the retention window only the closed journal goes.
+        #expect(JournalUpkeepPolicy(retention: -1).perform(on: journal) == 1)
+        #expect(journal.openJournals().count == 1)
+    }
+}
+
 @Suite("SwiftData store")
 struct MatchStoreTests {
 

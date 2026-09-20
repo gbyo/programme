@@ -587,6 +587,10 @@ final class AppModel {
             }
         }
         await refreshRecoveryCandidates()
+        // Launch is the primary upkeep point: prune closed journals older
+        // than the retention window. Throttled by policy, and pruning never
+        // refreshes widgets — recovery journals are not widget inputs.
+        JournalUpkeep.runIfDue(journal: journal)
         await refreshWidgetSnapshot()
 
         storeObserver.start(container: container) { [weak self] in
@@ -910,6 +914,10 @@ final class AppModel {
         nearby.stopAdvertising()
         ProgrammeStateReporter.reportWorkflow(.browsing)
         navigation.isShowingLiveMatch = false
+        // Scorer close is a natural upkeep point: the just-closed journal is
+        // now eligible for future retention pruning. Throttled by policy, and
+        // never a widget input.
+        JournalUpkeep.runIfDue(journal: journal)
         await refreshWidgetSnapshot()
     }
 
@@ -920,7 +928,9 @@ final class AppModel {
         // Make sure everything recorded has reached the database before the app
         // can be suspended or killed.
         Task { await liveSession?.flush() }
-        if phase == .background { MaintenanceScheduler.scheduleIfNeeded() }
+        // Moving to the background is a natural upkeep point. Throttled by
+        // policy; recovery never depends on this running.
+        if phase == .background { JournalUpkeep.runIfDue(journal: journal) }
     }
 
     // MARK: - Widgets (selected-team scoped)

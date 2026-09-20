@@ -207,8 +207,13 @@ public final class RecoveryJournal: @unchecked Sendable {
         try? FileManager.default.removeItem(at: url(for: matchID))
     }
 
-    /// Remove journals for matches closed more than `age` ago. Suitable
-    /// background maintenance; never required for correctness.
+    /// Remove journals for matches closed more than `age` ago. Opportunistic
+    /// foreground upkeep only; never required for correctness. Recovery never
+    /// depends on this running: every journal stays replayable until it is
+    /// pruned, and pruning only removes journals already marked closed.
+    /// Returns the number of journals removed, so callers can decide whether
+    /// anything downstream needs to react (nothing in the widgets reads
+    /// recovery journals, so pruning alone never refreshes them).
     @discardableResult
     public func pruneClosedJournals(olderThan age: TimeInterval = 60 * 60 * 24 * 30) -> Int {
         guard
@@ -228,6 +233,40 @@ public final class RecoveryJournal: @unchecked Sendable {
             }
         }
         return removed
+    }
+}
+
+/// Testable policy for closed-journal housekeeping. Pruning is tiny work that
+/// used to be scheduled as a recurring background processing task; it now
+/// runs opportunistically at naturally occurring foreground points (launch,
+/// scorer close, moving to the background). The policy keeps that cheap by
+/// throttling scans to `minimumInterval` while preserving the retention
+/// window, and it never touches anything the widgets read.
+public struct JournalUpkeepPolicy: Hashable, Sendable {
+    /// Closed journals older than this are removed. Defaults to 30 days.
+    public var retention: TimeInterval
+    /// Minimum time between upkeep scans. Defaults to 24 hours.
+    public var minimumInterval: TimeInterval
+
+    public init(
+        retention: TimeInterval = 60 * 60 * 24 * 30,
+        minimumInterval: TimeInterval = 60 * 60 * 24
+    ) {
+        self.retention = retention
+        self.minimumInterval = minimumInterval
+    }
+
+    /// Whether a scan is due. Always due when upkeep has never run.
+    public func isDue(now: Date, lastRunAt: Date?) -> Bool {
+        guard let lastRunAt else { return true }
+        return now.timeIntervalSince(lastRunAt) >= minimumInterval
+    }
+
+    /// Prune closed journals older than `retention`. Returns the number
+    /// removed. Open journals are never touched.
+    @discardableResult
+    public func perform(on journal: RecoveryJournal) -> Int {
+        journal.pruneClosedJournals(olderThan: retention)
     }
 }
 
