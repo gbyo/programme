@@ -1,6 +1,7 @@
 import AppIntents
 import CoreSpotlight
 import Foundation
+import ProgrammeCollaboration
 import ProgrammeCore
 import ProgrammePersistence
 import SwiftUI
@@ -92,6 +93,34 @@ struct PlayerEntityQuery: EntityQuery {
 
     func suggestedEntities() async throws -> [PlayerEntity] {
         try await provider.players()
+    }
+}
+
+/// Writes entity updates to the Spotlight index. The provider talks only to
+/// this seam so tests can observe invalidation policy without a live
+/// Spotlight database.
+protocol SpotlightIndexClient: Sendable {
+    func indexMatches(_ entities: [MatchEntity]) async throws
+    func indexPlayers(_ entities: [PlayerEntity]) async throws
+    func deleteMatchIdentifiers(_ ids: [UUID]) async throws
+    func deletePlayerIdentifiers(_ ids: [UUID]) async throws
+}
+
+struct LiveSpotlightIndexClient: SpotlightIndexClient {
+    func indexMatches(_ entities: [MatchEntity]) async throws {
+        try await CSSearchableIndex.default().indexAppEntities(entities)
+    }
+
+    func indexPlayers(_ entities: [PlayerEntity]) async throws {
+        try await CSSearchableIndex.default().indexAppEntities(entities)
+    }
+
+    func deleteMatchIdentifiers(_ ids: [UUID]) async throws {
+        try await CSSearchableIndex.default().deleteAppEntities(identifiedBy: ids, ofType: MatchEntity.self)
+    }
+
+    func deletePlayerIdentifiers(_ ids: [UUID]) async throws {
+        try await CSSearchableIndex.default().deleteAppEntities(identifiedBy: ids, ofType: PlayerEntity.self)
     }
 }
 
@@ -301,14 +330,127 @@ final class ProgrammeIntentProvider {
             "\(session.descriptor.teamShortName) \(session.snapshot.score.us), \(session.descriptor.opponentShortName) \(session.snapshot.score.opponent). \(session.clock.displayText) in the \(session.clock.periodLongLabel)."
     }
 
-    /// Keep Spotlight in step with the library. Indexing is a convenience, so a
-    /// failure here never surfaces to the person or blocks anything.
+    /// Full-library rebuild, reserved for launch repair, migration, and
+    /// explicit recovery. Ordinary updates go through `noteMutation`
+    /// instead. Indexing is a convenience, so a failure here never
+    /// surfaces to the person or blocks anything.
     func reindexSpotlight() async {
         guard let matchEntities = try? await matches(), let playerEntities = try? await players() else {
             return
         }
-        try? await CSSearchableIndex.default().indexAppEntities(matchEntities)
-        try? await CSSearchableIndex.default().indexAppEntities(playerEntities)
+        try? await spotlightClient.indexMatches(matchEntities)
+        try? await spotlightClient.indexPlayers(playerEntities)
+    }
+
+    // MARK: - Incremental Spotlight indexing
+
+    /// Writes index updates through this client: Core Spotlight in the app,
+    /// a fake in tests. Failures stay silent by policy.
+    var spotlightClient: SpotlightIndexClient = LiveSpotlightIndexClient()
+
+    /// Mutations coalesce here and flush on a short debounce, so live
+    /// scoring (many event writes for one match) and bulk imports each cost
+    /// one team-scoped resolution instead of repeated full-library reads.
+    private var pendingMatchIDs: Set<MatchID> = []
+    private var pendingTeamIDs: Set<TeamID> = []
+    private var pendingPlayers: [TeamID: Set<PlayerID>] = [:]
+    private var pendingDeletedMatchIDs: Set<UUID> = []
+    private var pendingDeletedPlayerIDs: Set<UUID> = []
+    private var spotlightFlushTask: Task<Void, Never>?
+
+    /// Records a local-truth mutation for batched Spotlight indexing.
+    /// Never reads the store; resolution happens once at flush time.
+    func noteMutation(_ mutation: OutboundMutation) {
+        switch mutation {
+        case .events(let matchID, _), .match(let matchID):
+            pendingDeletedMatchIDs.remove(matchID.rawValue)
+            pendingMatchIDs.insert(matchID)
+        case .team(let teamID):
+            pendingTeamIDs.insert(teamID)
+        case .season:
+            // Season names are not indexed; its matches are unaffected.
+            break
+        case .players(let teamID, let playerIDs):
+            pendingPlayers[teamID, default: []].formUnion(playerIDs)
+            pendingDeletedPlayerIDs.subtract(playerIDs.map { $0.rawValue })
+        case .deletedMatch(let matchID, _, _):
+            pendingMatchIDs.remove(matchID)
+            pendingDeletedMatchIDs.insert(matchID.rawValue)
+        case .deletedPlayers(_, let playerIDs):
+            for id in playerIDs {
+                for teamID in pendingPlayers.keys {
+                    pendingPlayers[teamID]?.remove(id)
+                }
+                pendingDeletedPlayerIDs.insert(id.rawValue)
+            }
+        }
+        scheduleSpotlightFlush()
+    }
+
+    private func scheduleSpotlightFlush() {
+        spotlightFlushTask?.cancel()
+        spotlightFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await self?.flushSpotlight()
+        }
+    }
+
+    /// Resolves pending IDs to entities with team-scoped reads and writes
+    /// them. Full reindexing stays reserved for launch repair and explicit
+    /// recovery; remote structure arrivals reindex through the workspace
+    /// change path instead.
+    func flushSpotlight() async {
+        spotlightFlushTask?.cancel()
+        spotlightFlushTask = nil
+        guard let store = appModel.store else { return }
+        let matchIDs = pendingMatchIDs
+        let teamIDs = pendingTeamIDs
+        let players = pendingPlayers
+        let deletedMatches = pendingDeletedMatchIDs
+        let deletedPlayers = pendingDeletedPlayerIDs
+        pendingMatchIDs = []
+        pendingTeamIDs = []
+        pendingPlayers = [:]
+        pendingDeletedMatchIDs = []
+        pendingDeletedPlayerIDs = []
+        let hasUpserts = !(matchIDs.isEmpty && teamIDs.isEmpty && players.isEmpty)
+        guard hasUpserts || !deletedMatches.isEmpty || !deletedPlayers.isEmpty else { return }
+        var teamsToLoad = teamIDs
+        for teamID in players.keys {
+            teamsToLoad.insert(teamID)
+        }
+        for matchID in matchIDs {
+            if let teamID = try? await store.teamID(forMatch: matchID) {
+                teamsToLoad.insert(teamID)
+            }
+        }
+        var matchEntities: [MatchEntity] = []
+        var playerEntities: [PlayerEntity] = []
+        for teamID in teamsToLoad {
+            let shortName = (try? await store.teamDetails(teamID: teamID))?.shortName ?? ""
+            guard let items = try? await store.matches(teamID: teamID, limit: 60) else { continue }
+            for item in items where matchIDs.contains(item.id) || teamIDs.contains(teamID) {
+                matchEntities.append(
+                    MatchEntity(item: item, venueLabel: item.venue.shortLabel, teamName: shortName))
+            }
+            let wantedPlayers = players[teamID]
+            if teamIDs.contains(teamID) || wantedPlayers != nil {
+                let roster = (try? await store.roster(teamID: teamID)) ?? .empty
+                for player in roster.sortedByNumber
+                where teamIDs.contains(teamID) || wantedPlayers?.contains(player.id) == true {
+                    playerEntities.append(PlayerEntity(player: player, teamName: shortName))
+                }
+            }
+        }
+        try? await spotlightClient.indexMatches(matchEntities)
+        try? await spotlightClient.indexPlayers(playerEntities)
+        if !deletedMatches.isEmpty {
+            try? await spotlightClient.deleteMatchIdentifiers(Array(deletedMatches))
+        }
+        if !deletedPlayers.isEmpty {
+            try? await spotlightClient.deletePlayerIdentifiers(Array(deletedPlayers))
+        }
     }
 
     #if DEBUG

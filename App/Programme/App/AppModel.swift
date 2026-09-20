@@ -378,19 +378,23 @@ final class AppModel {
     func startSyncIfAvailable() async {
         guard cloudAccount.state.isUsable else { return }
         guard let service = try? syncing() else { return }
-        await store?.setMutationHandler { [weak self] mutation in
-            Task { await self?.stageForSync(mutation) }
-        }
         await service.setWorkspaceChangedHandler { [weak self] in
             // Reload-only: preserve the selection's provenance so an
             // automatic fallback stays eligible for MDM suggestions.
             Task { await self?.reloadWorkspace() }
+            // Remote structure genuinely changed, so the index rebuilds;
+            // this is the only full reindex outside launch and recovery.
+            Task { await self?.intentProvider?.reindexSpotlight() }
         }
         await service.start()
     }
 
     private func stageForSync(_ mutation: OutboundMutation) async {
         await syncService?.stage(mutation)
+    }
+
+    private func indexForSpotlight(_ mutation: OutboundMutation) async {
+        intentProvider?.noteMutation(mutation)
     }
 
     /// If the on-disk store cannot be opened at all, the app still launches into
@@ -540,6 +544,14 @@ final class AppModel {
         guard !isReady else { return }
         defer { isReady = true }
         guard let container, let store else { return }
+        // One fanout for every local-truth mutation, with or without
+        // iCloud: sync staging no-ops until the service starts, and
+        // Spotlight indexing is always mutation-driven, never tied to
+        // widget refreshes or team switches.
+        await store.setMutationHandler { [weak self] mutation in
+            Task { await self?.stageForSync(mutation) }
+            Task { await self?.indexForSpotlight(mutation) }
+        }
         // Pre-provenance selections were always user choices; mark them
         // before any reload can treat them as automatic fallbacks.
         TeamWorkspace.migrateSelectionProvenance()
@@ -1128,7 +1140,9 @@ final class AppModel {
             recordText: recordText, matches: matches,
             reviewCount: reviewCount)
 
-        Task { await intentProvider?.reindexSpotlight() }
+        // Spotlight is its own invalidation domain: local-truth mutations
+        // reach it incrementally through noteMutation, so widget refreshes
+        // never trigger full-library reindexing.
         ProgrammeSharedContainer.write(
             ProgrammeWidgetSnapshot(
                 teamName: teamName,
