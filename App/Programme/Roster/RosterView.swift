@@ -13,10 +13,23 @@ struct RosterView: View {
 
     @Environment(AppModel.self) private var appModel
 
+    /// The one mutually exclusive Roster modal. Add and both import
+    /// entries route here, so no boolean combination can disagree about
+    /// what is presented.
+    enum RosterSheet: Identifiable {
+        case addPlayer
+        case importRoster(initialText: String?)
+
+        var id: String {
+            switch self {
+            case .addPlayer: "addPlayer"
+            case .importRoster: "importRoster"
+            }
+        }
+    }
+
     @State private var roster: RosterSnapshot = .empty
-    @State private var isAddingPlayer = false
-    @State private var isImporting = false
-    @State private var importText: String?
+    @State private var sheet: RosterSheet?
     @State private var showsFormer = false
     @State private var isTargetedForDrop = false
 
@@ -50,9 +63,9 @@ struct RosterView: View {
                         "Add players to begin preparing matches. You can type them in, import a CSV, or drag a roster file here."
                     )
                 } actions: {
-                    Button("Add a Player") { isAddingPlayer = true }
+                    Button("Add a Player") { sheet = .addPlayer }
                         .programmePrimaryAction()
-                    Button("Import a Roster") { isImporting = true }
+                    Button("Import a Roster") { sheet = .importRoster(initialText: nil) }
                 }
             } else if filtered.isEmpty {
                 ContentUnavailableView {
@@ -67,9 +80,9 @@ struct RosterView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu("Add", systemImage: "plus") {
-                    Button("Add Player", systemImage: "person.badge.plus") { isAddingPlayer = true }
+                    Button("Add Player", systemImage: "person.badge.plus") { sheet = .addPlayer }
                     Button("Import CSV or Paste", systemImage: "square.and.arrow.down") {
-                        isImporting = true
+                        sheet = .importRoster(initialText: nil)
                         importTip.invalidate(reason: .actionPerformed)
                     }
                 }
@@ -85,7 +98,7 @@ struct RosterView: View {
         }
         .dropDestination(for: Data.self) { items, _ in
             guard let data = items.first, let text = String(data: data, encoding: .utf8) else { return false }
-            importText = text
+            sheet = .importRoster(initialText: text)
             return true
         } isTargeted: {
             isTargetedForDrop = $0
@@ -98,20 +111,24 @@ struct RosterView: View {
                     .allowsHitTesting(false)
             }
         }
-        .sheet(isPresented: $isAddingPlayer) {
-            NavigationStack { PlayerEditorView(teamID: teamID, player: nil) }
-        }
-        .sheet(isPresented: $isImporting) {
-            NavigationStack { RosterImportView(teamID: teamID, initialText: nil) }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(item: Binding(get: { importText.map(IdentifiableText.init) }, set: { importText = $0?.text })) { item in
-            NavigationStack { RosterImportView(teamID: teamID, initialText: item.text) }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+        .sheet(item: $sheet) { route in
+            switch route {
+            case .addPlayer:
+                NavigationStack { PlayerEditorView(teamID: teamID, player: nil) }
+            case .importRoster(let initialText):
+                NavigationStack { RosterImportView(teamID: teamID, initialText: initialText) }
+                    .presentationSizing(.page)
+                    .presentationDragIndicator(.visible)
+            }
         }
         .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await reload() }
+        .onChange(of: teamID) {
+            // Add/import sheets capture their team at presentation; leaving
+            // one open across a team switch would file Team A's half-written
+            // player under Team B. The shell no longer resets our identity
+            // on team switches, so these dismiss here where they live.
+            sheet = nil
+        }
     }
 
     private func reload() async {
@@ -123,11 +140,6 @@ struct RosterView: View {
         roster.sortedByNumber
             .filter { showsFormer || $0.isOnRoster }
     }
-}
-
-struct IdentifiableText: Identifiable {
-    let id = UUID()
-    let text: String
 }
 
 struct PlayerRosterRow: View {
@@ -274,6 +286,16 @@ struct PlayerEditorView: View {
                 Button("Save") { Task { await save() } }
                     .disabled(!canSave)
                     .fontWeight(.semibold)
+            }
+            // The number pad has no Return key, so the jersey field gets
+            // native keyboard actions. Name fields keep hardware Return
+            // behavior and show no accessory.
+            if focusedField == .jerseyNumber {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Next") { focusedField = .classYear }
+                    Button("Done") { focusedField = nil }
+                }
             }
         }
         .onAppear {

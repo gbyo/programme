@@ -94,6 +94,6 @@ struct ArchiveDocumentView: View {
             imported > 0
             ? "Imported \(imported) match\(imported == 1 ? "" : "es") into your library."
             : "Programme couldn't import those matches. Nothing on this iPad was changed."
-        await appModel.refreshWidgetSnapshot()
+        await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
     }
 }

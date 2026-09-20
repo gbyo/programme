@@ -26,7 +26,7 @@ struct ManageTeamsView: View {
     var body: some View {
         List {
             Section {
-                ForEach(appModel.workspace.teams) { team in
+                ForEach(appModel.teamSummaries) { team in
                     NavigationLink {
                         TeamDetailView(teamID: team.id)
                     } label: {
@@ -74,6 +74,7 @@ struct ManageTeamsView: View {
 
     private func refresh() async {
         await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
+        await appModel.refreshTeamSummaries()
     }
 }
 
@@ -409,6 +410,7 @@ struct TeamDetailView: View {
                 primaryColorHex: Programme.hex(from: color),
                 secondaryColorHex: details?.secondaryColorHex)
             await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
+            await appModel.refreshTeamSummaries()
             await load()
             errorMessage = nil
             Haptics.success()
@@ -426,7 +428,7 @@ struct TeamDetailView: View {
             if appModel.workspace.selectedTeamID == teamID {
                 appModel.workspace.currentSeasonID = seasonID
                 appModel.workspace.viewedStatsSeasonID = seasonID
-                await appModel.refreshWidgetSnapshot()
+                await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
             }
             await load()
             Haptics.selectionChanged()
@@ -487,8 +489,9 @@ struct AddSeasonView: View {
             if makeCurrent, appModel.workspace.selectedTeamID == teamID {
                 appModel.workspace.currentSeasonID = id
                 appModel.workspace.viewedStatsSeasonID = id
-                await appModel.refreshWidgetSnapshot()
+                await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
             }
+            await appModel.refreshTeamSummaries()
             onAdded()
             dismiss()
             Haptics.success()

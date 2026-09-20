@@ -13,10 +13,11 @@ struct WatchContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     header(snapshot)
                     if let live = snapshot.live {
-                        // Staleness re-evaluates on a slow timeline: no new
-                        // radio traffic, but an old anchor never presents as
-                        // unquestionably current.
-                        TimelineView(.periodic(from: Date(), by: 15)) { context in
+                        // One-shot staleness transition: no new radio
+                        // traffic, and no always-running poll. The timeline
+                        // re-renders once when the snapshot goes stale; the
+                        // running clock itself is a system timer below.
+                        TimelineView(.explicit(snapshot.liveTimelineEntries)) { context in
                             liveView(live, snapshot: snapshot, now: context.date)
                         }
                     } else if let upcoming = snapshot.upcoming {
@@ -84,16 +85,26 @@ struct WatchContentView: View {
                 .font(.footnote.weight(.medium))
                 .lineLimit(1)
             // The clock renders on-watch from the anchor carried in the
-            // snapshot: no tick stream crosses the radio. A stale snapshot
-            // freezes at its update time instead of ticking an old anchor.
+            // snapshot: no tick stream crosses the radio. While running,
+            // the system animates a timer over the anchor-derived range;
+            // stopped or stale snapshots show a frozen string. A stale
+            // snapshot freezes at its update time instead of ticking an
+            // old anchor.
             if live.clock.isRunning, !stale {
-                TimelineView(.periodic(from: Date(), by: 1)) { context in
-                    Text(clockText(live, at: context.date))
-                        .font(.caption.monospacedDigit())
+                HStack(spacing: 4) {
+                    Text(
+                        timerInterval: live.timerRange(at: now),
+                        countsDown: live.countsDown,
+                        showsHours: false
+                    )
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    Text(live.rules.period(at: live.clock.period)?.shortLabel ?? "")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text(clockText(live, at: stale ? updatedAt : now))
+                Text(live.clockText(at: stale ? updatedAt : now))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -104,13 +115,6 @@ struct WatchContentView: View {
                     .lineLimit(2)
             }
         }
-    }
-
-    private func clockText(_ live: WatchSnapshot.Live, at date: Date) -> String {
-        let time = live.clock.matchTime(at: date)
-        let period = live.rules.period(at: live.clock.period)?.shortLabel ?? ""
-        return "\(time.displayText(rules: live.rules)) \(period)".trimmingCharacters(
-            in: .whitespaces)
     }
 
     private func upcomingView(_ upcoming: WatchSnapshot.Upcoming) -> some View {

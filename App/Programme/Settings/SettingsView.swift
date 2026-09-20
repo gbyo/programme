@@ -12,7 +12,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage("confirmBeforeFinalizing") private var confirmBeforeFinalizing = true
-    @AppStorage("keepScreenAwakeWhileScoring") private var keepScreenAwake = true
+    @AppStorage(ScreenAwakePolicy.preferenceKey) private var keepScreenAwake = true
     @AppStorage(HapticPreferences.key) private var hapticsEnabled = true
 
     @State private var defaultProfileID = StatProfile.maxPreps.id

@@ -48,7 +48,7 @@
             let model = makeAppModel(includeLiveMatch: includeLiveMatch)
             Task { @MainActor in
                 guard let store = model.store else { return }
-                model.workspace.teams = (try? await store.teams()) ?? []
+                model.workspace.teams = (try? await store.teamIdentities()) ?? []
                 model.workspace.selectedTeamID = ProgrammeSample.teamID
                 model.workspace.currentSeasonID = try? await store.currentSeasonID(
                     teamID: ProgrammeSample.teamID)
