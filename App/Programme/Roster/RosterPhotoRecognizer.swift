@@ -25,6 +25,17 @@ enum RosterPhotoRecognizer {
         case recognitionFailed
     }
 
+    /// Working-resolution ceiling: the longest side, in pixels, of the
+    /// image handed to Vision.
+    ///
+    /// Why 2048: Vision's `.accurate` recognizer reads roster-sized
+    /// jersey numbers and names reliably at this resolution, while a
+    /// 12 MP phone photo (4032 x 3024) drops to ~2 MP — roughly a 6x
+    /// pixel reduction. Smaller ceilings (1024-1536) would save more
+    /// energy but risk small name text; 2048 is the conservative,
+    /// quality-safe choice. Small photos are never upscaled.
+    static let maxWorkingPixelDimension = 2048
+
     /// Recognizes roster text in image data, returning lines in
     /// top-to-bottom reading order joined by newlines.
     static func recognizeText(in imageData: Data) async throws -> String {
@@ -33,19 +44,56 @@ enum RosterPhotoRecognizer {
         }
     }
 
-    private static func recognize(in imageData: Data) async throws -> String {
-        guard
-            let source = CGImageSourceCreateWithData(imageData as CFData, nil),
-            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else {
-            throw Failure.unreadableImage
+    /// Decodes a working-resolution image without fully materializing a
+    /// large original. ImageIO subsamples during decode, unlike a
+    /// decode-then-resize through UIKit/SwiftUI which pays the full
+    /// memory/CPU cost first. Returns nil when the source has no
+    /// decodable first image.
+    static func downsampledImage(from imageData: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else {
+            return nil
         }
-        let orientation =
-            CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+        return downsampledImage(from: source)
+    }
+
+    /// Thumbnail-decodes the first image in an ImageIO source, capping
+    /// the longest side at ``maxWorkingPixelDimension``. The thumbnail
+    /// keeps the source's stored orientation (no transform applied), so
+    /// callers must pass ``sourceOrientation(_:)`` to Vision.
+    static func downsampledImage(from source: CGImageSource) -> CGImage? {
+        let options: CFDictionary =
+            [
+                kCGImageSourceShouldCache: false,
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: false,
+                kCGImageSourceThumbnailMaxPixelSize: maxWorkingPixelDimension,
+            ] as CFDictionary
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
+    }
+
+    /// Reads the EXIF orientation tag without decoding image pixels.
+    static func sourceOrientation(_ source: CGImageSource) -> CGImagePropertyOrientation {
+        CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
             .flatMap { $0 as? [CFString: Any] }
             .flatMap { $0[kCGImagePropertyOrientation] as? UInt32 }
             .flatMap(CGImagePropertyOrientation.init(rawValue:))
             ?? .up
+    }
+
+    private static func recognize(in imageData: Data) async throws -> String {
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil) else {
+            throw Failure.unreadableImage
+        }
+        // Thumbnail first so large photos never pay a full-resolution
+        // decode; the direct decode below is only a fallback for formats
+        // where thumbnail creation cannot produce an image.
+        guard
+            let image = downsampledImage(from: source)
+                ?? CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else {
+            throw Failure.unreadableImage
+        }
+        let orientation = sourceOrientation(source)
 
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
