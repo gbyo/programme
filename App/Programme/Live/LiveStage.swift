@@ -85,6 +85,24 @@ struct EventComposer: Equatable {
 
     mutating func ask(_ step: ComposerStep) { self.step = step }
     mutating func finish() { step = nil }
+
+    /// Offer optional location enrichment for a shot that is already recorded.
+    ///
+    /// This is shared by ordinary shots and by goals after their assist question,
+    /// so the profile policy cannot drift between those two paths.
+    mutating func offerShotLocation(
+        shot: EventID,
+        shooterName: String,
+        outcome: ShotOutcome,
+        side: TeamSide,
+        profile: StatProfile
+    ) {
+        guard profile.prompts.shotLocation, side == .us else {
+            finish()
+            return
+        }
+        ask(.shotLocation(shot: shot, shooterName: shooterName, outcome: outcome))
+    }
 }
 
 /// An action waiting for the player it belongs to.

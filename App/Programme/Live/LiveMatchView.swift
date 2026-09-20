@@ -532,11 +532,18 @@ struct LiveMatchView: View {
                     .filter { $0.id != scorerID(of: goalID) },
                 onPick: { assist in
                     // `nil` is "unassisted" and settles the goal; `.unidentified`
-                    // deliberately leaves it in Review.
+                    // deliberately leaves it in Review. Either way, Standard and
+                    // Advanced still have one optional enrichment question left:
+                    // where the goal was struck.
                     session.resolveAssist(assist, on: goalID)
-                    composer.finish()
+                    continueAfterAssist(goalID: goalID, scorerName: scorerName, side: side)
                 },
-                onSkip: { composer.finish() }
+                onSkip: {
+                    // Deferring the assist must not also suppress a shot-location
+                    // prompt. The goal remains unresolved for Review while the
+                    // scorer can still place it on the map.
+                    continueAfterAssist(goalID: goalID, scorerName: scorerName, side: side)
+                }
             )
 
         case .shotLocation(let shotID, let shooterName, let outcome):
@@ -837,15 +844,24 @@ struct LiveMatchView: View {
     /// Optional enrichment on an event that already exists, offered on the same
     /// terms whatever the outcome was. Walking away leaves the shot recorded.
     private func offerShotLocation(for shot: ShotEvent, id: EventID, side: TeamSide) {
-        guard session.profile.prompts.shotLocation, side == .us else {
-            composer.finish()
-            return
-        }
-        composer.ask(
-            .shotLocation(
-                shot: id,
-                shooterName: session.context.roster(for: side).label(for: shot.shooter),
-                outcome: shot.outcome))
+        composer.offerShotLocation(
+            shot: id,
+            shooterName: session.context.roster(for: side).label(for: shot.shooter),
+            outcome: shot.outcome,
+            side: side,
+            profile: session.profile)
+    }
+
+    /// An assist is enrichment on a goal that already exists. Finishing or
+    /// deferring that question therefore advances to the same optional location
+    /// step as every other shot instead of prematurely ending the composer.
+    private func continueAfterAssist(goalID: EventID, scorerName: String, side: TeamSide) {
+        composer.offerShotLocation(
+            shot: goalID,
+            shooterName: scorerName,
+            outcome: .goal,
+            side: side,
+            profile: session.profile)
     }
 
     private func startPeriod() {
