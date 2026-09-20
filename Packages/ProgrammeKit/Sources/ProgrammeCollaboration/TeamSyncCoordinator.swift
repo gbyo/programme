@@ -52,11 +52,18 @@ public actor SyncInbox {
         try persist()
     }
 
-    public func drain() throws -> [IncomingChange] {
-        let changes = buffered
-        buffered = []
+    /// Snapshot the buffered batch without removing it. The snapshot stays
+    /// durable while the applier works, so a crash mid-materialization
+    /// replays from the inbox instead of losing fetched changes.
+    public func peek() -> [IncomingChange] { buffered }
+
+    /// Atomically replace the consumed snapshot with the deferred subset.
+    /// Only the consumed prefix is removed, so changes appended while the
+    /// snapshot was processing survive, and one persist covers the drain.
+    public func complete(consumed count: Int, deferred: [IncomingChange]) throws {
+        buffered.removeFirst(min(count, buffered.count))
+        buffered.append(contentsOf: deferred)
         try persist()
-        return changes
     }
 
     public var count: Int { buffered.count }
@@ -105,6 +112,7 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
     private var onIncoming: (@Sendable ([IncomingChange]) -> Void)?
     private var onZoneDeleted: (@Sendable (SyncDatabase, CKRecordZone.ID) -> Void)?
     private var onStatusChange: (@Sendable (Status) -> Void)?
+    private var onAccountChange: (@Sendable (CKSyncEngine.Event.AccountChange.ChangeType) -> Void)?
 
     public func setIncomingHandler(_ handler: (@Sendable ([IncomingChange]) -> Void)?) {
         onIncoming = handler
@@ -118,6 +126,12 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
 
     public func setStatusHandler(_ handler: (@Sendable (Status) -> Void)?) {
         onStatusChange = handler
+    }
+
+    public func setAccountChangeHandler(
+        _ handler: (@Sendable (CKSyncEngine.Event.AccountChange.ChangeType) -> Void)?
+    ) {
+        onAccountChange = handler
     }
 
     public init(
@@ -149,9 +163,10 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
         return nil
     }
 
-    /// Creates both engines (idempotent) and performs an initial fetch.
-    /// Safe to call while offline: the engines simply report errors through
-    /// events and the outbox keeps everything staged.
+    /// Creates both engines (idempotent). CKSyncEngine's automatic scheduler
+    /// performs the initial fetch and subsequent sends/fetches at system-chosen
+    /// times, taking connectivity, power, load, retries, and rate limits into
+    /// account. Programme only invokes immediate sync for an explicit caller.
     public func start() async {
         let container = makeContainer()
         for scope in [SyncDatabase.private, .shared] as [SyncDatabase] {
@@ -163,15 +178,18 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
                 engines[scope] = CKSyncEngine(configuration)
             }
         }
-        await fetchNow()
     }
 
+    /// Explicit immediate refresh seam for user-driven refresh/tests. Normal
+    /// replication relies on CKSyncEngine's default automatic scheduling.
     public func fetchNow() async {
         for engine in engines.values {
             try? await engine.fetchChanges()
         }
     }
 
+    /// Explicit immediate send seam for user-driven backup/tests. Staging local
+    /// changes does not call this; adding pending changes schedules sync.
     public func sendNow() async {
         for engine in engines.values {
             try? await engine.sendChanges()
@@ -180,25 +198,39 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
 
     /// Stages a record save durably, then tells the engine new work exists.
     public func stageSave(_ record: CKRecord, in scope: SyncDatabase) async throws {
-        guard let outbox = outboxes[scope] else { return }
-        try await outbox.stageSave(record)
-        engines[scope]?.state.add(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
-        await sendNow()
+        try await stageSaves([record], in: scope)
+    }
+
+    public func stageSaves(_ records: [CKRecord], in scope: SyncDatabase) async throws {
+        guard !records.isEmpty, let outbox = outboxes[scope] else { return }
+        try await outbox.stageSaves(records)
+        let pending: [CKSyncEngine.PendingRecordZoneChange] = records.map {
+            .saveRecord($0.recordID)
+        }
+        engines[scope]?.state.add(pendingRecordZoneChanges: pending)
     }
 
     public func stageDelete(
         recordID: CKRecord.ID, recordType: String, in scope: SyncDatabase
     ) async throws {
-        guard let outbox = outboxes[scope] else { return }
-        try await outbox.stageDelete(recordID: recordID, recordType: recordType)
-        engines[scope]?.state.add(pendingRecordZoneChanges: [.deleteRecord(recordID)])
-        await sendNow()
+        try await stageDeletes([(recordID, recordType)], in: scope)
     }
 
-    /// Creates the team's custom zone on first share/sync.
+    public func stageDeletes(
+        _ records: [(CKRecord.ID, String)], in scope: SyncDatabase
+    ) async throws {
+        guard !records.isEmpty, let outbox = outboxes[scope] else { return }
+        try await outbox.stageDeletes(records)
+        let pending: [CKSyncEngine.PendingRecordZoneChange] = records.map {
+            .deleteRecord($0.0)
+        }
+        engines[scope]?.state.add(pendingRecordZoneChanges: pending)
+    }
+
+    /// Creates the team's custom zone on first share/sync. Adding the pending
+    /// database change is enough for automatic sync to schedule its send.
     public func ensureTeamZone(_ zone: CKRecordZone, in scope: SyncDatabase) async {
         engines[scope]?.state.add(pendingDatabaseChanges: [.saveZone(zone)])
-        await sendNow()
     }
 
     /// Drains fetched changes through the applier and re-buffers whatever
@@ -206,16 +238,12 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
     /// the inbox: fetched server state advances in engine serializations,
     /// so only this method may drain.
     public func materialize(with applier: TeamSyncApplier) async -> DrainResult {
-        let changes: [IncomingChange]
-        do {
-            changes = try await inbox.drain()
-        } catch {
+        let changes = await inbox.peek()
+        guard !changes.isEmpty else {
             return DrainResult(applied: [], deferred: [], failed: [])
         }
         let result = await applier.drain(changes)
-        if !result.deferred.isEmpty {
-            try? await inbox.append(result.deferred)
-        }
+        try? await inbox.complete(consumed: changes.count, deferred: result.deferred)
         return result
     }
 
@@ -241,19 +269,38 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
         _ context: CKSyncEngine.SendChangesContext, syncEngine engine: CKSyncEngine
     ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard let scope = scope(of: engine) else { return nil }
-        return await batchForScope(scope)
+        return await batchForScope(scope, sendScope: context.options.scope)
     }
 
     /// Batch content without the engine: directly testable, and the single
     /// place where staged intents become wire records.
-    func batchForScope(_ scope: SyncDatabase) async -> CKSyncEngine.RecordZoneChangeBatch? {
+    ///
+    /// `sendScope` is the requesting `SendChangesContext`'s scope: only
+    /// staged saves/deletes it contains may go out. Returning anything else
+    /// violates the engine contract and fails the whole send as
+    /// `outOfScopeRecordSaves`. Out-of-scope work stays staged for a later
+    /// eligible batch — never dropped, never sent early.
+    func batchForScope(
+        _ scope: SyncDatabase,
+        sendScope: CKSyncEngine.SendChangesOptions.Scope = .all
+    ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard let outbox = outboxes[scope] else { return nil }
         do {
             let saves = try await outbox.stagedSaves.asyncMap { try await outbox.unarchive($0) }
-            let deletes = await outbox.stagedDeletes.map {
-                CKRecord.ID(
-                    recordName: $0.recordName,
-                    zoneID: CKRecordZone.ID(zoneName: $0.zoneName, ownerName: $0.ownerName))
+                .filter { sendScope.contains($0.recordID) }
+                .sorted {
+                    ($0.recordID.zoneID.zoneName, $0.recordID.recordName)
+                        < ($1.recordID.zoneID.zoneName, $1.recordID.recordName)
+                }
+            let deletes = await outbox.stagedDeletes.compactMap {
+                (staged: SyncOutbox.StagedDelete) -> CKRecord.ID? in
+                let id = CKRecord.ID(
+                    recordName: staged.recordName,
+                    zoneID: CKRecordZone.ID(zoneName: staged.zoneName, ownerName: staged.ownerName))
+                return sendScope.contains(id) ? id : nil
+            }
+            .sorted {
+                ($0.zoneID.zoneName, $0.recordName) < ($1.zoneID.zoneName, $1.recordName)
             }
             guard !saves.isEmpty || !deletes.isEmpty else { return nil }
             return CKSyncEngine.RecordZoneChangeBatch(recordsToSave: saves, recordIDsToDelete: deletes)
@@ -280,12 +327,20 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
             // already resumes automatic sync when an account becomes
             // available, so status/local-state handling is all we need here.
             applyAccountChange(change.changeType)
+            onAccountChange?(change.changeType)
         case .fetchedRecordZoneChanges(let fetched):
             await applyFetched(
                 saved: fetched.modifications.map(\.record),
                 deleted: fetched.deletions.map { ($0.recordID, $0.recordType) },
                 scope: scope)
         case .sentRecordZoneChanges(let sent):
+            // Only confirmed records leave the outbox. Failed saves/deletes
+            // (including `serverRecordChanged`) stay staged: the engine
+            // retries them on its own schedule, the next fetch delivers the
+            // server version, and the applier reconciles it through
+            // EventMerge — with same-revision contradictions surfacing as
+            // Needs Review and local corrections superseding via a newer
+            // revision. No custom retry loop, no send-path merge.
             await applySent(
                 saved: sent.savedRecords, deleted: sent.deletedRecordIDs, scope: scope)
         case .sentDatabaseChanges(let sent):

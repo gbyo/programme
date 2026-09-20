@@ -62,7 +62,7 @@ struct NewMatchView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    LocationSearchField(selection: $location)
+                    LocationPickerLink(selection: $location)
                 }
 
                 Section("Kickoff") {

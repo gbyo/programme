@@ -22,7 +22,7 @@ struct SeasonStatsView: View {
     @State private var exportPayload: ExportPayload?
     @State private var preparedExportKey: String?
     @State private var exportTask: Task<Void, Never>?
-    @State private var seasons: [SeasonListItem] = []
+    @State private var seasons: [SeasonIdentity] = []
     @State private var teamDetails: TeamDetails?
 
     private var viewedSeasonID: SeasonID? {
@@ -110,7 +110,7 @@ struct SeasonStatsView: View {
         exportTask = nil
         exportPayload = nil
         preparedExportKey = nil
-        seasons = (try? await store.seasons(teamID: teamID)) ?? []
+        seasons = (try? await store.seasonIdentities(teamID: teamID)) ?? []
         teamDetails = try? await store.teamDetails(teamID: teamID)
         let summaries =
             (try? await store.seasonSummaries(teamID: teamID, seasonID: viewedSeasonID)) ?? []
@@ -168,13 +168,22 @@ struct SeasonStatsView: View {
                         symbol: "person.3")
                 }
 
+                NavigationLink {
+                    SeasonAdditionalStatsTableView(season: season, roster: roster)
+                } label: {
+                    statisticsLink(
+                        title: "Additional Statistics",
+                        detail: "Corners, steals, fouls, offsides, cards and penalty kicks",
+                        symbol: "tablecells")
+                }
+
                 if !season.sortedKeepers.isEmpty {
                     NavigationLink {
                         SeasonKeepersTableView(season: season, roster: roster)
                     } label: {
                         statisticsLink(
                             title: "Goalkeeping",
-                            detail: "\(season.sortedKeepers.count) keepers · MIN, SV, GA, SV%, GAA, SHO",
+                            detail: "\(season.sortedKeepers.count) keepers · MIN, SV, GA, PK, SV%, GAA, SHO",
                             symbol: "hand.raised")
                     }
                 }
@@ -329,6 +338,14 @@ private struct SeasonPlayerTableRow: Identifiable {
     var points: Int? { stats.value(.goals, \.points).countValue }
     var shots: Int? { stats.value(.shots, \.shots).countValue }
     var shotsOnGoal: Int? { stats.value(.shots, \.shotsOnGoal).countValue }
+    var corners: Int? { stats.value(.corners, \.corners).countValue }
+    var steals: Int? { stats.value(.steals, \.steals).countValue }
+    var fouls: Int? { stats.value(.fouls, \.fouls).countValue }
+    var offsides: Int? { stats.value(.offsides, \.offsides).countValue }
+    var yellowCards: Int? { stats.value(.cards, \.yellowCards).countValue }
+    var redCards: Int? { stats.value(.cards, \.redCards).countValue }
+    var penaltyGoals: Int? { stats.value(.penaltyKicks, \.penaltyGoals).countValue }
+    var penaltyAttempts: Int? { stats.value(.penaltyKicks, \.penaltyAttempts).countValue }
 }
 
 /// Sorts the table without collapsing Programme's tracked/untracked distinction.
@@ -347,6 +364,14 @@ private struct SeasonPlayerSortComparator: SortComparator {
         case points
         case shots
         case shotsOnGoal
+        case corners
+        case steals
+        case fouls
+        case offsides
+        case yellowCards
+        case redCards
+        case penaltyGoals
+        case penaltyAttempts
 
         var id: String { rawValue }
 
@@ -361,10 +386,22 @@ private struct SeasonPlayerSortComparator: SortComparator {
             case .points: "Points"
             case .shots: "Shots"
             case .shotsOnGoal: "Shots on Goal"
+            case .corners: "Corners"
+            case .steals: "Steals"
+            case .fouls: "Fouls"
+            case .offsides: "Offsides"
+            case .yellowCards: "Yellow Cards"
+            case .redCards: "Red Cards"
+            case .penaltyGoals: "Penalty Goals"
+            case .penaltyAttempts: "Penalty Attempts"
             }
         }
 
         static let compactChoices: [Self] = [.points, .goals, .assists, .minutes]
+        static let additionalChoices: [Self] = [
+            .corners, .steals, .fouls, .offsides, .yellowCards, .redCards,
+            .penaltyGoals, .penaltyAttempts,
+        ]
     }
 
     typealias Compared = SeasonPlayerTableRow
@@ -392,6 +429,22 @@ private struct SeasonPlayerSortComparator: SortComparator {
             return compareOptional(lhs.shots, rhs.shots)
         case .shotsOnGoal:
             return compareOptional(lhs.shotsOnGoal, rhs.shotsOnGoal)
+        case .corners:
+            return compareOptional(lhs.corners, rhs.corners)
+        case .steals:
+            return compareOptional(lhs.steals, rhs.steals)
+        case .fouls:
+            return compareOptional(lhs.fouls, rhs.fouls)
+        case .offsides:
+            return compareOptional(lhs.offsides, rhs.offsides)
+        case .yellowCards:
+            return compareOptional(lhs.yellowCards, rhs.yellowCards)
+        case .redCards:
+            return compareOptional(lhs.redCards, rhs.redCards)
+        case .penaltyGoals:
+            return compareOptional(lhs.penaltyGoals, rhs.penaltyGoals)
+        case .penaltyAttempts:
+            return compareOptional(lhs.penaltyAttempts, rhs.penaltyAttempts)
         }
     }
 
@@ -544,6 +597,109 @@ private struct SeasonPlayersTableView: View {
     }
 }
 
+private struct SeasonAdditionalStatsTableView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var rows: [SeasonPlayerTableRow]
+    @State private var selection: PlayerID?
+    @State private var sortOrder = [
+        SeasonPlayerSortComparator(field: .corners, order: .reverse)
+    ]
+    @State private var compactSortField = SeasonPlayerSortComparator.Field.corners
+
+    init(season: SeasonStats, roster: RosterSnapshot) {
+        let rows = season.players.values.map {
+            SeasonPlayerTableRow(stats: $0, player: roster[$0.playerID])
+        }
+        let initialOrder = [
+            SeasonPlayerSortComparator(field: .corners, order: .reverse),
+            SeasonPlayerSortComparator(field: .name),
+        ]
+        _rows = State(initialValue: rows.sorted(using: initialOrder))
+    }
+
+    var body: some View {
+        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Player", sortUsing: SeasonPlayerSortComparator(field: .name)) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.name)
+                        .font(.body.weight(.medium))
+                    if horizontalSizeClass == .compact {
+                        Text(compactSummary(row))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            TableColumn("CK", sortUsing: SeasonPlayerSortComparator(field: .corners)) {
+                StatValueText($0.stats.value(.corners, \.corners))
+            }
+            TableColumn("ST", sortUsing: SeasonPlayerSortComparator(field: .steals)) {
+                StatValueText($0.stats.value(.steals, \.steals))
+            }
+            TableColumn("F", sortUsing: SeasonPlayerSortComparator(field: .fouls)) {
+                StatValueText($0.stats.value(.fouls, \.fouls))
+            }
+            TableColumn("OFF", sortUsing: SeasonPlayerSortComparator(field: .offsides)) {
+                StatValueText($0.stats.value(.offsides, \.offsides))
+            }
+            TableColumn("YC", sortUsing: SeasonPlayerSortComparator(field: .yellowCards)) {
+                StatValueText($0.stats.value(.cards, \.yellowCards))
+            }
+            TableColumn("RC", sortUsing: SeasonPlayerSortComparator(field: .redCards)) {
+                StatValueText($0.stats.value(.cards, \.redCards))
+            }
+            TableColumn("PKG", sortUsing: SeasonPlayerSortComparator(field: .penaltyGoals)) {
+                StatValueText($0.stats.value(.penaltyKicks, \.penaltyGoals))
+            }
+            TableColumn("PKA", sortUsing: SeasonPlayerSortComparator(field: .penaltyAttempts)) {
+                StatValueText($0.stats.value(.penaltyKicks, \.penaltyAttempts))
+            }
+        }
+        .onChange(of: sortOrder) { _, order in
+            var effective = order.isEmpty
+                ? [SeasonPlayerSortComparator(field: .corners, order: .reverse)]
+                : order
+            if effective.first?.field != .name {
+                effective.append(SeasonPlayerSortComparator(field: .name))
+            }
+            rows.sort(using: effective)
+        }
+        .onChange(of: compactSortField) { _, field in
+            guard horizontalSizeClass == .compact else { return }
+            sortOrder = [SeasonPlayerSortComparator(field: field, order: .reverse)]
+        }
+        .navigationTitle("Additional Statistics")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selection) { PlayerDetailView(playerID: $0) }
+        .toolbar {
+            if horizontalSizeClass == .compact {
+                ToolbarItem(placement: .secondaryAction) {
+                    Picker("Sort", selection: $compactSortField) {
+                        ForEach(SeasonPlayerSortComparator.Field.additionalChoices) { field in
+                            Text(field.title).tag(field)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+    }
+
+    private func compactSummary(_ row: SeasonPlayerTableRow) -> String {
+        let stats = row.stats
+        return [
+            "\(stats.value(.corners, \.corners).text()) CK",
+            "\(stats.value(.steals, \.steals).text()) ST",
+            "\(stats.value(.fouls, \.fouls).text()) F",
+            "\(stats.value(.offsides, \.offsides).text()) OFF",
+            "\(stats.value(.cards, \.yellowCards).text()) YC",
+            "\(stats.value(.cards, \.redCards).text()) RC",
+            "\(stats.value(.penaltyKicks, \.penaltyGoals).text()) PKG",
+            "\(stats.value(.penaltyKicks, \.penaltyAttempts).text()) PKA",
+        ].joined(separator: " · ")
+    }
+}
+
 private struct SeasonKeepersTableView: View {
     let season: SeasonStats
     let roster: RosterSnapshot
@@ -564,7 +720,7 @@ private struct SeasonKeepersTableView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         Text(
-                            "\(keeper.savePercentage.text()) SV% · \(keeper.goalsAgainstAverage.text()) GAA · \(keeper.totals.shutouts) SHO"
+                            "\(penaltyValue(keeper.totals.penaltySaves).text())/\(penaltyValue(keeper.totals.penaltiesFaced).text()) PK · \(keeper.savePercentage.text()) SV% · \(keeper.goalsAgainstAverage.text()) GAA · \(keeper.totals.shutouts) SHO"
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -575,6 +731,8 @@ private struct SeasonKeepersTableView: View {
             TableColumn("MIN") { Text("\($0.minutesPlayed)").monospacedDigit() }
             TableColumn("SV") { Text("\($0.totals.saves)").monospacedDigit() }
             TableColumn("GA") { Text("\($0.totals.goalsAllowed)").monospacedDigit() }
+            TableColumn("PKF") { StatValueText(penaltyValue($0.totals.penaltiesFaced)) }
+            TableColumn("PKSV") { StatValueText(penaltyValue($0.totals.penaltySaves)) }
             TableColumn("SV%") { StatValueText($0.savePercentage, style: .percent) }
             TableColumn("GAA") { StatValueText($0.goalsAgainstAverage, style: .decimal) }
             TableColumn("SHO") { Text("\($0.totals.shutouts)").monospacedDigit() }
@@ -582,5 +740,9 @@ private struct SeasonKeepersTableView: View {
         .navigationTitle("Goalkeeping")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selection) { PlayerDetailView(playerID: $0) }
+    }
+
+    private func penaltyValue(_ value: Int) -> StatValue {
+        (season.trackedMatches[.penaltyKicks] ?? 0) > 0 ? .count(value) : .notTracked
     }
 }

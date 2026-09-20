@@ -93,6 +93,16 @@ public struct ScoreboardSnapshot: Codable, Hashable, Sendable {
         guard !finalized, let last = lastReceivedAt else { return false }
         return last.addingTimeInterval(Self.staleAfter) < now
     }
+
+    /// One-shot stale deadline for the display-side link banner. Returns
+    /// the exact instant the link flips stale, or nil when no stale work
+    /// should be scheduled (no frame yet, or a final score that never
+    /// goes stale). Each received frame moves this deadline, so the
+    /// display waits on exactly one deadline instead of polling.
+    public func staleDeadline(lastReceivedAt: Date?) -> Date? {
+        guard !finalized, let last = lastReceivedAt else { return nil }
+        return last.addingTimeInterval(Self.staleAfter)
+    }
 }
 
 /// Length-prefixed framing for the TCP stream: 4-byte big-endian length
