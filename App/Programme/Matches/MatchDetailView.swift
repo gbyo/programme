@@ -448,7 +448,7 @@ struct BoxScoreTable: View {
         Grid(horizontalSpacing: 12, verticalSpacing: 0) {
             headerRow
             ForEach(players) { player in
-                Divider().gridCellColumns(9)
+                Divider().gridCellColumns(7)
                 playerRow(player)
             }
         }
@@ -581,7 +581,7 @@ struct KeeperTable: View {
         Grid(horizontalSpacing: 12, verticalSpacing: 0) {
             headerRow
             ForEach(keepers, id: \.playerID) { keeper in
-                Divider().gridCellColumns(7)
+                Divider().gridCellColumns(9)
                 keeperRow(keeper)
             }
         }
