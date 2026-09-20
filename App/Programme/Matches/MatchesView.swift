@@ -123,7 +123,13 @@ struct MatchesView: View {
                 "\(match.venue.label) versus \(match.opponentName) and its \(match.eventCount) events will be permanently removed. Export a Programme archive first if you want to keep a copy."
             )
         }
-        .task(id: [teamID.rawValue.uuidString, "\(seasonFilter)", "\(appModel.storeRevision)"]) {
+        .task(
+            id: [
+                teamID.rawValue.uuidString, "\(seasonFilter)", "\(appModel.storeRevision)",
+                "\(appModel.scopeRevision(.matches(teamID)).count)",
+                "\(appModel.scopeRevision(.teamEvents(teamID)).count)",
+            ]
+        ) {
             await reload()
         }
     }

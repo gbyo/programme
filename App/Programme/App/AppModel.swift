@@ -171,9 +171,28 @@ final class AppModel {
 
     var navigation = NavigationModel()
     var workspace = TeamWorkspace()
-    /// Bumped on every observed store write so browsing lists refetch.
-    /// Views combine this with their team/season ids in `.task(id:)`.
+    /// Backstop revision for store activity the typed mutations cannot
+    /// describe: derived-cache writes, reminder preferences, and any
+    /// out-of-band edit. Bumped at most once per burst by the debounced
+    /// history observer, never per write. Views combine this with their
+    /// team/season ids and their scope counter in `.task(id:)`.
     var storeRevision = 0
+    /// Per-scope revision counters. Ignored by observation itself: views
+    /// track only the returned scope's counter through `scopeRevision(_:)`,
+    /// so a Team B roster write never refetches Team A's screens.
+    @ObservationIgnored
+    private var scopeRevisions: [InvalidationScope: ScopeRevision] = [:]
+    /// Side-work coalescing. Widget and Spotlight refreshes are glanceable,
+    /// not interactive: the first request runs at once, bursts collapse into
+    /// one trailing refresh, and backgrounding flushes anything pending.
+    private var lastWidgetRefresh = Date.distantPast
+    private var pendingWidgetTask: Task<Void, Never>?
+    private var lastSpotlightReindex = Date.distantPast
+    private var pendingSpotlightTask: Task<Void, Never>?
+    private var pendingExternalNote: Task<Void, Never>?
+    private static let widgetCoalesceInterval: TimeInterval = 1.5
+    private static let spotlightCoalesceInterval: TimeInterval = 4
+    private static let externalCoalesceInterval: TimeInterval = 1
     /// Set once at launch; used by App Intents, Spotlight and Shortcuts.
     var intentProvider: ProgrammeIntentProvider?
     private let storeObserver = StoreChangeObserver()
@@ -589,10 +608,120 @@ final class AppModel {
         await refreshRecoveryCandidates()
         await refreshWidgetSnapshot()
 
+        await store.setInvalidationHandler { [weak self] mutation in
+            Task { await self?.handleStoreMutation(mutation) }
+        }
         storeObserver.start(container: container) { [weak self] in
-            self?.noteStoreChanged()
-            await self?.refreshWidgetSnapshot()
-            await self?.refreshRecoveryCandidates()
+            self?.noteStoreActivity()
+        }
+    }
+
+    /// Cached counter for a scope. A method rather than a subscript so view
+    /// bodies track only the returned scope's counter, never the registry.
+    func scopeRevision(_ scope: InvalidationScope) -> ScopeRevision {
+        if let existing = scopeRevisions[scope] { return existing }
+        let created = ScopeRevision()
+        scopeRevisions[scope] = created
+        return created
+    }
+
+    /// Fans a persisted mutation out to exactly the surfaces it affects.
+    /// Runs for local edits, second-window writes, archive imports, and
+    /// synced remote applies alike — every path reports through the store's
+    /// single funnel. Match-scoped mutations resolve their team first so a
+    /// Team B event never touches Team A's counters.
+    private func handleStoreMutation(_ mutation: OutboundMutation) async {
+        guard let store else { return }
+        let teamID: TeamID?
+        let matchID: MatchID?
+        switch mutation {
+        case .team(let id):
+            (teamID, matchID) = (id, nil)
+        case .season(let id, _), .players(let id, _), .deletedPlayers(let id, _),
+            .deletedMatch(_, let id, _):
+            (teamID, matchID) = (id, nil)
+        case .match(let id), .events(let id, _):
+            (teamID, matchID) = (try? await store.teamID(forMatch: id), id)
+        }
+        let impact = StoreInvalidation.impact(of: mutation, teamID: teamID)
+        for scope in impact.scopes { scopeRevision(scope).count += 1 }
+        let selectedAffected = workspace.selectedTeamID.map(impact.widgetTeamIDs.contains) ?? false
+        if selectedAffected || (matchID != nil && matchID == liveSession?.matchID) {
+            requestWidgetRefresh()
+        }
+        if impact.refreshSpotlight { requestSpotlightReindex() }
+        if impact.refreshRecovery {
+            Task { await refreshRecoveryCandidates() }
+        }
+    }
+
+    /// HistoryObserver reports only a counter, with no model or record
+    /// detail — and it fires for our own saves too. So this path stays a
+    /// backstop: bursts collapse into one delayed pass, while typed
+    /// mutations above already refreshed their scopes immediately. Never
+    /// skipped or throttled away, because unattributed activity is exactly
+    /// what cross-window and out-of-band edits look like.
+    private func noteStoreActivity() {
+        pendingExternalNote?.cancel()
+        pendingExternalNote = Task {
+            try? await Task.sleep(for: .milliseconds(Int(Self.externalCoalesceInterval * 1000)))
+            guard !Task.isCancelled else { return }
+            noteStoreChanged()
+            requestWidgetRefresh()
+            requestSpotlightReindex()
+            await refreshRecoveryCandidates()
+        }
+    }
+
+    private func requestWidgetRefresh() {
+        let now = Date()
+        guard now.timeIntervalSince(lastWidgetRefresh) < Self.widgetCoalesceInterval else {
+            lastWidgetRefresh = now
+            Task { await refreshWidgetSnapshot() }
+            return
+        }
+        guard pendingWidgetTask == nil else { return }
+        pendingWidgetTask = Task {
+            try? await Task.sleep(for: .milliseconds(Int(Self.widgetCoalesceInterval * 1000)))
+            guard !Task.isCancelled else { return }
+            pendingWidgetTask = nil
+            lastWidgetRefresh = Date()
+            await refreshWidgetSnapshot()
+        }
+    }
+
+    private func requestSpotlightReindex() {
+        let now = Date()
+        guard now.timeIntervalSince(lastSpotlightReindex) < Self.spotlightCoalesceInterval
+        else {
+            lastSpotlightReindex = now
+            Task { [weak self] in await self?.intentProvider?.reindexSpotlight() }
+            return
+        }
+        guard pendingSpotlightTask == nil else { return }
+        pendingSpotlightTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(Self.spotlightCoalesceInterval * 1000)))
+            guard !Task.isCancelled else { return }
+            self?.pendingSpotlightTask = nil
+            self?.lastSpotlightReindex = Date()
+            await self?.intentProvider?.reindexSpotlight()
+        }
+    }
+
+    /// Trailing refreshes may never fire once suspended; run anything owed
+    /// before backgrounding so the widget and index never go stale silently.
+    private func flushPendingSideWork() {
+        pendingExternalNote?.cancel()
+        pendingExternalNote = nil
+        if pendingWidgetTask != nil {
+            pendingWidgetTask?.cancel()
+            pendingWidgetTask = nil
+            Task { await refreshWidgetSnapshot() }
+        }
+        if pendingSpotlightTask != nil {
+            pendingSpotlightTask?.cancel()
+            pendingSpotlightTask = nil
+            Task { [weak self] in await self?.intentProvider?.reindexSpotlight() }
         }
     }
 
@@ -920,7 +1049,10 @@ final class AppModel {
         // Make sure everything recorded has reached the database before the app
         // can be suspended or killed.
         Task { await liveSession?.flush() }
-        if phase == .background { MaintenanceScheduler.scheduleIfNeeded() }
+        if phase == .background {
+            flushPendingSideWork()
+            MaintenanceScheduler.scheduleIfNeeded()
+        }
     }
 
     // MARK: - Widgets (selected-team scoped)

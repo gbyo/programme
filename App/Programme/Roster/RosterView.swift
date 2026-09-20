@@ -111,7 +111,12 @@ struct RosterView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await reload() }
+        .task(
+            id: [
+                teamID.rawValue.uuidString, "\(appModel.storeRevision)",
+                "\(appModel.scopeRevision(.roster(teamID)).count)",
+            ]
+        ) { await reload() }
     }
 
     private func reload() async {

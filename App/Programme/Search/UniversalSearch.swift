@@ -231,6 +231,7 @@ struct UniversalSearchResults: View {
             search.scope.rawValue,
             appModel.workspace.selectedTeamID?.rawValue.uuidString ?? "none",
             "\(appModel.storeRevision)",
+            "\(appModel.scopeRevision(.search).count)",
         ].joined(separator: "#")
     }
 

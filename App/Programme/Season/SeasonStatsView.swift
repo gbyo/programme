@@ -81,6 +81,8 @@ struct SeasonStatsView: View {
             id: [
                 teamID.rawValue.uuidString, viewedSeasonID?.rawValue.uuidString ?? "current",
                 "\(appModel.storeRevision)",
+                "\(appModel.scopeRevision(.seasons(teamID)).count)",
+                "\(appModel.scopeRevision(.teamEvents(teamID)).count)",
             ]
         ) {
             await load()

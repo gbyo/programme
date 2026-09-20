@@ -45,7 +45,12 @@ struct PlayerDetailView: View {
                 NavigationStack { PlayerEditorView(teamID: ownerTeamID, existing: snapshot) }
             }
         }
-        .task(id: [playerID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await load() }
+        .task(
+            id: [
+                playerID.rawValue.uuidString, "\(appModel.storeRevision)",
+                "\(appModel.scopeRevision(.player(playerID)).count)",
+            ]
+        ) { await load() }
     }
 
     private func content(_ stats: SeasonPlayerStats) -> some View {
