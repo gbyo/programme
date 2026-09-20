@@ -622,7 +622,7 @@ final class AppModel {
         // than the retention window. Throttled by policy, and pruning never
         // refreshes widgets — recovery journals are not widget inputs.
         JournalUpkeep.runIfDue(journal: journal)
-        await refreshWidgetSnapshot()
+        await refreshWidgetSnapshot(reloadingSeasonRecord: true)
 
         storeObserver.start(container: container) { [weak self] in
             guard let self else { return }
@@ -684,7 +684,7 @@ final class AppModel {
         }
         navigation.section = .home
         navigation.clearTeamScopedPaths()
-        await refreshWidgetSnapshot()
+        await refreshWidgetSnapshot(reloadingSeasonRecord: true)
     }
 
     /// Applies a newly arrived MDM team suggestion, but only while the
@@ -705,7 +705,7 @@ final class AppModel {
         workspace.persistSelection(explicit: false)
         workspace.currentSeasonID = try? await store.currentSeasonID(teamID: suggestion)
         workspace.viewedStatsSeasonID = workspace.currentSeasonID
-        await refreshWidgetSnapshot()
+        await refreshWidgetSnapshot(reloadingSeasonRecord: true)
     }
 
     /// Count summaries for management UI, loaded on demand. The workspace
@@ -730,7 +730,7 @@ final class AppModel {
         workspace.currentSeasonID = try? await store.currentSeasonID(teamID: teamID)
         workspace.viewedStatsSeasonID = workspace.currentSeasonID
         navigation.clearTeamScopedPaths()
-        await refreshWidgetSnapshot()
+        await refreshWidgetSnapshot(reloadingSeasonRecord: true)
     }
 
     /// Loads the fictional Ninety Six team and four played matches so the app can
@@ -977,7 +977,7 @@ final class AppModel {
         // Publish one revision when the scorer closes, then rebuild the
         // heavyweight derived surfaces once from the final local state.
         noteStoreChanged()
-        await refreshWidgetSnapshot()
+        await refreshWidgetSnapshot(reloadingSeasonRecord: true)
         await refreshRecoveryCandidates()
     }
 
@@ -1092,14 +1092,22 @@ final class AppModel {
     /// The widget snapshot represents the currently selected team. While a
     /// match is live, its team identity comes from the live session's
     /// MatchContext, not from browsing state.
-    func refreshWidgetSnapshot() async {
+    /// - Parameter reloadingSeasonRecord: also reload the season-record
+    ///   timeline (record text and recent results). Needed when season data
+    ///   may have changed — launch, team switch, finalize/close — but not
+    ///   for ordinary live events, which only move the match-status widget.
+    func refreshWidgetSnapshot(reloadingSeasonRecord: Bool = false) async {
         guard let store, let selectedTeamID = workspace.selectedTeamID else { return }
         await ProgrammeSignposts.measure("widgetRefresh") {
-            await self.refreshWidgetSnapshotBody(store: store, selectedTeamID: selectedTeamID)
+            await self.refreshWidgetSnapshotBody(
+                store: store, selectedTeamID: selectedTeamID,
+                reloadingSeasonRecord: reloadingSeasonRecord)
         }
     }
 
-    private func refreshWidgetSnapshotBody(store: MatchStore, selectedTeamID: TeamID) async {
+    private func refreshWidgetSnapshotBody(
+        store: MatchStore, selectedTeamID: TeamID, reloadingSeasonRecord: Bool
+    ) async {
         let currentSeasonID = workspace.currentSeasonID
         let details = try? await store.teamDetails(teamID: selectedTeamID)
         let teamName = details?.name ?? workspace.selectedTeam?.name ?? "Programme"
@@ -1123,7 +1131,12 @@ final class AppModel {
                 clockText: session.clock.displayText,
                 isClockRunning: session.clock.isRunning,
                 needsReviewCount: session.snapshot.needsReviewCount,
-                lastEventText: session.lastEventDescription?.oneLine)
+                lastEventText: session.lastEventDescription?.oneLine,
+                // The anchor travels so WidgetKit animates the clock itself;
+                // frozen clockText above stays as the stopped-clock rendering
+                // and the accessibility label.
+                clockAnchor: session.context.clock,
+                clockRules: session.context.rules)
         }
 
         let upcoming =
@@ -1171,7 +1184,12 @@ final class AppModel {
                 live: live,
                 upcoming: upcoming,
                 recent: Array(recent)))
-        WidgetRefresher.reload()
+        // Targeted reloads: the match widget follows every refresh, while
+        // the season widget only moves when season data may have changed.
+        WidgetRefresher.reloadMatchStatus()
+        if reloadingSeasonRecord {
+            WidgetRefresher.reloadSeasonRecord()
+        }
     }
 }
 

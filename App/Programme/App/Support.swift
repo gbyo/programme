@@ -1,6 +1,7 @@
 import Foundation
 import ProgrammeCore
 import ProgrammePersistence
+import ProgrammeUI
 import SwiftUI
 import WidgetKit
 
@@ -182,9 +183,20 @@ enum WidgetRefresher {
         #endif
     }
 
+    /// Reloads only the match-status timeline: live scores, clock state,
+    /// and upcoming fixtures. Called on every snapshot refresh.
     static func reloadMatchStatus() {
         #if canImport(WidgetKit)
-            WidgetCenter.shared.reloadTimelines(ofKind: "com.gbyo.programme.matchStatus")
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.matchStatus)
+        #endif
+    }
+
+    /// Reloads only the season-record timeline: record text and recent
+    /// results. Called only when season data may have changed (launch,
+    /// team switch, finalize/close) — never for ordinary live events.
+    static func reloadSeasonRecord() {
+        #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.seasonRecord)
         #endif
     }
 }

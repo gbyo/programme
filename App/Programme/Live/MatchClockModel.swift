@@ -5,10 +5,11 @@ import ProgrammeCore
 /// The visible clock, kept in its own observable object.
 ///
 /// This is a performance decision with a user-visible consequence: because the
-/// clock is not a property of `LiveMatchSession`, a second ticking over
-/// invalidates only the views that actually read the time. The lineup, the event
-/// palette and the pitch do not recompute once a second while the scorer is
-/// trying to tap them.
+/// clock is not a property of `LiveMatchSession`, scorer chrome that depends
+/// on clock state only recomputes when the anchor actually changes (configure,
+/// start/stop, period transitions, adjustments). Advancing time itself is
+/// rendered by system timer views from the anchor, so no app-owned task wakes
+/// up just to move the clock.
 @MainActor
 @Observable
 final class MatchClockModel {
@@ -19,61 +20,25 @@ final class MatchClockModel {
     private(set) var periodShortLabel = ""
     private(set) var periodLongLabel = ""
     private(set) var matchTime = MatchTime.kickoff
-    /// 0...1 through the scheduled period. Drives the thin progress rule only.
+    /// 0...1 through the scheduled period. Frozen rendering for stopped
+    /// clocks; running clocks animate progress from the anchor instead.
     private(set) var periodProgress: Double = 0
 
     @ObservationIgnored private var anchor = ClockAnchor(period: 1)
     @ObservationIgnored private var rules = MatchRules.highSchool
-    @ObservationIgnored private var ticker: Task<Void, Never>?
-
-    deinit { ticker?.cancel() }
 
     func configure(anchor: ClockAnchor, rules: MatchRules) {
         self.anchor = anchor
         self.rules = rules
         refresh()
-        updateTicker()
-    }
-
-    private func updateTicker() {
-        if anchor.isRunning {
-            guard ticker == nil else { return }
-            ticker = Task { [weak self] in
-                while !Task.isCancelled {
-                    guard let self else { return }
-
-                    // The visible clock has one-second resolution. Sleep until
-                    // the next elapsed-second boundary instead of waking five
-                    // times per second to discover that nothing changed.
-                    let delay = self.delayUntilNextSecond(at: Date())
-                    do {
-                        try await Task.sleep(for: delay)
-                    } catch {
-                        return
-                    }
-                    guard !Task.isCancelled else { return }
-                    self.refresh()
-                }
-            }
-        } else {
-            ticker?.cancel()
-            ticker = nil
-        }
-    }
-
-    private func delayUntilNextSecond(at now: Date) -> Duration {
-        let elapsed = max(0, anchor.elapsed(at: now))
-        let fraction = elapsed - floor(elapsed)
-        let seconds = fraction < 0.001 ? 1.0 : max(0.02, 1.0 - fraction)
-        return .milliseconds(Int64((seconds * 1_000).rounded(.up)))
     }
 
     private func refresh() {
         let now = Date()
         let time = anchor.matchTime(at: now)
         let text = time.displayText(rules: rules)
-        // Only publish when something actually changed, so observation fires at
-        // most once a second rather than five times.
+        // Only publish when something actually changed: refresh runs on
+        // configure, so observation fires on state changes, never per tick.
         if text != displayText { displayText = text }
         if time != matchTime { matchTime = time }
         if anchor.isRunning != isRunning { isRunning = anchor.isRunning }
