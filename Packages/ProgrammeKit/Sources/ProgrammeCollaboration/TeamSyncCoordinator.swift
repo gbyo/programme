@@ -241,19 +241,36 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
         _ context: CKSyncEngine.SendChangesContext, syncEngine engine: CKSyncEngine
     ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard let scope = scope(of: engine) else { return nil }
-        return await batchForScope(scope)
+        return await batchForScope(scope, filteredBy: context.options.scope)
     }
 
     /// Batch content without the engine: directly testable, and the single
     /// place where staged intents become wire records.
-    func batchForScope(_ scope: SyncDatabase) async -> CKSyncEngine.RecordZoneChangeBatch? {
+    ///
+    /// The engine requests each send for a specific zone scope: only staged
+    /// intents inside `filter` may be returned. Anything outside stays staged
+    /// for a later eligible batch — it is never dropped and never sent
+    /// out-of-scope (the engine fails such sends as invalid arguments).
+    func batchForScope(
+        _ scope: SyncDatabase,
+        filteredBy filter: CKSyncEngine.SendChangesOptions.Scope = .all
+    ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard let outbox = outboxes[scope] else { return nil }
         do {
             let saves = try await outbox.stagedSaves.asyncMap { try await outbox.unarchive($0) }
+                .filter { filter.contains($0.recordID) }
+                .sorted {
+                    ($0.recordID.zoneID.zoneName, $0.recordID.recordName)
+                        < ($1.recordID.zoneID.zoneName, $1.recordID.recordName)
+                }
             let deletes = await outbox.stagedDeletes.map {
                 CKRecord.ID(
                     recordName: $0.recordName,
                     zoneID: CKRecordZone.ID(zoneName: $0.zoneName, ownerName: $0.ownerName))
+            }
+            .filter { filter.contains($0) }
+            .sorted {
+                ($0.zoneID.zoneName, $0.recordName) < ($1.zoneID.zoneName, $1.recordName)
             }
             guard !saves.isEmpty || !deletes.isEmpty else { return nil }
             return CKSyncEngine.RecordZoneChangeBatch(recordsToSave: saves, recordIDsToDelete: deletes)

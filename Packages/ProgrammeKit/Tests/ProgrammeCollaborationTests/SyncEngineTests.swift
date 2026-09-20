@@ -14,9 +14,17 @@ private func temporaryURL(_ name: String) -> URL {
 
 private func teamRecord(named name: String = "Ninety Six") -> CKRecord {
     let teamID = TeamID(ProgrammeSample.id("team.ninety-six"))
-    return TeamRecord(
+    return teamRecord(teamID: teamID, named: name)
+}
+
+private func teamRecord(teamID: TeamID, named name: String) -> CKRecord {
+    TeamRecord(
         teamID: teamID, name: name, shortName: "NX", createdAt: Date()
     ).makeRecord(in: TeamZone.zoneID(for: teamID))
+}
+
+private func zoneScope(_ zoneID: CKRecordZone.ID) -> CKSyncEngine.SendChangesOptions.Scope {
+    .zoneIDs([zoneID])
 }
 
 private func makeCoordinator() throws -> TeamSyncCoordinator {
@@ -122,6 +130,67 @@ struct TeamSyncCoordinatorTests {
         try await coordinator.stageSave(record, in: .private)
         await coordinator.applySent(saved: [record], deleted: [], scope: .private)
         #expect(await coordinator.batchForScope(.private) == nil)
+    }
+
+    @Test("Zone-scoped batches contain only the requested team's saves")
+    func scopedBatchesStayInZone() async throws {
+        let coordinator = try makeCoordinator()
+        let teamA = TeamID(ProgrammeSample.id("team.ninety-six"))
+        let teamB = TeamID(ProgrammeSample.id("team.other"))
+        let recordA = teamRecord(teamID: teamA, named: "First")
+        let recordB = teamRecord(teamID: teamB, named: "Second")
+        try await coordinator.stageSave(recordA, in: .private)
+        try await coordinator.stageSave(recordB, in: .private)
+
+        // A context requesting Team A must never see Team B's record.
+        let batchA = await coordinator.batchForScope(
+            .private, filteredBy: zoneScope(recordA.recordID.zoneID))
+        let batchARecords = try #require(batchA?.recordsToSave)
+        #expect(batchARecords.count == 1)
+        #expect(batchARecords[0].recordID == recordA.recordID)
+
+        // And vice versa: Team B's context receives only Team B.
+        let batchB = await coordinator.batchForScope(
+            .private, filteredBy: zoneScope(recordB.recordID.zoneID))
+        let batchBRecords = try #require(batchB?.recordsToSave)
+        #expect(batchBRecords.count == 1)
+        #expect(batchBRecords[0].recordID == recordB.recordID)
+
+        // An unscoped context still sees everything.
+        let batchAll = await coordinator.batchForScope(.private)
+        #expect(batchAll?.recordsToSave.count == 2)
+    }
+
+    @Test("Out-of-scope deletes stay staged; confirms clear only confirmed zones")
+    func scopedDeletesAndConfirmsStayInZone() async throws {
+        let coordinator = try makeCoordinator()
+        let teamA = TeamID(ProgrammeSample.id("team.ninety-six"))
+        let teamB = TeamID(ProgrammeSample.id("team.other"))
+        let recordA = teamRecord(teamID: teamA, named: "First")
+        let recordB = teamRecord(teamID: teamB, named: "Second")
+        try await coordinator.stageDelete(
+            recordID: recordA.recordID, recordType: recordA.recordType, in: .private)
+        try await coordinator.stageSave(recordB, in: .private)
+
+        // Team A's context sees only the delete; Team B's record stays staged.
+        let batchA = await coordinator.batchForScope(
+            .private, filteredBy: zoneScope(recordA.recordID.zoneID))
+        #expect(batchA?.recordsToSave.isEmpty == true)
+        #expect(batchA?.recordIDsToDelete == [recordA.recordID])
+
+        // Confirming Team A's delete must not touch Team B's staged save.
+        await coordinator.applySent(saved: [], deleted: [recordA.recordID], scope: .private)
+        #expect(
+            await coordinator.batchForScope(
+                .private, filteredBy: zoneScope(recordA.recordID.zoneID)) == nil)
+        let batchB = await coordinator.batchForScope(
+            .private, filteredBy: zoneScope(recordB.recordID.zoneID))
+        let batchBRecords = try #require(batchB?.recordsToSave)
+        #expect(batchBRecords.count == 1)
+        #expect(batchBRecords[0].recordID == recordB.recordID)
+
+        // Databases stay isolated: nothing leaks into shared.
+        #expect(await coordinator.batchForScope(.shared) == nil)
     }
 
     @Test("Fetched changes buffer durably and forward to the handler")
