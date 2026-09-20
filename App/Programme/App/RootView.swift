@@ -96,13 +96,18 @@ struct RootView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabViewSidebarBottomBar {
-            // Workspace context, not a fifth destination: the team scopes
-            // every tab, so it sits pinned in the sidebar's bottom
-            // workspace area. The bottom bar only appears when the TabView
-            // shows a sidebar, and owns its own spacing — no manual
-            // padding, backgrounds, or selected-state chrome.
-            SidebarTeamSwitcher()
-                .accessibilityIdentifier("sidebar.teamSwitcher")
+            // Workspace context, not a fifth destination: team switching
+            // stays pinned in the sidebar bottom area. Settings is app-level,
+            // so it is a separate control rather than an unrelated item inside
+            // the team menu.
+            HStack(spacing: 12) {
+                SidebarTeamSwitcher()
+                    .accessibilityIdentifier("sidebar.teamSwitcher")
+                Spacer(minLength: 8)
+                ProgrammeSettingsButton()
+                    .labelStyle(.iconOnly)
+                    .accessibilityIdentifier("sidebar.settings")
+            }
         }
         // Deliberately no `.id(selectedTeamID)` here: resetting the whole
         // shell's identity on every team switch would discard the selected
@@ -214,28 +219,32 @@ struct TeamSwitcherTitle: ViewModifier {
             content
                 .navigationTitle(sectionTitle)
         } else if tabBarPlacement == .topBar {
-            // Collapsed iPad top bar: the adaptive tabs and section actions
-            // already fill the bar, so team switching is a compact
-            // icon-only Menu. Default title behavior otherwise.
+            // Collapsed iPad top bar: keep team switching compact and let the
+            // system place lower-priority app settings as a secondary action.
             content
                 .navigationTitle(sectionTitle)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         TopBarTeamSwitcher()
                     }
+                    ToolbarItem(placement: .secondaryAction) {
+                        ProgrammeSettingsButton()
+                    }
                 }
         } else {
-            // Bottom tabs, nil, and any other placement: the native title
-            // context pattern. `navigationSubtitle` is the documented place
-            // for context alongside a title, and `toolbarTitleMenu` opens
-            // from a tap on that title — destination on top, workspace
-            // beneath it. Default display mode lets SwiftUI own the
-            // large-to-compact scroll transition.
+            // Bottom tabs, nil, and any other placement: the title menu is
+            // strictly workspace context. Settings remains a separate app-level
+            // secondary action so "Switch Team" never opens unrelated commands.
             content
                 .navigationTitle(sectionTitle)
                 .navigationSubtitle(teamName)
                 .toolbarTitleMenu {
                     TeamSwitcherMenu()
+                }
+                .toolbar {
+                    ToolbarItem(placement: .secondaryAction) {
+                        ProgrammeSettingsButton()
+                    }
                 }
         }
     }
@@ -250,10 +259,10 @@ extension View {
 /// Sidebar workspace switcher: a native Label-style Menu (icon, one
 /// truncated line, native menu indicator) so the pinned bottom item reads
 /// as interactive, not passive text. Presentation-only; `TeamSwitcherMenu`
-/// owns the entries. VoiceOver hears the team name as a menu plus the
-/// switch hint. The soccerball symbol is the workspace mark: it is already
-/// used for the first-run identity and stays distinct from the Home,
-/// Matches, Roster, and Stats destination icons.
+/// owns the entries. The symbol combines people with a switching arrow so
+/// the control reads as "switch team" rather than merely "soccer." The
+/// visible menu indicator reinforces that tapping the current team opens
+/// choices.
 struct SidebarTeamSwitcher: View {
     @Environment(AppModel.self) private var appModel
 
@@ -263,13 +272,15 @@ struct SidebarTeamSwitcher: View {
         } label: {
             Label(
                 appModel.workspace.selectedTeam?.name ?? "Programme",
-                systemImage: "soccerball"
+                systemImage: "person.2.arrow.trianglehead.counterclockwise"
             )
             .lineLimit(1)
             .truncationMode(.tail)
         }
         .menuIndicator(.visible)
-        .accessibilityHint("Switch team")
+        .accessibilityLabel(
+            appModel.workspace.selectedTeam.map { "Switch team, \($0.name)" } ?? "Switch team"
+        )
     }
 }
 
@@ -287,8 +298,11 @@ struct TopBarTeamSwitcher: View {
         Menu {
             TeamSwitcherMenu()
         } label: {
-            Label("Switch Team", systemImage: "soccerball")
-                .labelStyle(.iconOnly)
+            Label(
+                "Switch Team",
+                systemImage: "person.2.arrow.trianglehead.counterclockwise"
+            )
+            .labelStyle(.iconOnly)
         }
         .accessibilityLabel(teamName.map { "Switch team, \($0)" } ?? "Switch team")
         .accessibilityIdentifier("topbar.teamSwitcher")
@@ -323,12 +337,17 @@ struct TeamSwitcherMenu: View {
         Button("Manage Teams…", systemImage: "person.3") {
             appModel.navigation.isPresentingManageTeams = true
         }
-        // Settings is application context, not a per-screen action: one
-        // separated entry here reaches it from every presentation (sidebar
-        // bottom bar, top-bar icon, compact title menu) instead of a gear
-        // repeated on each destination.
-        Divider()
-        Button("Settings…", systemImage: "gearshape") {
+    }
+}
+
+/// App-level settings stay separate from the workspace/team menu. A semantic
+/// secondary toolbar placement lets SwiftUI decide whether this appears
+/// directly or in overflow as space changes.
+struct ProgrammeSettingsButton: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        Button("Settings", systemImage: "gearshape") {
             appModel.navigation.isPresentingSettings = true
         }
     }
