@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import OSLog
 import Observation
 import ProgrammeCollaboration
 import ProgrammeCore
@@ -154,6 +155,7 @@ final class TeamWorkspace {
 @MainActor
 @Observable
 final class AppModel {
+    private static let launchLog = Logger(subsystem: "com.gbyo.programme", category: "launch")
     private(set) var container: ModelContainer?
     private(set) var store: MatchStore?
     private(set) var journal: RecoveryJournal?
@@ -383,10 +385,19 @@ final class AppModel {
 
     /// If the on-disk store cannot be opened at all, the app still launches into
     /// an in-memory one so it can explain what happened instead of crashing.
-    private static let fallbackContainer: ModelContainer? = try? ProgrammeStore.container(inMemory: true)
+    private static func fallbackContainer() -> ModelContainer? {
+        do {
+            return try ProgrammeStore.container(inMemory: true)
+        } catch {
+            // Same stderr trail as the launch path above: without it the
+            // fatalError below is the only evidence and the cause is lost.
+            Self.launchLog.error("Could not create fallback store: \(error, privacy: .public)")
+            return nil
+        }
+    }
 
     var containerForScene: ModelContainer {
-        container ?? Self.fallbackContainer
+        container ?? Self.fallbackContainer()
             ?? {
                 // A container is required by the scene. If even an in-memory store
                 // cannot be created the process is unusable; surface it immediately
@@ -428,10 +439,19 @@ final class AppModel {
                         .appending(path: "ProgrammeTestRecovery/\(UUID().uuidString)"))
                 : try? RecoveryJournal.makeDefault()
             if launchOptions.seedsSampleData {
-                try? ProgrammeStore.seedSampleData(
-                    into: container.mainContext, includeLiveMatch: launchOptions.opensLiveMatch)
+                do {
+                    try ProgrammeStore.seedSampleData(
+                        into: container.mainContext, includeLiveMatch: launchOptions.opensLiveMatch)
+                } catch {
+                    // A silent skip lands on first-run onboarding with no
+                    // explanation; the unified log keeps the cause instead.
+                    Self.launchLog.error("Could not seed sample data: \(error, privacy: .public)")
+                }
             }
         } catch {
+            // The unified log keeps the underlying store error for a launch
+            // failure in the field or under XCTest.
+            Self.launchLog.error("Could not open library: \(error, privacy: .public)")
             startupError = ProgrammeError(
                 title: "Programme couldn't open its library",
                 message:
@@ -513,11 +533,15 @@ final class AppModel {
         // Pre-provenance selections were always user choices; mark them
         // before any reload can treat them as automatic fallbacks.
         TeamWorkspace.migrateSelectionProvenance()
-        // Resolve the initial MDM configuration before the first automatic
-        // team selection, so an MDM suggestion wins over the plain
-        // first-team fallback. Apple documents the initial value as
-        // yielding immediately, so this does not stall launch.
-        await managed.startAndAwaitInitialConfiguration()
+        // Observation starts fire-and-forget: awaiting the first managed
+        // value here stalled launch outright wherever the system
+        // configuration sequence never yields (seen on the iOS 27
+        // simulator despite the documented immediate first value). The
+        // first automatic selection uses the plain fallback, and a managed
+        // suggestion still applies on arrival through
+        // managedConfigurationChanged, which only ever replaces
+        // non-explicit selections — never a user choice.
+        managed.start()
         // Apply later MDM suggestions only while the device still has no
         // explicit user selection. Never resets navigation or seasons, and
         // never overrides a user choice.
