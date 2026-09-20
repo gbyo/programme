@@ -8,6 +8,9 @@ import SwiftUI
 @main
 struct ProgrammeApp: App {
     @State private var appModel = AppModel()
+    /// Programme-wide search state, shared by every section's search field.
+    /// In-memory only: search text never persists across launches.
+    @State private var search = UniversalSearchModel()
     @Environment(\.scenePhase) private var scenePhase
     // System entry point for CloudKit share invitations accepted outside
     // the app. Forwards to AppModel; see ShareAcceptanceDelegate.
@@ -26,6 +29,7 @@ struct ProgrammeApp: App {
         WindowGroup {
             RootView()
                 .environment(appModel)
+                .environment(search)
                 .task {
                     // Install the acceptance handler and drain staged
                     // invitations atomically; later arrivals deliver
@@ -47,7 +51,7 @@ struct ProgrammeApp: App {
                 }
         }
         .modelContainer(appModel.containerForScene)
-        .commands { ProgrammeCommands(appModel: appModel) }
+        .commands { ProgrammeCommands(appModel: appModel, search: search) }
         .onChange(of: scenePhase) { _, phase in
             appModel.scenePhaseChanged(to: phase)
         }

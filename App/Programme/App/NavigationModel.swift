@@ -10,7 +10,6 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
     case matches
     case roster
     case stats
-    case search
 
     var id: String { rawValue }
 
@@ -20,7 +19,6 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
         case .matches: "Matches"
         case .roster: "Roster"
         case .stats: "Stats"
-        case .search: "Search"
         }
     }
 
@@ -32,7 +30,6 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
         case .matches: "Matches"
         case .roster: "Roster"
         case .stats: "Season Stats"
-        case .search: "Search"
         }
     }
 
@@ -42,7 +39,6 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
         case .matches: "calendar"
         case .roster: "person.3"
         case .stats: "chart.bar.xaxis"
-        case .search: "magnifyingglass"
         }
     }
 }
@@ -71,7 +67,6 @@ final class NavigationModel {
     var matchesPath = NavigationPath()
     var rosterPath = NavigationPath()
     var statsPath = NavigationPath()
-    var searchPath = NavigationPath()
 
     /// The live scorer takes over the window rather than living in a tab.
     var isShowingLiveMatch = false
@@ -97,7 +92,6 @@ final class NavigationModel {
         matchesPath = NavigationPath()
         rosterPath = NavigationPath()
         statsPath = NavigationPath()
-        searchPath = NavigationPath()
     }
 
     func open(_ route: AppRoute) {
@@ -132,7 +126,6 @@ final class NavigationModel {
         case .matches: Binding(get: { self.matchesPath }, set: { self.matchesPath = $0 })
         case .roster: Binding(get: { self.rosterPath }, set: { self.rosterPath = $0 })
         case .stats: Binding(get: { self.statsPath }, set: { self.statsPath = $0 })
-        case .search: Binding(get: { self.searchPath }, set: { self.searchPath = $0 })
         }
     }
 

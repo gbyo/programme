@@ -121,13 +121,22 @@ this answers which nearby device displays this live match right now):
 ## App shell
 
 Programme is iPad-first, with one adaptive `TabView` (`.sidebarAdaptable`, modern
-`Tab` API) providing five top-level sections: **Home | Matches | Roster
-| Stats | Search** (Search carries `TabRole.search`). SwiftUI renders those as
+`Tab` API) providing four top-level sections: **Home | Matches | Roster
+| Stats**. SwiftUI renders those as
 a bottom tab bar on iPhone and an adaptable tab bar/sidebar on iPad; there is
 no hand-built navigation chrome and no device branching. Each section keeps
 its own `NavigationStack`/`NavigationPath` (`AppSection` +
-`homePath`/`matchesPath`/`rosterPath`/`statsPath`/`searchPath` in
+`homePath`/`matchesPath`/`rosterPath`/`statsPath` in
 `NavigationModel`, which describes where the user is, not how it is presented).
+
+Search is an action on content, not a fifth destination. Every section's
+stack carries the same Programme-wide search field (`.searchable` with the
+`navigationBarDrawer` placement plus `.searchScopes` for Current Team /
+All Teams, all bound to one shared `UniversalSearchModel`). While search is
+active the shared `UniversalSearchResults` replaces the section content in
+place; selecting a result routes into the canonical Matches / Roster / Stats
+stack through the team-aware `AppModel.open(_:)` logic, and cancelling
+restores the browsed section.
 
 A **Team is the workspace** in which those sections operate — never a
 destination. `TeamWorkspace` (owned by `AppModel`) holds one selected team,

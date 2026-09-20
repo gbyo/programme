@@ -14,7 +14,6 @@ struct RosterView: View {
     @Environment(AppModel.self) private var appModel
 
     @State private var roster: RosterSnapshot = .empty
-    @State private var searchText = ""
     @State private var isAddingPlayer = false
     @State private var isImporting = false
     @State private var importText: String?
@@ -39,7 +38,9 @@ struct RosterView: View {
         }
         .listStyle(.insetGrouped)
         .teamWorkspaceTitle("Roster")
-        .searchable(text: $searchText, prompt: "Players")
+        // Finding a player by name or number is the shared universal search
+        // owned by the navigation shell, not a second local search field
+        // here.
         .overlay {
             if roster.players.isEmpty {
                 ContentUnavailableView {
@@ -54,7 +55,13 @@ struct RosterView: View {
                     Button("Import a Roster") { isImporting = true }
                 }
             } else if filtered.isEmpty {
-                ContentUnavailableView.search(text: searchText)
+                ContentUnavailableView {
+                    Label("No Current Players", systemImage: "person.3")
+                } description: {
+                    Text("Everyone on this team is marked as a former player.")
+                } actions: {
+                    Button("Show Former Players") { showsFormer = true }
+                }
             }
         }
         .toolbar {
@@ -115,13 +122,6 @@ struct RosterView: View {
     private var filtered: [PlayerSnapshot] {
         roster.sortedByNumber
             .filter { showsFormer || $0.isOnRoster }
-            .filter {
-                guard !searchText.isEmpty else { return true }
-                let query = searchText.lowercased()
-                return $0.firstName.lowercased().contains(query)
-                    || $0.lastName.lowercased().contains(query)
-                    || ($0.jerseyNumber.map { "\($0)" } ?? "").contains(query)
-            }
     }
 }
 

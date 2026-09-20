@@ -8,6 +8,7 @@ import SwiftUI
 /// replaces the whole browsing shell while a match is being scored.
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(UniversalSearchModel.self) private var search
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(HapticPreferences.key) private var hapticsEnabled = true
     @State private var isCreatingTeam = false
@@ -68,9 +69,11 @@ struct RootView: View {
         FirstRunView(isCreatingTeam: $isCreatingTeam)
     }
 
-    /// Five fixed sections. Each keeps its own NavigationStack/NavigationPath
+    /// Four fixed sections. Each keeps its own NavigationStack/NavigationPath
     /// so switching tabs preserves where the person was; switching teams
-    /// clears team-specific paths.
+    /// clears team-specific paths. Search is not a section: every stack
+    /// carries the same Programme-wide search field, and the shared
+    /// `UniversalSearchModel` below owns its state.
     private var tabShell: some View {
         @Bindable var navigation = appModel.navigation
 
@@ -90,12 +93,6 @@ struct RootView: View {
             Tab(AppSection.stats.title, systemImage: AppSection.stats.symbolName, value: AppSection.stats) {
                 sectionStack(for: .stats)
             }
-            Tab(
-                AppSection.search.title, systemImage: AppSection.search.symbolName,
-                value: AppSection.search, role: .search
-            ) {
-                sectionStack(for: .search)
-            }
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabViewSidebarBottomBar {
@@ -110,11 +107,28 @@ struct RootView: View {
         .id(appModel.workspace.selectedTeamID)
     }
 
+    /// One shared search field per section, all bound to the same
+    /// `UniversalSearchModel`: one universal Programme search with the
+    /// system pull-down presentation, not four copied filters. The drawer
+    /// stays hidden until the user pulls down (`automatic`), and scopes
+    /// appear only while searching (`onSearchPresentation`).
     @ViewBuilder
     private func sectionStack(for section: AppSection) -> some View {
         @Bindable var navigation = appModel.navigation
+        @Bindable var search = search
         NavigationStack(path: navigation.path(for: section)) {
-            sectionRoot(for: section)
+            SectionSearchContainer(section: section)
+                .searchable(
+                    text: $search.query,
+                    isPresented: $search.isPresented,
+                    placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "Search Programme"
+                )
+                .searchScopes($search.scope, activation: .onSearchPresentation) {
+                    ForEach(UniversalSearchScope.allCases) { scope in
+                        Text(scope.rawValue).tag(scope)
+                    }
+                }
                 .navigationDestination(for: AppRoute.self) { route in
                     switch route {
                     case .match(let id): MatchDetailView(matchID: id)
@@ -129,9 +143,39 @@ struct RootView: View {
                 }
         }
     }
+}
 
-    @ViewBuilder
-    private func sectionRoot(for section: AppSection) -> some View {
+/// The section root with universal search overlaid: while the section's
+/// search field is active the shared `UniversalSearchResults` replaces the
+/// section content in place — same tab, same team, same navigation stack.
+/// Cancelling clears the query and restores the browsing screen, and search
+/// never changes `navigation.section`.
+struct SectionSearchContainer: View {
+    let section: AppSection
+
+    @Environment(UniversalSearchModel.self) private var search
+    @Environment(\.isSearching) private var isSearching
+
+    var body: some View {
+        Group {
+            if isSearching {
+                UniversalSearchResults(search: search)
+            } else {
+                SectionRootContent(section: section)
+            }
+        }
+        .onChange(of: isSearching) { _, searching in
+            if !searching { search.query = "" }
+        }
+    }
+}
+
+struct SectionRootContent: View {
+    let section: AppSection
+
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
         if let teamID = appModel.workspace.selectedTeamID {
             switch section {
             case .home: HomeView(teamID: teamID)
@@ -140,7 +184,6 @@ struct RootView: View {
             case .stats:
                 SeasonStatsView(
                     teamID: teamID, seasonID: appModel.workspace.viewedStatsSeasonID)
-            case .search: SearchView()
             }
         }
     }
@@ -290,11 +333,18 @@ struct TeamSwitcherMenu: View {
 /// reach for the screen for the common actions.
 struct ProgrammeCommands: Commands {
     let appModel: AppModel
+    let search: UniversalSearchModel
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Match…") { appModel.navigation.isPresentingNewMatch = true }
                 .keyboardShortcut("n", modifiers: .command)
+        }
+        // The conventional search shortcut, routed into the native search
+        // presentation of whichever section is showing — never a fake tab.
+        CommandMenu("Search") {
+            Button("Search Programme") { search.isPresented = true }
+                .keyboardShortcut("f", modifiers: .command)
         }
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { appModel.navigation.isPresentingSettings = true }

@@ -181,6 +181,42 @@ class ProgrammeUITestCase: XCTestCase {
         return strip.label
     }
 
+    /// Reveals the pull-down universal search field by dragging scroll
+    /// content down, then returns the field once it is tappable. Every
+    /// section owns the same field, so this works from Home, Matches,
+    /// Roster, and Stats alike.
+    @discardableResult
+    func revealSearch(_ app: XCUIApplication) -> XCUIElement {
+        let field = app.searchFields.firstMatch
+        for _ in 0..<6 {
+            if field.isHittable { return field }
+            var revealed = false
+            for query in [app.tables, app.collectionViews, app.scrollViews] {
+                for scroll in query.allElementsBoundByIndex where scroll.exists {
+                    scroll.swipeDown()
+                    revealed = true
+                }
+            }
+            if !revealed { app.swipeDown() }
+        }
+        XCTAssertTrue(
+            field.isHittable,
+            "The universal search field never became reachable")
+        return field
+    }
+
+    /// Reveals universal search, focuses it, and types a query.
+    func searchFor(_ app: XCUIApplication, _ text: String) {
+        let field = revealSearch(app)
+        field.tap()
+        field.typeText(text)
+    }
+
+    /// Taps the system Cancel control, restoring the browsed section.
+    func cancelSearch(_ app: XCUIApplication) {
+        app.buttons["Cancel"].tap()
+    }
+
     /// Opens one of the four top-level sections, whether SwiftUI renders the
     /// destinations as a tab bar (iPhone) or an adaptable sidebar (iPad).
     func openSection(_ app: XCUIApplication, _ name: String) {
