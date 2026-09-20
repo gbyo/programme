@@ -38,11 +38,10 @@ enum PaletteOverflow: Equatable {
 /// pitch is aiming from memory, and muscle memory is worth more than any
 /// cleverness about what they tapped most last week.
 ///
-/// Frequency is expressed once, statically, in *size*: the four actions that make
-/// up almost every match sit in a large 2×2 block at the top, and everything else
-/// is a shorter row underneath. The opponent's quick actions are pinned below the
-/// scroll view, because an opponent shot feeds our goalkeeper's statistics and
-/// must never be below the fold.
+/// Frequency is expressed once, statically, in *size*: the three actions that
+/// make up almost every match sit in a large block at the top, and everything
+/// else is a shorter row underneath. The opponent's quick actions are pinned
+/// below the scroll view so their common events never fall below the fold.
 struct EventPalette: View {
     let session: LiveMatchSession
     var onAction: (PaletteAction) -> Void
@@ -82,20 +81,47 @@ struct EventPalette: View {
 
     // MARK: - Blocks
 
-    /// Goal, Shot on Goal, Shot, Save — the four that account for almost every
-    /// event in a match, as the largest targets on the screen.
+    /// Goal, Shot, Save — the three that account for almost every event in a
+    /// match, as the largest targets on the screen.
+    ///
+    /// A `Grid` rather than a `LazyVGrid`, because three actions do not fill a
+    /// two-column grid. Goal spans the full width of the top row — it is the one
+    /// action that is the point of the app, and the widest target on the screen
+    /// is the right home for it — and Shot and Save share the row beneath. The
+    /// alternatives were both worse: a lazy grid leaves Save as a half-width tile
+    /// beside a hole, and filling that hole would mean promoting some rare
+    /// command into the square a scorer's thumb has learned is a common one.
+    ///
+    /// The count only varies with the match's stat profile, which is fixed before
+    /// kickoff, so nothing here moves during a match. When a profile leaves only
+    /// one of Shot and Save, that one spans the row rather than sitting beside a
+    /// gap.
     private var primaryBlock: some View {
-        LazyVGrid(columns: twoColumns, spacing: 10) {
-            ForEach(primaryActions) { action in
-                PaletteButton(
-                    action: action,
-                    prominence: .primary,
-                    isArmed: session.armedPlayer != nil,
-                    differentiateWithoutColor: differentiateWithoutColor
-                ) {
-                    onAction(action)
+        let supporting = supportingPrimaryActions
+        return Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                primaryButton(goalAction)
+                    .gridCellColumns(2)
+            }
+            if !supporting.isEmpty {
+                GridRow {
+                    ForEach(supporting) { action in
+                        primaryButton(action)
+                            .gridCellColumns(supporting.count == 1 ? 2 : 1)
+                    }
                 }
             }
+        }
+    }
+
+    private func primaryButton(_ action: PaletteAction) -> some View {
+        PaletteButton(
+            action: action,
+            prominence: .primary,
+            isArmed: session.armedPlayer != nil,
+            differentiateWithoutColor: differentiateWithoutColor
+        ) {
+            onAction(action)
         }
     }
 
@@ -126,23 +152,37 @@ struct EventPalette: View {
 
     // MARK: - Actions
 
-    /// Built from the match's stat profile, which is fixed before kickoff.
-    var primaryActions: [PaletteAction] {
+    /// The one action that is the point of the app. Always present, always first.
+    ///
+    /// A goal is semantically one of Shot's outcomes, and it still keeps its own
+    /// button: it is the most time-critical thing that happens in a match, it
+    /// moves the score, it is common, and it leads straight into the scorer and
+    /// assist workflow. Reaching it through *Shot → Goal* would be a tap slower
+    /// at the worst possible moment. Both routes record the same single event.
+    var goalAction: PaletteAction {
+        PaletteAction(
+            id: "goal", title: "Goal", subtitle: "Scorer, then assist",
+            symbolName: "soccerball.inverse", pending: .goal(.openPlay), kind: .emphasis)
+    }
+
+    /// The other large targets, built from the match's stat profile, which is
+    /// fixed before kickoff.
+    ///
+    /// There is exactly one ordinary Shot button, and it does not claim to know
+    /// what happened — the outcome is the next question. Save stays its own
+    /// action because it is a different mental model: the scorer is watching our
+    /// goalkeeper stop an opponent's shot, not entering one of our attempts, and
+    /// making that *Opponent Shot → Saved* would cost two extra taps for one of
+    /// the most common things they record.
+    var supportingPrimaryActions: [PaletteAction] {
         let profile = session.profile
-        var result: [PaletteAction] = [
-            PaletteAction(
-                id: "goal", title: "Goal", subtitle: "Scorer, then assist",
-                symbolName: "soccerball.inverse", pending: .goal(.openPlay), kind: .emphasis)
-        ]
+        var result: [PaletteAction] = []
         if profile.tracks(.shots) {
             result.append(
                 PaletteAction(
-                    id: "sog", title: "Shot on Goal", subtitle: "Saved by their keeper",
-                    symbolName: "scope", pending: .shot(.saved), kind: .standard))
-            result.append(
-                PaletteAction(
-                    id: "shot", title: "Shot", subtitle: "Off target",
-                    symbolName: "arrow.up.forward", pending: .shot(.offTarget), kind: .standard))
+                    id: "shot", title: "Shot", subtitle: "Then what happened?",
+                    symbolName: "arrow.up.forward", pending: .shotAttempt(.openPlay),
+                    kind: .standard))
         }
         if profile.tracks(.goalkeeping) {
             result.append(
@@ -152,6 +192,9 @@ struct EventPalette: View {
         }
         return result
     }
+
+    /// Every large target, in the order they appear.
+    var primaryActions: [PaletteAction] { [goalAction] + supportingPrimaryActions }
 
     var secondaryActions: [PaletteAction] {
         let profile = session.profile
@@ -173,7 +216,7 @@ struct EventPalette: View {
                 PaletteAction(
                     id: "pk", title: "Penalty Kick", subtitle: nil,
                     symbolName: "circle.bottomhalf.filled",
-                    pending: .penaltyAttempt, kind: .standard))
+                    pending: .shotAttempt(.penaltyKick), kind: .standard))
         }
         if profile.tracks(.cards) {
             result.append(
@@ -363,10 +406,14 @@ private struct PaletteButtonStyle: ViewModifier {
 
 /// Secondary event selection.
 ///
-/// A native menu rather than a sheet: choosing "Blocked" is a one-step choice
+/// A native menu rather than a sheet: choosing "Offside" is a one-step choice
 /// among a handful of rare actions, and a sheet takes the match off the screen to
 /// ask it. Picking something here drops straight back into the centre stage that
 /// asks who it belonged to.
+///
+/// Everything here is a genuinely secondary *event type*. Shot outcomes are not:
+/// blocked and woodwork are answers to Shot's own question now, not a second way
+/// into the shot model hidden behind an ellipsis.
 struct MoreMenu: View {
     let session: LiveMatchSession
     var onPick: (PaletteOverflow) -> Void
@@ -386,15 +433,6 @@ struct MoreMenu: View {
                 }
                 if session.profile.tracks(.offsides) {
                     Button("Offside", systemImage: "flag.slash") { onPick(.pending(.offside)) }
-                }
-            }
-
-            if session.profile.tracks(.shots) {
-                Section("Shot Result") {
-                    Button("Blocked", systemImage: "shield") { onPick(.pending(.shot(.blocked))) }
-                    Button("Post or Crossbar", systemImage: "diamond") {
-                        onPick(.pending(.shot(.woodwork)))
-                    }
                 }
             }
 

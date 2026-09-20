@@ -284,8 +284,7 @@ struct ProgrammeCommands: Commands {
         // them, without the touch interface depending on any of it.
         CommandMenu("Record") {
             liveAction("Goal", key: "g", kind: .goal)
-            liveAction("Shot on Goal", key: "s", kind: .shotOnGoal, requires: .shots)
-            liveAction("Shot", key: "h", kind: .shot, requires: .shots)
+            liveAction("Shot", key: "s", kind: .shot, requires: .shots)
             liveAction("Save", key: "v", kind: .save, requires: .goalkeeping)
             liveAction("Corner", key: "c", kind: .corner, requires: .corners)
             Divider()

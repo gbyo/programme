@@ -136,6 +136,133 @@ struct ComposerFlowTests {
         #expect(fixture.snapshot.needsReviewCount == 0)
     }
 
+    /// Every answer the Shot flow offers, recorded exactly the way the composer
+    /// records it: one `ShotEvent` carrying the chosen outcome, and no separate
+    /// shot / shot-on-goal / goal bookkeeping anywhere.
+    @Test(
+        "Each shot outcome derives one shot and the right on-target and goal credit",
+        arguments: [
+            (ShotOutcome.goal, 1, 1, 1),
+            (.saved, 1, 1, 0),
+            (.offTarget, 1, 0, 0),
+            (.blocked, 1, 0, 0),
+            (.woodwork, 1, 0, 0),
+        ]
+    )
+    func eachShotOutcomeDerivesTheRightStatistics(
+        outcome: ShotOutcome, shots: Int, onGoal: Int, goals: Int
+    ) throws {
+        var fixture = MatchFixture()
+        try fixture.startMatch()
+        fixture.seek(period: 1, minutes: 15)
+
+        try fixture.perform(
+            .recordShot(
+                ShotEvent(side: .us, shooter: .player(ProgrammeSample.carter), outcome: outcome)))
+
+        let line = fixture.snapshot.player(ProgrammeSample.carter)
+        #expect(shotEvents(in: fixture).count == 1)
+        #expect(line.shots == shots)
+        #expect(line.shotsOnGoal == onGoal)
+        #expect(line.goals == goals)
+        #expect(fixture.snapshot.score.us == goals)
+    }
+
+    /// Choosing Goal from the outcome question is not a second kind of goal.
+    /// The composer routes it through the same goal-recording path the Goal
+    /// button uses, so what lands in the log is one event, with the score moved
+    /// and the assist left outstanding exactly as it would be either way.
+    @Test func choosingGoalAsAShotOutcomeRecordsTheSameSingleGoalEvent() throws {
+        var fixture = MatchFixture()
+        try fixture.startMatch()
+        fixture.seek(period: 1, minutes: 18)
+
+        try fixture.perform(
+            .recordShot(
+                ShotEvent(
+                    side: .us, shooter: .player(ProgrammeSample.carter), outcome: .goal,
+                    assist: .unidentified)))
+
+        #expect(shotEvents(in: fixture).count == 1, "Shot → Goal wrote more than one event")
+        #expect(fixture.snapshot.score.us == 1)
+        #expect(fixture.snapshot.player(ProgrammeSample.carter).goals == 1)
+        #expect(fixture.snapshot.player(ProgrammeSample.carter).shots == 1)
+        #expect(fixture.snapshot.player(ProgrammeSample.carter).shotsOnGoal == 1)
+        // The assist question is outstanding rather than answered for them.
+        #expect(fixture.snapshot.needsReviewCount == 1)
+    }
+
+    /// Correcting an outcome through the event editor re-derives everything from
+    /// the events, including the score and the goalkeeper's line. Nothing is
+    /// patched up by hand, so a correction cannot leave a stale total behind.
+    @Test func correctingAnOutcomeReDerivesTheScoreAndTheGoalkeeper() throws {
+        var fixture = MatchFixture()
+        try fixture.startMatch()
+        fixture.seek(period: 1, minutes: 22)
+
+        let effects = try fixture.perform(
+            .recordShot(ShotEvent(side: .opponent, shooter: .untracked, outcome: .saved)))
+        let id = try #require(
+            effects.compactMap { effect -> EventID? in
+                if case .appendEvent(let event) = effect { return event.id }
+                return nil
+            }.first)
+
+        #expect(fixture.snapshot.keeper(ProgrammeSample.keeper).saves == 1)
+        #expect(fixture.snapshot.score.opponent == 0)
+
+        // It went in after all.
+        var shot = try #require(shotPayload(of: id, in: fixture))
+        shot.outcome = .goal
+        try fixture.edit(.replacePayload(id, .shot(shot), summary: "Outcome changed to Goal"))
+
+        #expect(fixture.snapshot.score.opponent == 1)
+        #expect(fixture.snapshot.keeper(ProgrammeSample.keeper).saves == 0)
+        #expect(fixture.snapshot.keeper(ProgrammeSample.keeper).goalsAllowed == 1)
+        #expect(fixture.snapshot.keeper(ProgrammeSample.keeper).shotsOnGoalFaced == 1)
+
+        // And on a second look it never reached the frame at all.
+        shot.outcome = .blocked
+        try fixture.edit(.replacePayload(id, .shot(shot), summary: "Outcome changed to Blocked"))
+
+        #expect(fixture.snapshot.score.opponent == 0)
+        #expect(fixture.snapshot.keeper(ProgrammeSample.keeper).shotsOnGoalFaced == 0)
+        #expect(fixture.snapshot.keeper(ProgrammeSample.keeper).goalsAllowed == 0)
+        #expect(
+            shotEvents(in: fixture).count == 1,
+            "Correcting an outcome added an event instead of revising one")
+    }
+
+    /// A penalty goal scores, counts as both an attempt and a penalty goal, and
+    /// is never assisted — which is why the composer does not ask.
+    @Test func aPenaltyGoalScoresAndIsNeverAssisted() throws {
+        var fixture = MatchFixture()
+        try fixture.startMatch()
+        fixture.seek(period: 1, minutes: 33)
+
+        try fixture.perform(
+            .recordShot(
+                ShotEvent(
+                    side: .us, shooter: .player(ProgrammeSample.carter), outcome: .goal,
+                    phase: .penaltyKick)))
+
+        let line = fixture.snapshot.player(ProgrammeSample.carter)
+        #expect(fixture.snapshot.score.us == 1)
+        #expect(line.goals == 1)
+        #expect(line.penaltyAttempts == 1)
+        #expect(line.penaltyGoals == 1)
+        #expect(fixture.snapshot.players.values.allSatisfy { $0.assists == 0 })
+        #expect(fixture.snapshot.needsReviewCount == 0, "A penalty goal was left awaiting an assist")
+    }
+
+    /// Every shot still in the log, so a test can say "one event" and mean it.
+    private func shotEvents(in fixture: MatchFixture) -> [MatchEvent] {
+        fixture.context.activeEvents.filter {
+            if case .shot = $0.payload { return true }
+            return false
+        }
+    }
+
     private func shotPayload(of id: EventID, in fixture: MatchFixture) -> ShotEvent? {
         guard let event = fixture.context.events.first(where: { $0.id == id }),
             case .shot(let shot) = event.payload

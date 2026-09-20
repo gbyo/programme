@@ -144,10 +144,13 @@ final class EventRecordingUITests: ProgrammeUITestCase {
         let app = launch(["-programme-open-live"])
         waitForScorer(app)
 
-        element(app, "palette.sog").tap()
+        element(app, "palette.shot").tap()
         let unknown = element(app, "pick.wide.Player Unknown")
         XCTAssertTrue(unknown.waitForExistence(timeout: 5), "Player Unknown was not offered")
         unknown.tap()
+
+        XCTAssertTrue(element(app, "outcome.saved").waitForExistence(timeout: 5))
+        element(app, "outcome.saved").tap()
 
         XCTAssertTrue(lastEventLabel(app).contains("needs player attribution"))
         XCTAssertTrue(element(app, "scoring.review").label.contains("need attention"))
