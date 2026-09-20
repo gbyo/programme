@@ -133,7 +133,7 @@ struct AttributionResolverView: View {
             PlayerPickerStage(
                 title: promptTitle,
                 players: candidates,
-                goalkeeperID: session.snapshot.activeGoalkeeper,
+                goalkeeperID: eventSide == .us ? session.snapshot.activeGoalkeeper : nil,
                 allowsUnknown: false,
                 onPick: { ref in
                     session.attribute(eventID: event.id, slot: slot, to: ref)
@@ -171,12 +171,32 @@ struct AttributionResolverView: View {
         return "\(description.timeText) · \(description.title) — \(base)"
     }
 
-    /// Players who were on the field at that moment, which is almost always the
-    /// right list, followed by the rest of the roster.
+    private var eventSide: TeamSide {
+        event.payload.side ?? .us
+    }
+
+    /// Players who could own this correction. Our side preserves the historical
+    /// on-field-first ordering; Programme has no opponent lineup timeline, so a
+    /// Both Teams opponent correction uses that match's opponent roster.
     private var candidates: [PlayerSnapshot] {
-        let onFieldThen = session.snapshot.timeline.onField(side: .us, at: event.time)
-        let primary = session.roster.sortedByNumber.filter { onFieldThen.contains($0.id) }
-        let others = session.roster.activeRoster.filter { !onFieldThen.contains($0.id) }
-        return primary + others
+        let roster = session.context.roster(for: eventSide)
+        let result: [PlayerSnapshot]
+
+        if eventSide == .opponent {
+            result = roster.activeRoster
+        } else {
+            let onFieldThen = session.snapshot.timeline.onField(side: eventSide, at: event.time)
+            let primary = roster.sortedByNumber.filter { onFieldThen.contains($0.id) }
+            let others = roster.activeRoster.filter { !onFieldThen.contains($0.id) }
+            result = primary + others
+        }
+
+        guard slot == .assist,
+            case .shot(let shot) = event.payload,
+            let scorerID = shot.shooter.playerID
+        else {
+            return result
+        }
+        return result.filter { $0.id != scorerID }
     }
 }

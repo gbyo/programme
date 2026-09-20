@@ -76,9 +76,20 @@ struct ScoreboardWindow: View {
                     name: session.descriptor.opponentShortName, value: session.snapshot.score.opponent)
             }
 
-            Text(session.clock.displayText)
+            // System-animated from the anchor, like the scorer header:
+            // the clock advances with no app-owned tick.
+            if session.clock.isRunning {
+                Text(
+                    timerInterval: WidgetClock.timerRange(
+                        anchor: session.context.clock, rules: session.context.rules, at: Date()),
+                    countsDown: WidgetClock.countsDown(rules: session.context.rules),
+                    showsHours: false
+                )
                 .font(.system(size: 92, weight: .light).monospacedDigit())
-                .contentTransition(.numericText())
+            } else {
+                Text(session.clock.displayText)
+                    .font(.system(size: 92, weight: .light).monospacedDigit())
+            }
         }
         .padding(48)
         .accessibilityElement(children: .combine)

@@ -104,7 +104,12 @@ struct RootView: View {
             SidebarTeamSwitcher()
                 .accessibilityIdentifier("sidebar.teamSwitcher")
         }
-        .id(appModel.workspace.selectedTeamID)
+        // Deliberately no `.id(selectedTeamID)` here: resetting the whole
+        // shell's identity on every team switch would discard the selected
+        // section, the sidebar presentation, and all tab-local state.
+        // Team changes drive explicitly instead — team-scoped navigation
+        // paths clear in `selectTeam`, section roots reload by team, and
+        // team-relative view state resets where it lives.
     }
 
     /// One shared search field per section, all bound to the same
@@ -159,7 +164,7 @@ struct SectionSearchContainer: View {
     var body: some View {
         Group {
             if isSearching {
-                UniversalSearchResults(search: search)
+                UniversalSearchResults(search: search, section: section)
             } else {
                 SectionRootContent(section: section)
             }

@@ -46,6 +46,22 @@ public struct MatchListItem: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Lightweight team identity for bootstrap, workspace routing, sync zone setup,
+/// and intents enumeration. Reads scalar fields only and never faults the
+/// players or seasons relationships. Surfaces that display counts use
+/// `teams()` instead.
+public struct TeamIdentity: Identifiable, Hashable, Sendable {
+    public var id: TeamID
+    public var name: String
+    public var shortName: String
+
+    public init(id: TeamID, name: String, shortName: String) {
+        self.id = id
+        self.name = name
+        self.shortName = shortName
+    }
+}
+
 public struct TeamListItem: Identifiable, Hashable, Sendable {
     public var id: TeamID
     public var name: String
@@ -59,6 +75,25 @@ public struct TeamListItem: Identifiable, Hashable, Sendable {
         self.shortName = shortName
         self.playerCount = playerCount
         self.seasonCount = seasonCount
+    }
+}
+
+/// Lightweight season identity for pickers, filters, and sync staging. Reads
+/// scalar fields only and never faults the matches relationship. Surfaces
+/// that display match counts use `seasons(teamID:)` instead.
+public struct SeasonIdentity: Identifiable, Hashable, Sendable {
+    public var id: SeasonID
+    public var name: String
+    public var startDate: Date
+    public var endDate: Date?
+    public var isCurrent: Bool
+
+    public init(id: SeasonID, name: String, startDate: Date, endDate: Date?, isCurrent: Bool) {
+        self.id = id
+        self.name = name
+        self.startDate = startDate
+        self.endDate = endDate
+        self.isCurrent = isCurrent
     }
 }
 
@@ -161,6 +196,13 @@ public actor MatchStore {
         return team.teamID
     }
 
+    public func teamIdentities() throws -> [TeamIdentity] {
+        let descriptor = FetchDescriptor<TeamModel>(sortBy: [SortDescriptor(\.name)])
+        return try modelContext.fetch(descriptor).map {
+            TeamIdentity(id: $0.teamID, name: $0.name, shortName: $0.shortName)
+        }
+    }
+
     public func teams() throws -> [TeamListItem] {
         let descriptor = FetchDescriptor<TeamModel>(sortBy: [SortDescriptor(\.name)])
         return try modelContext.fetch(descriptor).map {
@@ -213,6 +255,17 @@ public actor MatchStore {
         return TeamDetails(
             id: model.teamID, name: model.name, shortName: model.shortName, mascot: model.mascot,
             primaryColorHex: model.primaryColorHex, secondaryColorHex: model.secondaryColorHex)
+    }
+
+    public func seasonIdentities(teamID: TeamID) throws -> [SeasonIdentity] {
+        guard let team = try team(teamID) else { throw StoreError.teamNotFound }
+        return team.seasons
+            .sorted { $0.startDate > $1.startDate }
+            .map { season in
+                SeasonIdentity(
+                    id: season.seasonID, name: season.name, startDate: season.startDate,
+                    endDate: season.endDate, isCurrent: season.isCurrent)
+            }
     }
 
     public func seasons(teamID: TeamID) throws -> [SeasonListItem] {
@@ -521,6 +574,19 @@ public actor MatchStore {
         -> [MatchListItem]
     {
         var descriptor = FetchDescriptor<MatchModel>(sortBy: [SortDescriptor(\.kickoff, order: .reverse)])
+        // Filter in SQLite, not in Swift: fetching every team's rows just to
+        // discard them wastes work, and a fetchLimit applied before the
+        // filter can hide the requested team's rows behind other teams'.
+        if let teamID, let seasonID {
+            let teamIDValue = teamID.rawValue
+            let seasonIDValue = seasonID.rawValue
+            descriptor.predicate = #Predicate {
+                $0.teamIdentifier == teamIDValue && $0.season?.identifier == seasonIDValue
+            }
+        } else if let teamID {
+            let teamIDValue = teamID.rawValue
+            descriptor.predicate = #Predicate { $0.teamIdentifier == teamIDValue }
+        }
         if let limit { descriptor.fetchLimit = limit }
         let models = try modelContext.fetch(descriptor)
         return
@@ -541,7 +607,19 @@ public actor MatchStore {
     /// never derives a season's worth of statistics.
     public func seasonSummaries(teamID: TeamID, seasonID: SeasonID?) throws -> [MatchStatSummary] {
         guard let team = try team(teamID) else { throw StoreError.teamNotFound }
-        let models = try modelContext.fetch(FetchDescriptor<MatchModel>())
+        // Scope the fetch to this team's rows; per-season and finalized
+        // filtering below then runs over usable rows only.
+        let teamIDValue = teamID.rawValue
+        var descriptor = FetchDescriptor<MatchModel>()
+        if let seasonID {
+            let seasonIDValue = seasonID.rawValue
+            descriptor.predicate = #Predicate {
+                $0.teamIdentifier == teamIDValue && $0.season?.identifier == seasonIDValue
+            }
+        } else {
+            descriptor.predicate = #Predicate { $0.teamIdentifier == teamIDValue }
+        }
+        let models = try modelContext.fetch(descriptor)
         var summaries: [MatchStatSummary] = []
         for model in models where model.teamIdentifier == teamID.rawValue {
             if let seasonID, model.season?.identifier != seasonID.rawValue { continue }
@@ -558,6 +636,33 @@ public actor MatchStore {
 
     public func seasonStats(teamID: TeamID, seasonID: SeasonID?) throws -> SeasonStats {
         SeasonEngine.aggregate(try seasonSummaries(teamID: teamID, seasonID: seasonID))
+    }
+
+    /// W-L-D record text without deriving a single player total.
+    ///
+    /// Counts the cached results of finalized matches only — the same
+    /// population and the same win/loss/draw rule as
+    /// `SeasonEngine.aggregate` — but never decodes an event or runs
+    /// `StatEngine.snapshot`. The cache is written from each match's final
+    /// snapshot, so this agrees with `seasonStats(...).recordText` while
+    /// staying proportional to the match count. For call sites (widget,
+    /// Watch) that only render the record string.
+    public func seasonRecord(teamID: TeamID, seasonID: SeasonID?) throws -> String {
+        let models = try modelContext.fetch(FetchDescriptor<MatchModel>())
+        var wins = 0
+        var losses = 0
+        var draws = 0
+        for model in models where model.teamIdentifier == teamID.rawValue {
+            if let seasonID, model.season?.identifier != seasonID.rawValue { continue }
+            guard model.phase == .finalized else { continue }
+            switch model.result {
+            case .win: wins += 1
+            case .loss: losses += 1
+            case .draw: draws += 1
+            case nil: break
+            }
+        }
+        return "\(wins)-\(losses)-\(draws)"
     }
 
     /// Snapshot a single match without keeping the model around.

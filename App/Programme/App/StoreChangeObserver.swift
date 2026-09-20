@@ -16,6 +16,7 @@ import SwiftData
 final class StoreChangeObserver {
     private var observer: AnyObject?
     private var onChange: (@MainActor () async -> Void)?
+    private var deliveryTask: Task<Void, Never>?
 
     func start(container: ModelContainer, onChange: @escaping @MainActor () async -> Void) {
         guard #available(iOS 27.0, *) else { return }
@@ -40,13 +41,32 @@ final class StoreChangeObserver {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.observer != nil else { return }
-                await self.onChange?()
+
+                // Observation tracking is one-shot. Re-arm immediately so
+                // changes that arrive during the debounce window are not lost.
                 self.track(historyObserver)
+
+                // One logical write can touch several observed models. Coalesce
+                // that burst into one derived-data refresh instead of repeating
+                // widget, recovery, and search-index work for each history bump.
+                self.deliveryTask?.cancel()
+                self.deliveryTask = Task { @MainActor [weak self] in
+                    do {
+                        try await Task.sleep(for: .milliseconds(500))
+                    } catch {
+                        return
+                    }
+                    guard let self, self.observer != nil else { return }
+                    await self.onChange?()
+                    self.deliveryTask = nil
+                }
             }
         }
     }
 
     func stop() {
+        deliveryTask?.cancel()
+        deliveryTask = nil
         observer = nil
         onChange = nil
     }

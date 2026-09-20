@@ -138,6 +138,65 @@ struct RecoveryJournalTests {
     }
 }
 
+@Suite("Closed-journal upkeep policy")
+struct JournalUpkeepPolicyTests {
+
+    private func makeJournal() throws -> (RecoveryJournal, URL) {
+        let directory = URL.temporaryDirectory.appending(path: "programme-upkeep-tests-\(UUID().uuidString)")
+        return (try RecoveryJournal(directory: directory), directory)
+    }
+
+    private func closedJournal(in journal: RecoveryJournal) throws {
+        var context = MatchContext(descriptor: ProgrammeSample.descriptor(), roster: ProgrammeSample.roster)
+        try journal.open(
+            matchID: context.descriptor.id, descriptor: context.descriptor,
+            roster: context.roster, opponentRoster: .empty)
+        let effects = try MatchEngine.perform(
+            .setLineup(
+                LineupEvent(
+                    side: .us, onField: ProgrammeSample.startingEleven, goalkeeper: ProgrammeSample.keeper)),
+            on: context, at: Date())
+        MatchEngine.apply(effects, to: &context)
+        try journal.append(effects, for: context.descriptor.id)
+        try journal.close(matchID: context.descriptor.id)
+    }
+
+    @Test("Upkeep is due when it has never run, then throttled by interval")
+    func dueThenThrottled() {
+        let policy = JournalUpkeepPolicy(minimumInterval: 60 * 60 * 24)
+        let now = Date()
+        #expect(policy.isDue(now: now, lastRunAt: nil))
+        #expect(!policy.isDue(now: now, lastRunAt: now))
+        #expect(
+            !policy.isDue(now: now, lastRunAt: now.addingTimeInterval(-60 * 60 * 23)))
+        #expect(policy.isDue(now: now, lastRunAt: now.addingTimeInterval(-60 * 60 * 25)))
+    }
+
+    @Test("Upkeep preserves the retention window and never prunes open journals")
+    func performRespectsRetentionAndOpenJournals() throws {
+        let (journal, directory) = try makeJournal()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try closedJournal(in: journal)
+
+        // Open journal that must survive every upkeep run. A distinct seed
+        // keeps its file separate from the closed journal above.
+        let openContext = MatchContext(
+            descriptor: ProgrammeSample.descriptor(seed: "match.upkeep-open"),
+            roster: ProgrammeSample.roster)
+        try journal.open(
+            matchID: openContext.descriptor.id, descriptor: openContext.descriptor,
+            roster: openContext.roster, opponentRoster: .empty)
+
+        // Freshly closed journal is inside the retention window.
+        #expect(JournalUpkeepPolicy(retention: 60 * 60 * 24 * 30).perform(on: journal) == 0)
+        #expect(journal.openJournals().count == 1)
+
+        // Past the retention window only the closed journal goes.
+        #expect(JournalUpkeepPolicy(retention: -1).perform(on: journal) == 1)
+        #expect(journal.openJournals().count == 1)
+    }
+}
+
 @Suite("SwiftData store")
 struct MatchStoreTests {
 
@@ -539,6 +598,32 @@ struct TeamWorkspaceTests {
         #expect(details.name == "Varsity Renamed")
         #expect(details.shortName == "VAR")
     }
+
+    @Test("Identity projections match summaries without the counts")
+    func identityProjections() async throws {
+        let store = try makeStore()
+        let varsity = try await store.createTeam(name: "Varsity", shortName: "VAR")
+        let season = try await store.createSeason(
+            teamID: varsity, name: "2026", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        try await store.addPlayers(teamID: varsity, ProgrammeSample.roster.players)
+
+        let identities = try await store.teamIdentities()
+        #expect(identities.map(\.id) == [varsity])
+        #expect(identities.first?.name == "Varsity")
+        #expect(identities.first?.shortName == "VAR")
+
+        let seasonIdentities = try await store.seasonIdentities(teamID: varsity)
+        #expect(seasonIdentities.map(\.id) == [season])
+        #expect(seasonIdentities.first?.name == "2026")
+        #expect(seasonIdentities.first?.isCurrent == true)
+
+        // Summaries still carry the counts for management UI.
+        let summaries = try await store.teams()
+        #expect(summaries.first?.playerCount == ProgrammeSample.roster.players.count)
+        #expect(summaries.first?.seasonCount == 1)
+        #expect(try await store.seasons(teamID: varsity).first?.matchCount == 0)
+    }
 }
 
 @Suite("Match locations are optional metadata, never scoring truth")
@@ -720,5 +805,197 @@ struct MatchReminderPreferenceTests {
         let context = try await store.context(for: item.id)
         #expect(context.descriptor.location?.name == "Abbeville High School")
         #expect(try await store.reminderMinutesBefore(for: item.id) == nil)
+    }
+}
+
+@Suite("Match fetching filters in the store, before any limit")
+struct MatchFetchPredicateTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makeMatch(
+        _ store: MatchStore, teamID: TeamID, seasonID: SeasonID?, opponent: String,
+        daysFromNow: Int
+    ) async throws -> MatchID {
+        try await store.createMatch(
+            teamID: teamID, seasonID: seasonID, opponentName: opponent,
+            opponentShortName: opponent, kickoff: ProgrammeSample.kickoff(daysFromNow: daysFromNow),
+            venue: .home, rules: .highSchool, statProfile: .maxPreps, tracking: .ourTeam,
+            competition: nil, roster: ProgrammeSample.roster)
+    }
+
+    @Test("A team limit applies to that team's matches, not to unfiltered rows")
+    func teamLimitAppliesAfterTeamFilter() async throws {
+        let store = try makeStore()
+        let teamA = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        let teamB = try await store.createTeam(name: "Dixie", shortName: nil)
+        // Team B's matches are newer. A limit applied before the team
+        // filter would spend itself on B's rows and hide A's.
+        for days in [-10, -9, -8] {
+            _ = try await makeMatch(store, teamID: teamA, seasonID: nil, opponent: "Foe", daysFromNow: days)
+        }
+        for days in [-2, -1] {
+            _ = try await makeMatch(store, teamID: teamB, seasonID: nil, opponent: "Foe", daysFromNow: days)
+        }
+
+        let limited = try await store.matches(teamID: teamA, limit: 2)
+        #expect(limited.count == 2)
+        #expect(limited.allSatisfy { $0.opponentName == "Foe" })
+        // Newest first: the two most recent of team A.
+        #expect(limited.map(\.kickoff) == limited.map(\.kickoff).sorted(by: >))
+
+        let all = try await store.matches(teamID: teamA)
+        #expect(all.count == 3)
+    }
+
+    @Test("Season and team filters combine without leaking across seasons or teams")
+    func seasonAndTeamFiltersCombine() async throws {
+        let store = try makeStore()
+        let teamA = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        let teamB = try await store.createTeam(name: "Dixie", shortName: nil)
+        let fallID = try await store.createSeason(
+            teamID: teamA, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        let springID = try await store.createSeason(
+            teamID: teamA, name: "Spring", startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: nil, makeCurrent: false)
+        let fallA = try await makeMatch(
+            store, teamID: teamA, seasonID: fallID, opponent: "Fall Foe", daysFromNow: -5)
+        _ = try await makeMatch(
+            store, teamID: teamA, seasonID: springID, opponent: "Spring Foe", daysFromNow: -4)
+        _ = try await makeMatch(
+            store, teamID: teamB, seasonID: nil, opponent: "Other Foe", daysFromNow: -3)
+        try await store.apply([.setPhase(.finalized)], to: fallA)
+
+        let fall = try await store.matches(teamID: teamA, seasonID: fallID)
+        #expect(fall.map(\.opponentName) == ["Fall Foe"])
+
+        // Finalized summaries stay scoped to the requested team.
+        let summaries = try await store.seasonSummaries(teamID: teamA, seasonID: nil)
+        #expect(summaries.count == 1)
+
+        // Interrupted matches are still found.
+        let liveID = try await makeMatch(
+            store, teamID: teamA, seasonID: fallID, opponent: "Live Foe", daysFromNow: 0)
+        try await store.apply([.setPhase(.inPeriod)], to: liveID)
+        let interrupted = try await store.interruptedMatches()
+        #expect(interrupted.map(\.id).contains(liveID))
+    }
+}
+
+@Suite("Season record text projects cached results without deriving totals")
+struct SeasonRecordProjectionTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makeTeamAndRoster(_ store: MatchStore) async throws -> (TeamID, RosterSnapshot) {
+        let teamID = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        try await store.addPlayers(teamID: teamID, ProgrammeSample.roster.players)
+        return (teamID, try await store.roster(teamID: teamID))
+    }
+
+    private func play(_ command: MatchCommand, on context: inout MatchContext, date: inout Date)
+        throws
+    {
+        let effects = try MatchEngine.perform(command, on: context, at: date)
+        MatchEngine.apply(effects, to: &context)
+        date = date.addingTimeInterval(1)
+    }
+
+    /// Plays a match to the given score and imports it into `seasonID`,
+    /// finalizing unless asked not to (a live match must not count).
+    private func importMatch(
+        _ store: MatchStore, teamID: TeamID, seasonID: SeasonID?, seed: String, ourGoals: Int,
+        opponentGoals: Int, finalize: Bool = true
+    ) async throws {
+        var context = MatchContext(
+            descriptor: ProgrammeSample.descriptor(seed: seed), roster: ProgrammeSample.roster)
+        var date = Date(timeIntervalSince1970: 1_800_000_000)
+        try play(
+            .setLineup(
+                LineupEvent(
+                    side: .us, onField: ProgrammeSample.startingEleven,
+                    goalkeeper: ProgrammeSample.keeper)), on: &context, date: &date)
+        try play(.startNextPeriod, on: &context, date: &date)
+        for _ in 0..<ourGoals {
+            try play(
+                .recordShot(
+                    ShotEvent(
+                        side: .us, shooter: .player(ProgrammeSample.carter), outcome: .goal)),
+                on: &context, date: &date)
+        }
+        for _ in 0..<opponentGoals {
+            try play(
+                .recordShot(ShotEvent(side: .opponent, shooter: .untracked, outcome: .goal)),
+                on: &context, date: &date)
+        }
+        if finalize {
+            try play(.finalize, on: &context, date: &date)
+        }
+        _ = try await store.importMatch(context, teamID: teamID, seasonID: seasonID)
+    }
+
+    @Test("Record projection matches the derived season record for wins, losses, and draws")
+    func recordMatchesDerivedSeasonRecord() async throws {
+        let store = try makeStore()
+        let (teamID, _) = try await makeTeamAndRoster(store)
+        let seasonID = try await store.createSeason(
+            teamID: teamID, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.win", ourGoals: 2,
+            opponentGoals: 1)
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.loss", ourGoals: 0,
+            opponentGoals: 1)
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.draw", ourGoals: 1,
+            opponentGoals: 1)
+        // Still live: counted by neither path.
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.live", ourGoals: 3,
+            opponentGoals: 0, finalize: false)
+
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: seasonID) == "1-1-1")
+        #expect(
+            try await store.seasonRecord(teamID: teamID, seasonID: seasonID)
+                == store.seasonStats(teamID: teamID, seasonID: seasonID).recordText)
+    }
+
+    @Test("Record projection respects season scope and starts at zero")
+    func recordRespectsSeasonScope() async throws {
+        let store = try makeStore()
+        let (teamID, _) = try await makeTeamAndRoster(store)
+        let firstID = try await store.createSeason(
+            teamID: teamID, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        let secondID = try await store.createSeason(
+            teamID: teamID, name: "Spring", startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: nil, makeCurrent: false)
+
+        try await importMatch(
+            store, teamID: teamID, seasonID: firstID, seed: "scope.first", ourGoals: 1,
+            opponentGoals: 0)
+        try await importMatch(
+            store, teamID: teamID, seasonID: secondID, seed: "scope.second", ourGoals: 2,
+            opponentGoals: 0)
+
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: firstID) == "1-0-0")
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: secondID) == "1-0-0")
+        // No season filter aggregates every finalized match, like seasonStats.
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: nil) == "2-0-0")
+        #expect(
+            try await store.seasonRecord(teamID: teamID, seasonID: nil)
+                == store.seasonStats(teamID: teamID, seasonID: nil).recordText)
+
+        let otherTeamID = try await store.createTeam(name: "Dixie", shortName: nil)
+        #expect(try await store.seasonRecord(teamID: otherTeamID, seasonID: nil) == "0-0-0")
     }
 }
