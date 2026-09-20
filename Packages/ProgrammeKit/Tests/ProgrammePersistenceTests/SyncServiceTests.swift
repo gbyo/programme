@@ -191,3 +191,65 @@ private final class MutationLog: @unchecked Sendable {
         lock.withLock { _mutations = [] }
     }
 }
+
+@Suite("Share scope resolves from the local ownership cache")
+struct SharedZoneOwnershipCacheTests {
+    private func ownersURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appending(path: "programme-owners-\(UUID().uuidString)/shared-zone-owners.json")
+    }
+
+    private func makeService(_ store: MatchStore) throws -> TeamSyncService {
+        let directory = URL.temporaryDirectory.appending(path: "programme-sync-\(UUID().uuidString)")
+        return try TeamSyncService(store: store, directory: directory) {
+            fatalError("No CloudKit in tests")
+        }
+    }
+
+    @Test("Remembered owners look up, replace, and forget per team")
+    func rememberReplaceForget() async throws {
+        let teamA = TeamID(ProgrammeSample.id("team.owners-a"))
+        let cache = try SharedZoneOwners(url: ownersURL())
+        #expect(await cache.ownerName(for: teamA) == nil)
+        await cache.remember([teamA: "alice"])
+        #expect(await cache.ownerName(for: teamA) == "alice")
+        await cache.remember([teamA: "bob"])
+        #expect(await cache.ownerName(for: teamA) == "bob")
+        await cache.forget(teamID: teamA)
+        #expect(await cache.ownerName(for: teamA) == nil)
+    }
+
+    @Test("Ownership survives relaunch; reset clears every team")
+    func persistsAndResets() async throws {
+        let url = ownersURL()
+        let teamA = TeamID(ProgrammeSample.id("team.owners-a"))
+        let teamB = TeamID(ProgrammeSample.id("team.owners-b"))
+        let first = try SharedZoneOwners(url: url)
+        await first.remember([teamA: "alice", teamB: "bob"])
+        let second = try SharedZoneOwners(url: url)
+        #expect(await second.ownerName(for: teamA) == "alice")
+        #expect(await second.ownerName(for: teamB) == "bob")
+        await second.reset()
+        #expect(await second.ownerName(for: teamA) == nil)
+        let third = try SharedZoneOwners(url: url)
+        #expect(await third.ownerName(for: teamB) == nil)
+    }
+
+    @Test("Cached scope reads never touch CloudKit and clear on sign-out")
+    func cachedReadsStayLocal() async throws {
+        let container = try ProgrammeStore.container(inMemory: true)
+        let service = try makeService(MatchStore(modelContainer: container))
+        let teamA = TeamID(ProgrammeSample.id("team.owners-a"))
+        let teamB = TeamID(ProgrammeSample.id("team.owners-b"))
+        // Fresh cache answers unknown — and the fatalError container
+        // factory above proves no CloudKit call was attempted to ask.
+        #expect(await service.cachedOwnerName(for: teamA) == nil)
+        await service.owners.remember([teamA: "alice", teamB: "bob"])
+        #expect(await service.cachedOwnerName(for: teamA) == "alice")
+        // Sign-out drops every team, so a new account never inherits
+        // the previous account's scopes.
+        await service.handleAccountChange(.signOut(previousUser: CKRecord.ID(recordName: "u")))
+        #expect(await service.cachedOwnerName(for: teamA) == nil)
+        #expect(await service.cachedOwnerName(for: teamB) == nil)
+    }
+}

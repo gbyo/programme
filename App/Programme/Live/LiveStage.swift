@@ -69,17 +69,53 @@ enum ComposerStep: Equatable {
         }
     }
 
+    /// Whether a compact-sheet step supplies the sheet's semantic actions
+    /// itself instead of using the composer's generic Done affordance.
+    var ownsSheetActions: Bool {
+        switch self {
+        case .shotLocation: true
+        default: false
+        }
+    }
+
     /// What the compact sheet calls itself at this step.
     var title: String {
         switch self {
         case .choosePlayer(let prompt): prompt.title
         case .shotOutcome: "What happened?"
         case .assist: "Who assisted?"
-        case .shotLocation: "Where was it struck?"
+        case .shotLocation: "Shot Location"
         case .shotBodyPart: "How was it struck?"
         case .shotPhase: "What phase of play?"
         case .cardReason: "Why was the card shown?"
         case .substitution: "Substitution"
+        }
+    }
+
+    /// Stable identity for the visible question.
+    ///
+    /// This is deliberately semantic rather than the `UUID` carried by
+    /// `PlayerPrompt`. It lets the view replace one question with another while
+    /// preserving state within the active question, without using an
+    /// identity-resetting `UUID()` hack.
+    var transitionID: String {
+        switch self {
+        case .choosePlayer(let prompt):
+            "choose-player-\(prompt.side.rawValue)-\(prompt.action.transitionID)"
+        case .shotOutcome(_, let side, let context):
+            "shot-outcome-\(side.rawValue)-\(context.label)"
+        case .assist(let goalID, _, _):
+            "assist-\(goalID)"
+        case .shotLocation(let shotID, _, _):
+            "shot-location-\(shotID)"
+        case .shotBodyPart(let shotID, _, _):
+            "shot-body-part-\(shotID)"
+        case .shotPhase(let shotID, _, _, _):
+            "shot-phase-\(shotID)"
+        case .cardReason(let cardID, _, _):
+            "card-reason-\(cardID)"
+        case .substitution:
+            "substitution"
         }
     }
 }
@@ -101,24 +137,31 @@ struct EventComposer: Equatable {
 
     /// Advance through optional shot enrichment without putting any of those
     /// answers in front of the primary event. Each stage revises the same shot.
+    ///
+    /// This is shared by ordinary shots and by goals after their assist question,
+    /// so the profile policy cannot drift between those two paths. Both Teams
+    /// mode tracks opponent shots symmetrically with ours; Our Team mode offers
+    /// no location step for opponent shots, while deeper Advanced detail still
+    /// follows the profile.
     mutating func offerShotEnrichment(
         shot: EventID,
         shooterName: String,
         outcome: ShotOutcome,
         currentPhase: PlayPhase,
         side: TeamSide,
+        tracking: OpponentTrackingMode,
         profile: StatProfile,
         startingAt step: ShotEnrichmentStep = .location
     ) {
         switch step {
         case .location:
-            if profile.prompts.shotLocation, side == .us {
+            if profile.prompts.shotLocation, side == .us || tracking == .bothTeams {
                 ask(.shotLocation(shot: shot, shooterName: shooterName, outcome: outcome))
                 return
             }
             offerShotEnrichment(
                 shot: shot, shooterName: shooterName, outcome: outcome,
-                currentPhase: currentPhase, side: side, profile: profile,
+                currentPhase: currentPhase, side: side, tracking: tracking, profile: profile,
                 startingAt: .bodyPart)
 
         case .bodyPart:
@@ -128,7 +171,7 @@ struct EventComposer: Equatable {
             }
             offerShotEnrichment(
                 shot: shot, shooterName: shooterName, outcome: outcome,
-                currentPhase: currentPhase, side: side, profile: profile,
+                currentPhase: currentPhase, side: side, tracking: tracking, profile: profile,
                 startingAt: .playPhase)
 
         case .playPhase:
@@ -203,6 +246,22 @@ enum PendingAction: Equatable {
         case .card(let type): "Who received the \(type.label.lowercased())?"
         case .goalkeeper: "Who is going in goal?"
         case .ownGoal: "Who put it in their own net?"
+        }
+    }
+
+    /// Stable semantic identity used only by Composer presentation.
+    var transitionID: String {
+        switch self {
+        case .goal(let phase): "goal-\(phase.rawValue)"
+        case .shotAttempt(let phase): "shot-attempt-\(phase.rawValue)"
+        case .shot(let outcome): "shot-\(outcome.rawValue)"
+        case .corner: "corner"
+        case .steal: "steal"
+        case .foul: "foul"
+        case .offside: "offside"
+        case .card(let type): "card-\(type.rawValue)"
+        case .goalkeeper: "goalkeeper"
+        case .ownGoal: "own-goal"
         }
     }
 

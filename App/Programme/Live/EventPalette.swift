@@ -47,9 +47,11 @@ struct EventPalette: View {
     var onAction: (PaletteAction) -> Void
     var onOverflow: (PaletteOverflow) -> Void
     var onOpponentAction: (OpponentQuickAction) -> Void
+    var onOpponentPending: (PendingAction) -> Void
     var onClearArmedPlayer: () -> Void
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @State private var goalActivation = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,7 +77,9 @@ struct EventPalette: View {
             OpponentQuickBar(
                 opponentName: session.descriptor.opponentShortName,
                 profile: session.profile,
-                action: onOpponentAction)
+                tracking: session.descriptor.tracking,
+                action: onOpponentAction,
+                onMoreAction: onOpponentPending)
         }
     }
 
@@ -119,10 +123,18 @@ struct EventPalette: View {
             action: action,
             prominence: .primary,
             isArmed: session.armedPlayer != nil,
-            differentiateWithoutColor: differentiateWithoutColor
+            differentiateWithoutColor: differentiateWithoutColor,
+            goalActivation: action.id == "goal" ? goalActivation : nil
         ) {
-            onAction(action)
+            activate(action)
         }
+    }
+
+    private func activate(_ action: PaletteAction) {
+        if action.id == "goal" {
+            goalActivation += 1
+        }
+        onAction(action)
     }
 
     /// Everything real but less frequent, plus the overflow menu. Shorter tiles:
@@ -134,7 +146,8 @@ struct EventPalette: View {
                     action: action,
                     prominence: .secondary,
                     isArmed: session.armedPlayer != nil,
-                    differentiateWithoutColor: differentiateWithoutColor
+                    differentiateWithoutColor: differentiateWithoutColor,
+                    goalActivation: nil
                 ) {
                     onAction(action)
                 }
@@ -283,10 +296,10 @@ struct RecordHeader: View {
                 .padding(.vertical, 9)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.accentColor.opacity(0.16), in: .rect(cornerRadius: 10))
-                .transition(.opacity)
+                .id(armedPlayer.id)
+                .transition(LiveMotion.acknowledgementTransition(reduceMotion: reduceMotion))
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: armedPlayer?.id)
     }
 }
 
@@ -307,8 +320,10 @@ struct PaletteButton: View {
     let prominence: Prominence
     let isArmed: Bool
     let differentiateWithoutColor: Bool
+    let goalActivation: Int?
     let perform: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .headline) private var primaryHeight: CGFloat = Programme.Metrics
         .paletteButtonHeight
     @ScaledMetric(relativeTo: .headline) private var secondaryHeight: CGFloat = 54
@@ -332,9 +347,7 @@ struct PaletteButton: View {
     private var label: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: action.symbolName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .imageScale(.medium)
+                symbol
                 // One line, scaled to fit: a wrapped or hyphenated label is
                 // harder to recognise at a glance than a slightly smaller one.
                 Text(action.title)
@@ -350,6 +363,20 @@ struct PaletteButton: View {
                     .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var symbol: some View {
+        if action.id == "goal", let goalActivation, !reduceMotion {
+            Image(systemName: action.symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .imageScale(.medium)
+                .symbolEffect(.bounce.wholeSymbol, value: goalActivation)
+        } else {
+            Image(systemName: action.symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .imageScale(.medium)
         }
     }
 
@@ -447,14 +474,18 @@ struct MoreMenu: View {
                 }
             }
 
-            Section(session.descriptor.opponentShortName) {
-                if session.profile.tracks(.penaltyKicks) {
-                    Button("Penalty Goal", systemImage: "circle.bottomhalf.filled") {
-                        onPick(.opponentPenalty)
+            if session.descriptor.tracking == .ourTeam {
+                Section(session.descriptor.opponentShortName) {
+                    if session.profile.tracks(.penaltyKicks) {
+                        Button("Penalty Goal", systemImage: "circle.bottomhalf.filled") {
+                            onPick(.opponentPenalty)
+                        }
                     }
-                }
-                if session.profile.tracks(.cards) {
-                    Button("Yellow Card", systemImage: "rectangle.portrait") { onPick(.opponentCard) }
+                    if session.profile.tracks(.cards) {
+                        Button("Yellow Card", systemImage: "rectangle.portrait") {
+                            onPick(.opponentCard)
+                        }
+                    }
                 }
             }
 
@@ -502,6 +533,69 @@ enum OpponentQuickAction: String, Identifiable, CaseIterable {
     }
 }
 
+enum OpponentMenuAction: String, Identifiable, CaseIterable, Hashable {
+    case penaltyKick
+    case steal
+    case foul
+    case offside
+    case yellowCard
+    case secondYellow
+    case redCard
+    case ownGoal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .penaltyKick: "Penalty Kick"
+        case .steal: "Steal"
+        case .foul: "Foul"
+        case .offside: "Offside"
+        case .yellowCard: "Yellow Card"
+        case .secondYellow: "Second Yellow"
+        case .redCard: "Red Card"
+        case .ownGoal: "Own Goal"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .penaltyKick: "circle.bottomhalf.filled"
+        case .steal: "shoe.2.fill"
+        case .foul: "exclamationmark.triangle"
+        case .offside: "flag.slash"
+        case .yellowCard: "rectangle.portrait"
+        case .secondYellow: "rectangle.portrait.on.rectangle.portrait"
+        case .redCard: "rectangle.portrait.fill"
+        case .ownGoal: "arrow.uturn.backward.circle"
+        }
+    }
+
+    var pending: PendingAction {
+        switch self {
+        case .penaltyKick: .shotAttempt(.penaltyKick)
+        case .steal: .steal
+        case .foul: .foul
+        case .offside: .offside
+        case .yellowCard: .card(.yellow)
+        case .secondYellow: .card(.secondYellow)
+        case .redCard: .card(.red)
+        case .ownGoal: .ownGoal
+        }
+    }
+
+    func isAvailable(in profile: StatProfile) -> Bool {
+        switch self {
+        case .penaltyKick: profile.tracks(.penaltyKicks)
+        case .steal: profile.tracks(.steals)
+        case .foul: profile.tracks(.fouls)
+        case .offside: profile.tracks(.offsides)
+        case .yellowCard, .secondYellow, .redCard: profile.tracks(.cards)
+        case .ownGoal: true
+        }
+    }
+}
+
 /// The opponent's quick actions, pinned below the palette's scroll view.
 ///
 /// An opponent shot is how our goalkeeper's shots-faced and save percentage get
@@ -511,7 +605,9 @@ enum OpponentQuickAction: String, Identifiable, CaseIterable {
 struct OpponentQuickBar: View {
     let opponentName: String
     let profile: StatProfile
+    let tracking: OpponentTrackingMode
     let action: (OpponentQuickAction) -> Void
+    let onMoreAction: (PendingAction) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -539,6 +635,35 @@ struct OpponentQuickBar: View {
                     .accessibilityIdentifier("palette.opponent.\(quick.rawValue)")
                     .accessibilityLabel("\(opponentName) \(quick.title)")
                 }
+
+                if tracking == .bothTeams, !availableMoreActions.isEmpty {
+                    Menu {
+                        Section("Play") {
+                            opponentMenuButtons([.penaltyKick, .steal, .foul, .offside])
+                        }
+                        Section("Cards") {
+                            opponentMenuButtons([.yellowCard, .secondYellow, .redCard])
+                        }
+                        Section("Unusual") {
+                            opponentMenuButtons([.ownGoal])
+                        }
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("More")
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .menuOrder(.fixed)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
+                    .tint(.secondary)
+                    .accessibilityIdentifier("palette.opponent.more")
+                    .accessibilityLabel("\(opponentName) more actions")
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -561,6 +686,19 @@ struct OpponentQuickBar: View {
             case .goal: true
             case .shot: profile.tracks(.shots)
             case .corner: profile.tracks(.corners)
+            }
+        }
+    }
+
+    private var availableMoreActions: [OpponentMenuAction] {
+        OpponentMenuAction.allCases.filter { $0.isAvailable(in: profile) }
+    }
+
+    @ViewBuilder
+    private func opponentMenuButtons(_ actions: [OpponentMenuAction]) -> some View {
+        ForEach(actions.filter { $0.isAvailable(in: profile) }) { item in
+            Button(item.title, systemImage: item.symbolName) {
+                onMoreAction(item.pending)
             }
         }
     }

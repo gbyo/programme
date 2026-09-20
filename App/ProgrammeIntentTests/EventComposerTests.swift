@@ -16,6 +16,7 @@ final class EventComposerTests: XCTestCase {
             outcome: .goal,
             currentPhase: .openPlay,
             side: .us,
+            tracking: .ourTeam,
             profile: .standard)
 
         XCTAssertEqual(
@@ -34,12 +35,13 @@ final class EventComposerTests: XCTestCase {
             outcome: .goal,
             currentPhase: .openPlay,
             side: .us,
+            tracking: .ourTeam,
             profile: .maxPreps)
 
         XCTAssertNil(composer.step)
     }
 
-    func testStandardDoesNotAskForOpponentShotLocation() {
+    func testOurTeamModeDoesNotAskForOpponentShotLocation() {
         let goalID = EventID()
         var composer = EventComposer(
             step: .assist(goal: goalID, scorerName: "Opponent", side: .opponent))
@@ -50,10 +52,12 @@ final class EventComposerTests: XCTestCase {
             outcome: .goal,
             currentPhase: .openPlay,
             side: .opponent,
+            tracking: .ourTeam,
             profile: .standard)
 
         XCTAssertNil(composer.step)
     }
+
     func testAdvancedContinuesFromLocationToBodyPartToPhase() {
         let shotID = EventID()
         var composer = EventComposer.idle
@@ -64,6 +68,7 @@ final class EventComposerTests: XCTestCase {
             outcome: .saved,
             currentPhase: .openPlay,
             side: .us,
+            tracking: .ourTeam,
             profile: .advanced)
 
         XCTAssertEqual(
@@ -76,6 +81,7 @@ final class EventComposerTests: XCTestCase {
             outcome: .saved,
             currentPhase: .openPlay,
             side: .us,
+            tracking: .ourTeam,
             profile: .advanced,
             startingAt: .bodyPart)
 
@@ -89,6 +95,7 @@ final class EventComposerTests: XCTestCase {
             outcome: .saved,
             currentPhase: .freeKick,
             side: .us,
+            tracking: .ourTeam,
             profile: .advanced,
             startingAt: .playPhase)
 
@@ -111,6 +118,7 @@ final class EventComposerTests: XCTestCase {
             outcome: .offTarget,
             currentPhase: .openPlay,
             side: .opponent,
+            tracking: .ourTeam,
             profile: .advanced)
 
         XCTAssertEqual(
@@ -146,4 +154,22 @@ final class EventComposerTests: XCTestCase {
         XCTAssertNil(composer.step)
     }
 
+    func testBothTeamsModeAsksForOpponentShotLocation() {
+        let goalID = EventID()
+        var composer = EventComposer(
+            step: .assist(goal: goalID, scorerName: "Opponent", side: .opponent))
+
+        composer.offerShotEnrichment(
+            shot: goalID,
+            shooterName: "Opponent",
+            outcome: .goal,
+            currentPhase: .openPlay,
+            side: .opponent,
+            tracking: .bothTeams,
+            profile: .standard)
+
+        XCTAssertEqual(
+            composer.step,
+            .shotLocation(shot: goalID, shooterName: "Opponent", outcome: .goal))
+    }
 }

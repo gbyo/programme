@@ -14,6 +14,15 @@ struct GeneratedExport: Identifiable, Hashable {
     var symbolName: String
     var url: URL
     var byteCount: Int
+
+    init(_ prepared: PreparedExport) {
+        exporterID = prepared.exporterID
+        name = prepared.name
+        detail = prepared.detail
+        symbolName = prepared.symbolName
+        url = prepared.url
+        byteCount = prepared.byteCount
+    }
 }
 
 /// Choose formats, generate them, then share.
@@ -29,6 +38,7 @@ struct ExportSheet: View {
     @State private var isWorking = false
     @State private var errorMessage: String?
     @State private var previewURL: URL?
+    @State private var generationTask: Task<Void, Never>?
 
     var body: some View {
         List(selection: $selection) {
@@ -116,43 +126,53 @@ struct ExportSheet: View {
         .onAppear {
             if selection.isEmpty, let first = exporters.first { selection = [first.id] }
         }
+        .onDisappear {
+            // Leaving the sheet abandons a run still in flight; committed
+            // files stay untouched.
+            generationTask?.cancel()
+        }
     }
 
+    /// Starts generation off the main actor so the "Preparing…" UI stays
+    /// live. The batch runs `detached` — a plain `Task` created here would
+    /// inherit the main actor and keep the work main-bound — while the outer
+    /// task stays on the main actor: it only awaits the batch, holds the
+    /// `generateExport` signpost interval across that await, and publishes.
+    /// Only `Sendable` values cross into the worker and only file records
+    /// come back; every `@State` write happens below on the main actor.
+    /// Cancelling the outer task propagates into the batch.
     private func generate() {
+        generationTask?.cancel()
         isWorking = true
         errorMessage = nil
         ProgrammeStateReporter.reportOperation(.export)
-        defer {
-            ProgrammeStateReporter.reportOperation(nil)
-            isWorking = false
+        let selectedIDs = selection
+        let exporters = exporters
+        let payload = payload
+        let batch = Task.detached(priority: .userInitiated) {
+            ExportRunner.prepare(exporters: exporters, selecting: selectedIDs, payload: payload)
         }
-        var results: [GeneratedExport] = []
-        var failures: [String] = []
-
-        for exporter in exporters where selection.contains(exporter.id) {
-            do {
-                let data = try ProgrammeSignposts.measure("generateExport") {
-                    try exporter.export(payload)
-                }
-                let directory = FileManager.default.temporaryDirectory
-                    .appending(path: "ProgrammeExports", directoryHint: .isDirectory)
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let url = directory.appending(path: exporter.filename(for: payload))
-                try data.write(to: url, options: .atomic)
-                results.append(
-                    GeneratedExport(
-                        exporterID: exporter.id, name: exporter.name, detail: exporter.detail,
-                        symbolName: exporter.symbolName, url: url, byteCount: data.count))
-            } catch {
-                failures.append(exporter.name)
-            }
-        }
-
-        generated = results
-        if !failures.isEmpty {
-            // Never imply data loss: the match is untouched by a failed export.
-            errorMessage =
-                "Programme couldn't create \(failures.joined(separator: " and ")). Your match is safe. Try exporting again."
+        generationTask = Task { @MainActor in
+            await withTaskCancellationHandler(
+                operation: {
+                    let result = await ProgrammeSignposts.measure("generateExport") {
+                        await batch.value
+                    }
+                    // A newer run superseded this one; its publish wins.
+                    guard !Task.isCancelled else { return }
+                    ProgrammeStateReporter.reportOperation(nil)
+                    isWorking = false
+                    guard let result else { return }
+                    generated = result.prepared.map(GeneratedExport.init(_:))
+                    if !result.failedExporterNames.isEmpty {
+                        // Never imply data loss: the match is untouched by a failed export.
+                        errorMessage =
+                            "Programme couldn't create \(result.failedExporterNames.joined(separator: " and ")). Your match is safe. Try exporting again."
+                    }
+                },
+                onCancel: {
+                    batch.cancel()
+                })
         }
     }
 

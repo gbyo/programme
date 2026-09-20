@@ -96,10 +96,16 @@ struct LiveHeader: View {
                 Text("\(score)")
                     .font(.programmeScore(isCompact ? 30 : 40))
                     .contentTransition(.numericText())
+                    .animation(
+                        reduceMotion ? nil : LiveMotion.acknowledgement,
+                        value: score)
             } else {
                 Text("\(score)")
                     .font(.programmeScore(isCompact ? 30 : 40))
                     .contentTransition(.numericText())
+                    .animation(
+                        reduceMotion ? nil : LiveMotion.acknowledgement,
+                        value: score)
                 Text(name)
                     .font(isCompact ? .subheadline.weight(.semibold) : .title3.weight(.semibold))
                     .lineLimit(1)
@@ -108,7 +114,6 @@ struct LiveHeader: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: score)
     }
 
     private func clockBlock(isCompact: Bool) -> some View {

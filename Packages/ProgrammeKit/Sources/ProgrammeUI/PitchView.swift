@@ -99,7 +99,12 @@ public struct PitchView: View {
                         .background(Circle().fill(Color.accentColor.opacity(0.28)))
                         .frame(width: 26, height: 26)
                         .position(point)
-                        .transition(.scale.combined(with: .opacity))
+                        .transition(
+                            reduceMotion
+                                ? .identity
+                                : .scale.combined(with: .opacity)
+                                    .animation(.snappy(duration: 0.14))
+                        )
                         .allowsHitTesting(false)
                 }
             }
@@ -137,7 +142,6 @@ public struct PitchView: View {
                 case .ended: hoverPoint = nil
                 }
             }
-            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: pendingLocation)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)

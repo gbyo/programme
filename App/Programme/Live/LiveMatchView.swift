@@ -25,17 +25,20 @@ struct LiveMatchView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var composer = EventComposer.idle
-    @State private var isShowingInspector = false
-    /// One sheet at a time. Programme never stacks them, and routing every
-    /// presentation through a single item makes a transition between two of them
-    /// a content swap rather than a dismiss-and-present race.
+    /// The sole presentation state. Programme never stacks presentations, and
+    /// routing every one through a single value makes a transition between
+    /// two of them a content swap rather than a dismiss-and-present race.
+    /// Two cases render outside `.sheet` — the note alert and the stats
+    /// inspector column — because those are the platform-idiomatic shapes
+    /// for a quick text entry and a stats column, but the router still owns
+    /// them: no other presentation Bool exists.
     @State private var activeSheet: LiveSheet?
     @State private var compactPane: CompactPane = .palette
     /// Compact layouts show the newly recorded event briefly above the toolbar
     /// instead of making passive status compete with the toolbar's controls.
     @State private var compactLastEventID: EventID?
-    @State private var isAddingNote = false
     @State private var note = ""
+    @AppStorage(ScreenAwakePolicy.preferenceKey) private var keepScreenAwake = true
 
     enum LiveSheet: Identifiable, Equatable {
         /// The Event Composer itself. Its *content* lives in `composer`; this
@@ -52,6 +55,8 @@ struct LiveMatchView: View {
         case shootout
         case editEvent(EventID)
         case nearbyDisplay
+        case addNote
+        case statsInspector
 
         var id: String {
             switch self {
@@ -69,6 +74,18 @@ struct LiveMatchView: View {
             case .shootout: "shootout"
             case .editEvent(let id): "edit-\(id)"
             case .nearbyDisplay: "nearby-display"
+            case .addNote: "add-note"
+            case .statsInspector: "stats-inspector"
+            }
+        }
+
+        /// Whether this case renders inside the `.sheet` modifier. The note
+        /// alert and the inspector column are owned by the same state but
+        /// rendered by their own platform modifiers below.
+        var isSheet: Bool {
+            switch self {
+            case .addNote, .statsInspector: false
+            default: true
             }
         }
     }
@@ -118,26 +135,24 @@ struct LiveMatchView: View {
         static let twoColumnMinimum: CGFloat = workspaceUsable + recordMinimum
     }
 
-    /// The phone and any genuinely narrow iPad window use Programme's compact
-    /// scoring layout. Keeping this as one product rule means the composer and
-    /// the bottom toolbar adapt at the same point instead of inventing separate
-    /// width thresholds for each feature.
+    /// Whatever the hardware, a compact environment gets Programme's compact
+    /// scoring layout and anything regular gets the columns. Keeping this as
+    /// one space-driven rule means the composer and the bottom toolbar adapt
+    /// at the same point instead of inventing separate width thresholds for
+    /// each feature — and a regular-width phone uses the richer layout its
+    /// environment can hold.
     private var usesCompactScoringLayout: Bool {
-        #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom == .phone { return true }
-        #endif
-        return horizontalSizeClass == .compact
+        horizontalSizeClass == .compact
     }
 
     /// Whether the composer takes over the screen in a sheet rather than living
     /// in a column.
     ///
-    /// The product rule comes first and the layout rule second. A phone always
-    /// uses the sheet, because the substitution flow there is a pushed
-    /// navigation stack and falling back to the iPad columns because of an
-    /// unexpected size class would be a broken screen rather than a compromise.
-    /// A narrow iPad window — Stage Manager, Split View — reaches the same
-    /// behaviour through the platform's own compact environment.
+    /// A compact environment uses the sheet, where the substitution flow is a
+    /// pushed navigation stack. A regular environment — a wide iPad window, or
+    /// a phone reporting regular width — keeps the columns. The composer step
+    /// itself is presentation-independent, so a size-class transition
+    /// re-routes the same pending question instead of losing it.
     private var composerUsesSheet: Bool {
         usesCompactScoringLayout
     }
@@ -153,22 +168,21 @@ struct LiveMatchView: View {
                     Group {
                         if let notice = session.notice {
                             NoticeBanner(notice: notice) { session.dismissNotice() }
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(
+                                    LiveMotion.temporaryStatusTransition(
+                                        reduceMotion: reduceMotion))
                         } else if usesCompactScoringLayout,
                             compactLastEventID == session.lastEventDescription?.id
                         {
                             CompactLastEventConfirmation(session: session)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(
+                                    LiveMotion.temporaryStatusTransition(
+                                        reduceMotion: reduceMotion))
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
                 }
-                .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
-                .animation(
-                    reduceMotion ? nil : .snappy(duration: 0.22),
-                    value: compactLastEventID
-                )
                 .programmeSensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
                 .navigationBarTitleDisplayMode(.inline)
@@ -178,7 +192,7 @@ struct LiveMatchView: View {
                     MatchControlsToolbar(
                         session: session,
                         onClose: closeScorer,
-                        onShowStats: { isShowingInspector = true },
+                        onShowStats: { activeSheet = .statsInspector },
                         onEditLineup: { activeSheet = .lineup },
                         onEditOpponentRoster: { activeSheet = .opponentRoster },
                         onAdjustClock: { activeSheet = .adjustClock },
@@ -202,17 +216,20 @@ struct LiveMatchView: View {
                         onEdit: { editLastEvent() },
                         onLog: { activeSheet = .eventLog },
                         onReview: { activeSheet = .review },
-                        onStats: { isShowingInspector.toggle() }
+                        onStats: {
+                            activeSheet =
+                                (activeSheet == .statsInspector) ? nil : .statsInspector
+                        }
                     )
                 }
         }
         // Statistics are the inspector's job, here and nowhere else. In a compact
         // environment SwiftUI presents an inspector as a sheet by itself, which
         // is the right shape there and needs no second implementation.
-        .inspector(isPresented: $isShowingInspector) {
+        .inspector(isPresented: inspectorPresented) {
             NavigationStack {
                 MatchStatsInspector(session: session) {
-                    isShowingInspector = false
+                    if activeSheet == .statsInspector { activeSheet = nil }
                 }
             }
             .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
@@ -225,12 +242,16 @@ struct LiveMatchView: View {
         .sheet(item: presentedSheet) { sheet in
             sheetContent(sheet)
         }
-        .alert("Add a note", isPresented: $isAddingNote) {
+        .alert("Add a note", isPresented: notePresented) {
             TextField("What happened?", text: $note)
-            Button("Cancel", role: .cancel) { note = "" }
+            Button("Cancel", role: .cancel) {
+                note = ""
+                if activeSheet == .addNote { activeSheet = nil }
+            }
             Button("Add") {
                 if !note.isEmpty { session.run(.addNote(note), feedback: .silent) }
                 note = ""
+                if activeSheet == .addNote { activeSheet = nil }
             }
         } message: {
             Text("Notes appear in the event log and in exported stat sheets.")
@@ -246,7 +267,9 @@ struct LiveMatchView: View {
             case .periodBreak, .awaitingFinalization:
                 // The composer owns the sheet while it has a question, so a
                 // period ending has to put it away before asking for one.
+                // A half-written note is put away the same way.
                 abandonComposer()
+                if activeSheet == .addNote { note = "" }
                 activeSheet = .periodBreak
             case .inPeriod:
                 if activeSheet == .periodBreak { activeSheet = nil }
@@ -274,6 +297,23 @@ struct LiveMatchView: View {
         }
         .onAppear {
             if !session.hasStartingLineup { activeSheet = .lineup }
+            // The scorer is visibly active: keep the display awake only while
+            // the preference is enabled. The controller re-evaluates the
+            // policy, so this never leaves the global setting behind.
+            appModel.screenAwake.isScorerVisible = true
+            appModel.screenAwake.preferenceEnabled = keepScreenAwake
+            appModel.screenAwake.refresh()
+        }
+        .onDisappear {
+            // Leaving the scorer — closing, finalizing, or navigating away —
+            // restores normal idle behavior immediately.
+            appModel.screenAwake.isScorerVisible = false
+            appModel.screenAwake.refresh()
+        }
+        .onChange(of: keepScreenAwake) { _, enabled in
+            // Disabling the setting mid-match restores normal sleep at once.
+            appModel.screenAwake.preferenceEnabled = enabled
+            appModel.screenAwake.refresh()
         }
     }
 
@@ -287,7 +327,8 @@ struct LiveMatchView: View {
         Binding(
             get: {
                 if composerUsesSheet && composer.isComposing { return .composer }
-                return activeSheet
+                guard let sheet = activeSheet, sheet.isSheet else { return nil }
+                return sheet
             },
             set: { sheet in
                 guard sheet == nil else {
@@ -299,6 +340,34 @@ struct LiveMatchView: View {
                 } else {
                     activeSheet = nil
                 }
+            })
+    }
+
+    /// Derived bindings, not stored state: the alert and the inspector
+    /// column answer to the same router as the sheet.
+    private var notePresented: Binding<Bool> {
+        Binding(
+            get: { activeSheet == .addNote },
+            set: { showing in
+                if !showing {
+                    note = ""
+                    if activeSheet == .addNote { activeSheet = nil }
+                }
+            })
+    }
+
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: {
+                guard activeSheet == .statsInspector else { return false }
+                // The composer wins while it has a question: in a compact
+                // window the system would present the inspector as a second
+                // sheet over the composer's. Its toolbar is behind that
+                // sheet, so this is unreachable from the UI either way.
+                return !(composerUsesSheet && composer.isComposing)
+            },
+            set: { showing in
+                if !showing, activeSheet == .statsInspector { activeSheet = nil }
             })
     }
 
@@ -361,6 +430,12 @@ struct LiveMatchView: View {
         case .nearbyDisplay:
             NearbyAdvertiseSheet()
                 .environment(appModel.nearby)
+
+        case .addNote, .statsInspector:
+            // Never rendered here: the alert and inspector modifiers above
+            // own these cases. The switch stays exhaustive so a new case
+            // cannot slip past the router silently.
+            EmptyView()
         }
     }
 
@@ -430,9 +505,9 @@ struct LiveMatchView: View {
     /// place only when it has something to ask, and gives it straight back.
     private var twoColumnLayout: some View {
         HStack(spacing: 0) {
-            Group {
+            ZStack {
                 if composer.isComposing {
-                    workspace
+                    composerContent
                 } else {
                     LineupColumn(session: session, onSelect: select(player:))
                 }
@@ -474,6 +549,7 @@ struct LiveMatchView: View {
             onAction: handle(action:),
             onOverflow: handle(overflow:),
             onOpponentAction: handleOpponent(_:),
+            onOpponentPending: beginOpponent(_:),
             onClearArmedPlayer: { session.armedPlayer = nil }
         )
     }
@@ -491,13 +567,23 @@ struct LiveMatchView: View {
                 IdleWorkspace(session: session)
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: composer)
+        .clipped()
     }
 
     /// The composer itself, shared by the column and the sheet. One definition of
     /// each question, presented two ways.
     @ViewBuilder
     private var composerContent: some View {
+        if let step = composer.step {
+            ComposerStepContainer(step: step) {
+                composerStepContent
+            }
+            .transition(LiveMotion.composerPresenceTransition(reduceMotion: reduceMotion))
+        }
+    }
+
+    @ViewBuilder
+    private var composerStepContent: some View {
         switch composer.step {
         case .choosePlayer(let prompt):
             PlayerPickerStage(
@@ -506,10 +592,14 @@ struct LiveMatchView: View {
                     for: prompt.action.attributionCategory, side: prompt.side),
                 goalkeeperID: prompt.side == .us ? session.snapshot.activeGoalkeeper : nil,
                 allowsUnknown: prompt.action.allowsUnknown,
-                unknownTitle: prompt.side == .us
-                    ? "Player Unknown" : "\(session.descriptor.opponentShortName) — No Player",
-                unknownSubtitle: prompt.side == .us
-                    ? "Record now, attribute later" : "Count it for the team only",
+                unknownTitle:
+                    prompt.side == .us || session.descriptor.tracking == .bothTeams
+                    ? "Player Unknown"
+                    : "\(session.descriptor.opponentShortName) — No Player",
+                unknownSubtitle:
+                    prompt.side == .us || session.descriptor.tracking == .bothTeams
+                    ? "Record now, attribute later"
+                    : "Count it for the team only",
                 showsTips: session.showsContextualTips,
                 onPick: { complete(prompt.action, side: prompt.side, with: $0) },
                 onCancel: { composer.finish() }
@@ -532,9 +622,9 @@ struct LiveMatchView: View {
                     .filter { $0.id != scorerID(of: goalID) },
                 onPick: { assist in
                     // `nil` is "unassisted" and settles the goal; `.unidentified`
-                    // deliberately leaves it in Review. Either way, Standard and
-                    // Advanced still have one optional enrichment question left:
-                    // where the goal was struck.
+                    // deliberately leaves it in Review. Either way, the goal
+                    // still has optional enrichment left, starting with where
+                    // it was struck.
                     session.resolveAssist(assist, on: goalID)
                     continueAfterAssist(goalID: goalID, side: side)
                 },
@@ -551,6 +641,7 @@ struct LiveMatchView: View {
                 shooterName: shooterName,
                 outcome: outcome,
                 markers: session.shotMarkers,
+                presentation: composerUsesSheet ? .compactSheet : .inline,
                 onCommit: { location in
                     session.resolveShotLocation(location, on: shotID)
                     continueShotEnrichment(shotID: shotID, after: .location)
@@ -666,46 +757,51 @@ struct LiveMatchView: View {
         case .opponentCard:
             complete(.card(.yellow), side: .opponent, with: .untracked)
         case .addNote:
-            isAddingNote = true
+            activeSheet = .addNote
         }
     }
 
     private func handleOpponent(_ quick: OpponentQuickAction) {
+        let action: PendingAction =
+            switch quick {
+            case .goal:
+                .goal(.openPlay)
+            case .shot:
+                // Our Team keeps its one-tap team-total shortcut. Both Teams
+                // asks for the player and the real outcome.
+                session.descriptor.tracking == .bothTeams
+                    ? .shotAttempt(.openPlay)
+                    : .shot(.offTarget)
+            case .corner:
+                .corner
+            }
+        beginOpponent(action)
+    }
+
+    /// The opponent uses the same action -> player -> event composer as our side.
+    /// Both Teams never silently degrades to team totals when its roster is
+    /// missing; that would create data that contradicts the selected mode.
+    private func beginOpponent(_ action: PendingAction) {
         guard session.context.hasStarted else {
             session.show(
                 notice: LiveNotice(text: "The match hasn't kicked off yet.", kind: .warning))
             return
         }
 
-        // Whether the opponent's players are tracked at all decides both how much
-        // Programme may ask and how much it is worth asking.
-        let attributesOpponent =
-            session.descriptor.tracking == .bothTeams
-            && !session.context.opponentRoster.players.isEmpty
-
-        let action: PendingAction =
-            switch quick {
-            case .goal: .goal(.openPlay)
-            // In Our Team mode the opponent's Shot stays a single tap and keeps
-            // the meaning it has always had: off target. An opponent shot that
-            // reached the frame is recorded as our goalkeeper's Save, which is
-            // the faster tap for the same fact and the one the goalkeeping
-            // statistics are derived from. Asking for an outcome here would slow
-            // ordinary tracking down to buy nothing.
-            //
-            // With an opponent roster the scorer is already going through a
-            // player picker, and a shot attributed to an opponent deserves a real
-            // outcome: it is the only way an on-target opponent shot is credited
-            // to the player who took it.
-            case .shot: attributesOpponent ? .shotAttempt(.openPlay) : .shot(.offTarget)
-            case .corner: .corner
-            }
-
-        if attributesOpponent {
-            composer.ask(.choosePlayer(PlayerPrompt(action: action, side: .opponent)))
-        } else {
+        guard session.descriptor.tracking == .bothTeams else {
             complete(action, side: .opponent, with: .untracked)
+            return
         }
+
+        guard !session.context.opponentRoster.players.isEmpty else {
+            session.show(
+                notice: LiveNotice(
+                    text: "Add the opponent roster before recording player-level opponent events.",
+                    kind: .warning))
+            return
+        }
+
+        composer.ask(.choosePlayer(PlayerPrompt(action: action, side: .opponent)))
     }
 
     private func beginSubstitution() {
@@ -898,6 +994,7 @@ struct LiveMatchView: View {
             outcome: shot.outcome,
             currentPhase: shot.phase,
             side: side,
+            tracking: session.descriptor.tracking,
             profile: session.profile,
             startingAt: step)
     }
@@ -963,8 +1060,6 @@ struct ComposerSheet<Content: View>: View {
     @ViewBuilder var content: Content
     var onDismiss: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         Group {
             if step?.providesOwnNavigation == true {
@@ -979,9 +1074,11 @@ struct ComposerSheet<Content: View>: View {
                         .navigationTitle(step?.title ?? "")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Done") { onDismiss() }
-                                    .accessibilityIdentifier("composer.done")
+                            if step?.ownsSheetActions != true {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { onDismiss() }
+                                        .accessibilityIdentifier("composer.done")
+                                }
                             }
                         }
                 }
@@ -993,7 +1090,40 @@ struct ComposerSheet<Content: View>: View {
         .presentationSizing(.page)
         .presentationDragIndicator(.visible)
         .accessibilityIdentifier("composer.sheet")
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: step)
+    }
+}
+
+/// Shared Composer-step host for the regular workspace and the compact sheet.
+///
+/// The first question uses the restrained Composer presence transition owned by
+/// its parent. Once the host is present, changing its semantic step moves the
+/// new question in from the trailing edge and the previous question out toward
+/// the leading edge. The host's state keeps that distinction without delaying
+/// any Composer state change.
+private struct ComposerStepContainer<Content: View>: View {
+    let step: ComposerStep
+    let content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hasAppeared = false
+
+    init(step: ComposerStep, @ViewBuilder content: () -> Content) {
+        self.step = step
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            content
+                .id(step.transitionID)
+                .transition(
+                    hasAppeared
+                        ? LiveMotion.composerStepTransition(reduceMotion: reduceMotion)
+                        : .identity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .onAppear { hasAppeared = true }
     }
 }
 
@@ -1053,7 +1183,10 @@ struct IdleWorkspace: View {
                     Label("\(player.shortLabel) selected", systemImage: "hand.tap.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
-                        .transition(.opacity)
+                        .id(player.id)
+                        .transition(
+                            LiveMotion.acknowledgementTransition(
+                                reduceMotion: reduceMotion))
                 }
             }
             .padding(.horizontal, 16)
@@ -1069,7 +1202,6 @@ struct IdleWorkspace: View {
             Spacer(minLength: 0)
         }
         .accessibilityIdentifier("live.workspace")
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.armedPlayer)
     }
 
     private var idlePrompt: some View {

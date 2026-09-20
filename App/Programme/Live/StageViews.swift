@@ -224,6 +224,11 @@ struct AssistPickerStage: View {
     }
 }
 
+enum ShotLocationPresentation {
+    case inline
+    case compactSheet
+}
+
 /// Optional shot placement, for a shot that is **already recorded**.
 ///
 /// Always skippable, and skipping now costs nothing at all: the shot exists with
@@ -233,56 +238,126 @@ struct ShotLocationStage: View {
     let shooterName: String
     let outcome: ShotOutcome
     var markers: [ShotMarker]
+    var presentation: ShotLocationPresentation
     @State private var location: PitchPoint?
     var onCommit: (PitchPoint?) -> Void
 
     var body: some View {
+        Group {
+            switch presentation {
+            case .inline:
+                inlineContent
+            case .compactSheet:
+                compactSheetContent
+            }
+        }
+        .programmeSensoryFeedback(.selection, trigger: location)
+    }
+
+    private var inlineContent: some View {
         VStack(spacing: 10) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Where was it struck?")
-                        .font(.title3.weight(.semibold))
-                    Label("\(outcome.label) recorded · \(shooterName)", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Programme.Palette.confirmed)
-                }
+                recordedStatus(showQuestion: true)
                 Spacer()
                 if location != nil {
-                    Button("Clear") { location = nil }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("shotLocation.clear")
-                        .accessibilityHint("Clears the proposed shot location. Apple Pencil double-tap does the same.")
+                    clearButton
                 }
                 Button("Skip") { onCommit(nil) }
                     .buttonStyle(.bordered)
-                    .keyboardShortcut(.escape, modifiers: [])
+                    .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("shotLocation.skip")
                 Button("Record") { onCommit(location) }
                     .programmePrimaryAction()
                     .disabled(location == nil)
-                    .keyboardShortcut(.return, modifiers: [])
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("shotLocation.record")
             }
-            PitchView(
-                markers: markers,
-                pendingLocation: location,
-                isPlacementActive: true,
-                onPlace: { point in
-                    location = point
-                },
-                onClearPendingLocation: {
-                    location = nil
-                },
-                onConfirmPendingLocation: {
-                    // Mirrors the Record button, which stays disabled with no
-                    // pending point, so squeeze with nothing proposed is quiet.
-                    if location != nil {
-                        onCommit(location)
-                    }
-                }
-            )
+            pitch
         }
         .padding(16)
-        .programmeSensoryFeedback(.selection, trigger: location)
+    }
+
+    /// In a compact sheet the NavigationStack owns the modal decisions. Skip and
+    /// Record use SwiftUI's semantic toolbar placements so the system decides
+    /// their position and appearance; Clear remains contextual to the pitch
+    /// because it only changes the pending point.
+    private var compactSheetContent: some View {
+        VStack(spacing: 12) {
+            recordedStatus(showQuestion: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            pitch
+                .overlay(alignment: .topTrailing) {
+                    if location != nil {
+                        clearButton
+                            .padding(10)
+                    }
+                }
+        }
+        .padding(16)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Skip") { onCommit(nil) }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("shotLocation.skip")
+                    .accessibilityHint("Leaves this recorded shot without a location.")
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Record") { onCommit(location) }
+                    .disabled(location == nil)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("shotLocation.record")
+                    .accessibilityHint("Records the selected shot location.")
+            }
+        }
+    }
+
+    private var clearButton: some View {
+        Button("Clear", systemImage: "xmark.circle") {
+            location = nil
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("shotLocation.clear")
+        .accessibilityHint(
+            "Clears the proposed shot location. Apple Pencil double-tap does the same.")
+    }
+
+    @ViewBuilder
+    private func recordedStatus(showQuestion: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if showQuestion {
+                Text("Where was it struck?")
+                    .font(.title3.weight(.semibold))
+            }
+            Label(
+                "\(outcome.label) recorded · \(shooterName)",
+                systemImage: "checkmark.circle.fill"
+            )
+            .font(.subheadline)
+            .foregroundStyle(Programme.Palette.confirmed)
+            .accessibilityIdentifier("shotLocation.recordedConfirmation")
+        }
+    }
+
+    private var pitch: some View {
+        PitchView(
+            markers: markers,
+            pendingLocation: location,
+            isPlacementActive: true,
+            onPlace: { point in
+                location = point
+            },
+            onClearPendingLocation: {
+                location = nil
+            },
+            onConfirmPendingLocation: {
+                // Mirrors Record: Pencil squeeze is quiet until there is a
+                // concrete pending point.
+                if location != nil {
+                    onCommit(location)
+                }
+            }
+        )
     }
 }
 

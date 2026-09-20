@@ -40,10 +40,18 @@ final class MatchClockModel {
             guard ticker == nil else { return }
             ticker = Task { [weak self] in
                 while !Task.isCancelled {
-                    // Sampled rather than counted: the displayed value always
-                    // comes from the anchor, so a missed wake-up cannot drift.
-                    try? await Task.sleep(for: .milliseconds(200))
                     guard let self else { return }
+
+                    // The visible clock has one-second resolution. Sleep until
+                    // the next elapsed-second boundary instead of waking five
+                    // times per second to discover that nothing changed.
+                    let delay = self.delayUntilNextSecond(at: Date())
+                    do {
+                        try await Task.sleep(for: delay)
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled else { return }
                     self.refresh()
                 }
             }
@@ -51,6 +59,13 @@ final class MatchClockModel {
             ticker?.cancel()
             ticker = nil
         }
+    }
+
+    private func delayUntilNextSecond(at now: Date) -> Duration {
+        let elapsed = max(0, anchor.elapsed(at: now))
+        let fraction = elapsed - floor(elapsed)
+        let seconds = fraction < 0.001 ? 1.0 : max(0.02, 1.0 - fraction)
+        return .milliseconds(Int64((seconds * 1_000).rounded(.up)))
     }
 
     private func refresh() {

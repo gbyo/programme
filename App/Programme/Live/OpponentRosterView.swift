@@ -15,10 +15,9 @@ struct OpponentRosterView: View {
     @State private var players: [PlayerSnapshot] = []
     @State private var newNumber = ""
     @State private var newName = ""
-    @State private var pastedText = ""
-    @State private var isPasting = false
     @State private var addFeedbackTrigger = 0
     @FocusState private var numberFieldIsFocused: Bool
+    @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
         List {
@@ -30,6 +29,8 @@ struct OpponentRosterView: View {
                         .focused($numberFieldIsFocused)
                     TextField("Name", text: $newName)
                         .textInputAutocapitalization(.words)
+                        .focused($nameFieldIsFocused)
+                        .submitLabel(.done)
                         .onSubmit(add)
                     Button("Add", action: add)
                         .buttonStyle(.borderedProminent)
@@ -50,7 +51,7 @@ struct OpponentRosterView: View {
                             "Without a roster, opponent events are recorded as team totals — which is exactly what Our Team mode does."
                         )
                     } actions: {
-                        Button("Paste a List") { isPasting = true }
+                        NavigationLink("Paste a List") { pasteDestination }
                     }
                 }
             } else {
@@ -76,8 +77,12 @@ struct OpponentRosterView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .primaryAction) {
-                Button("Paste a List", systemImage: "doc.on.clipboard") { isPasting = true }
-                    .labelStyle(.iconOnly)
+                NavigationLink {
+                    pasteDestination
+                } label: {
+                    Label("Paste a List", systemImage: "doc.on.clipboard")
+                }
+                .labelStyle(.iconOnly)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
@@ -86,9 +91,16 @@ struct OpponentRosterView: View {
                 }
                 .fontWeight(.semibold)
             }
-        }
-        .sheet(isPresented: $isPasting) {
-            NavigationStack { pasteSheet }
+            // The number pad has no Return key: Next advances to Name for
+            // rapid entry, Done dismisses. The accessory appears only while
+            // the numeric field is focused.
+            if numberFieldIsFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Next") { nameFieldIsFocused = true }
+                    Button("Done") { numberFieldIsFocused = false }
+                }
+            }
         }
         .onAppear {
             players = session.context.opponentRoster.sortedByNumber
@@ -97,7 +109,40 @@ struct OpponentRosterView: View {
         .programmeSensoryFeedback(.selection, trigger: addFeedbackTrigger)
     }
 
-    private var pasteSheet: some View {
+    /// Paste is the next step of the same draft roster, so it pushes
+    /// on the existing stack instead of stacking a second sheet.
+    private var pasteDestination: some View {
+        PasteOpponentRosterView { parsed in
+            players.append(contentsOf: parsed)
+            players = RosterSnapshot(players: players).sortedByNumber
+        }
+    }
+
+    private func add() {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let split = RosterImportPreview.splitName(trimmed)
+        players.append(
+            PlayerSnapshot(
+                firstName: split.first, lastName: split.last, jerseyNumber: Int(newNumber)))
+        players = RosterSnapshot(players: players).sortedByNumber
+        newNumber = ""
+        newName = ""
+        numberFieldIsFocused = true
+        addFeedbackTrigger += 1
+    }
+}
+
+/// Paste Roster pushes on the opponent roster stack: parsed players join
+/// the draft roster, Back leaves it untouched, and Save at the root still
+/// commits everything to the session.
+struct PasteOpponentRosterView: View {
+    var onAdd: ([PlayerSnapshot]) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var pastedText = ""
+
+    var body: some View {
         Form {
             Section {
                 TextEditor(text: $pastedText)
@@ -115,21 +160,13 @@ struct OpponentRosterView: View {
         .navigationTitle("Paste Roster")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") {
-                    pastedText = ""
-                    isPasting = false
-                }
-            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Add") {
                     // The same parser the roster importer uses, so "Last, First"
                     // and jersey-number detection behave identically.
                     let parsed = RosterImporter.preview(csv: normalized(pastedText)).players
-                    players.append(contentsOf: parsed)
-                    players = RosterSnapshot(players: players).sortedByNumber
-                    pastedText = ""
-                    isPasting = false
+                    onAdd(parsed)
+                    dismiss()
                 }
                 .disabled(pastedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -149,19 +186,5 @@ struct OpponentRosterView: View {
                 return "\(parts[0].replacingOccurrences(of: "#", with: "")),\(parts[1])"
             }
             .joined(separator: "\n")
-    }
-
-    private func add() {
-        let trimmed = newName.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        let split = RosterImportPreview.splitName(trimmed)
-        players.append(
-            PlayerSnapshot(
-                firstName: split.first, lastName: split.last, jerseyNumber: Int(newNumber)))
-        players = RosterSnapshot(players: players).sortedByNumber
-        newNumber = ""
-        newName = ""
-        numberFieldIsFocused = true
-        addFeedbackTrigger += 1
     }
 }
