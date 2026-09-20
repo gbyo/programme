@@ -66,28 +66,28 @@ struct RosterImportView: View {
                 // deterministic review pipeline. Cancel leaves rawText — and
                 // any prior paste or file input — untouched.
                 NavigationStack {
-                RosterScannerView { scannedText = $0 }
-                    .navigationTitle("Scan Roster")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { isShowingScanner = false }
-                        }
-                        ToolbarItem(placement: .status) {
-                            Text(scanStatus)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Use Scanned Text") {
-                                rawText = scannedText
-                                isShowingScanner = false
-                                analyze()
+                    RosterScannerView { scannedText = $0 }
+                        .navigationTitle("Scan Roster")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") { isShowingScanner = false }
                             }
-                            .disabled(scanLineCount == 0)
-                            .fontWeight(.semibold)
+                            ToolbarItem(placement: .status) {
+                                Text(scanStatus)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Use Scanned Text") {
+                                    rawText = scannedText
+                                    isShowingScanner = false
+                                    analyze()
+                                }
+                                .disabled(scanLineCount == 0)
+                                .fontWeight(.semibold)
+                            }
                         }
-                    }
                 }
             }
             .onAppear {
