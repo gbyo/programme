@@ -39,7 +39,9 @@ public actor TeamSyncService: Sendable {
     private let shareCoordinator: TeamShareCoordinator
     private let applier: TeamSyncApplier
     private let conflicts: TeamConflictStore
-    private let owners: SharedZoneOwners
+    /// Durable accepted-share ownership. Internal (not private) so tests can
+    /// drive cache replacement and removal without CloudKit.
+    let owners: SharedZoneOwners
     private var started = false
     private var ensuredZones: Set<String> = []
 
@@ -102,6 +104,9 @@ public actor TeamSyncService: Sendable {
         await coordinator.setZoneDeletedHandler { [weak self] _, _ in
             Task { await self?.zoneDeleted() }
         }
+        await coordinator.setAccountChangeHandler { [weak self] change in
+            Task { await self?.handleAccountChange(change) }
+        }
         // Engines must exist before we enqueue zone creation.
         // ensureTeamZone writes pending database changes into an engine's
         // state, so doing this before coordinator.start() silently drops the
@@ -132,6 +137,29 @@ public actor TeamSyncService: Sendable {
     /// another ownership store.
     public func sharedZoneOwners() async -> [TeamID: String] {
         await coordinator.sharedZoneOwners()
+    }
+
+    /// Actor-local owner lookup for UI scope resolution. Never touches
+    /// CloudKit: sharing UI renders from the last known local state, which
+    /// stays correct offline. The cache is refreshed on share acceptance,
+    /// zone deletion, and account sign-in, and cleared on sign-out or
+    /// account switch.
+    public func cachedOwnerName(for teamID: TeamID) async -> String? {
+        await owners.ownerName(for: teamID)
+    }
+
+    /// Bounded cache maintenance for account transitions. Sign-in refreshes
+    /// from the zone list; sign-out or account switch drops every cached
+    /// owner so a new account never inherits the old account's scopes.
+    func handleAccountChange(_ change: CKSyncEngine.Event.AccountChange.ChangeType) async {
+        switch change {
+        case .signIn:
+            await refreshOwners()
+        case .signOut, .switchAccounts:
+            await owners.reset()
+        @unknown default:
+            await owners.reset()
+        }
     }
 
     /// Unresolved same-revision contradictions for a team, oldest first.
@@ -375,6 +403,13 @@ public actor SharedZoneOwners: Sendable {
 
     public func forget(teamID: TeamID) {
         owners.removeValue(forKey: teamID.rawValue.uuidString)
+        try? persist()
+    }
+
+    /// Drops every cached owner. Used on sign-out and account switch so a
+    /// new account never inherits the previous account's scopes.
+    public func reset() {
+        owners = [:]
         try? persist()
     }
 

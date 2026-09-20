@@ -105,6 +105,7 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
     private var onIncoming: (@Sendable ([IncomingChange]) -> Void)?
     private var onZoneDeleted: (@Sendable (SyncDatabase, CKRecordZone.ID) -> Void)?
     private var onStatusChange: (@Sendable (Status) -> Void)?
+    private var onAccountChange: (@Sendable (CKSyncEngine.Event.AccountChange.ChangeType) -> Void)?
 
     public func setIncomingHandler(_ handler: (@Sendable ([IncomingChange]) -> Void)?) {
         onIncoming = handler
@@ -118,6 +119,12 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
 
     public func setStatusHandler(_ handler: (@Sendable (Status) -> Void)?) {
         onStatusChange = handler
+    }
+
+    public func setAccountChangeHandler(
+        _ handler: (@Sendable (CKSyncEngine.Event.AccountChange.ChangeType) -> Void)?
+    ) {
+        onAccountChange = handler
     }
 
     public init(
@@ -317,6 +324,7 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
             // already resumes automatic sync when an account becomes
             // available, so status/local-state handling is all we need here.
             applyAccountChange(change.changeType)
+            onAccountChange?(change.changeType)
         case .fetchedRecordZoneChanges(let fetched):
             await applyFetched(
                 saved: fetched.modifications.map(\.record),
