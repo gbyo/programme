@@ -50,6 +50,7 @@ struct EventPalette: View {
     var onClearArmedPlayer: () -> Void
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @State private var goalActivation = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -119,10 +120,18 @@ struct EventPalette: View {
             action: action,
             prominence: .primary,
             isArmed: session.armedPlayer != nil,
-            differentiateWithoutColor: differentiateWithoutColor
+            differentiateWithoutColor: differentiateWithoutColor,
+            goalActivation: action.id == "goal" ? goalActivation : nil
         ) {
-            onAction(action)
+            activate(action)
         }
+    }
+
+    private func activate(_ action: PaletteAction) {
+        if action.id == "goal" {
+            goalActivation += 1
+        }
+        onAction(action)
     }
 
     /// Everything real but less frequent, plus the overflow menu. Shorter tiles:
@@ -134,7 +143,8 @@ struct EventPalette: View {
                     action: action,
                     prominence: .secondary,
                     isArmed: session.armedPlayer != nil,
-                    differentiateWithoutColor: differentiateWithoutColor
+                    differentiateWithoutColor: differentiateWithoutColor,
+                    goalActivation: nil
                 ) {
                     onAction(action)
                 }
@@ -283,10 +293,10 @@ struct RecordHeader: View {
                 .padding(.vertical, 9)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.accentColor.opacity(0.16), in: .rect(cornerRadius: 10))
-                .transition(.opacity)
+                .id(armedPlayer.id)
+                .transition(LiveMotion.acknowledgementTransition(reduceMotion: reduceMotion))
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: armedPlayer?.id)
     }
 }
 
@@ -307,8 +317,10 @@ struct PaletteButton: View {
     let prominence: Prominence
     let isArmed: Bool
     let differentiateWithoutColor: Bool
+    let goalActivation: Int?
     let perform: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .headline) private var primaryHeight: CGFloat = Programme.Metrics
         .paletteButtonHeight
     @ScaledMetric(relativeTo: .headline) private var secondaryHeight: CGFloat = 54
@@ -332,9 +344,7 @@ struct PaletteButton: View {
     private var label: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: action.symbolName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .imageScale(.medium)
+                symbol
                 // One line, scaled to fit: a wrapped or hyphenated label is
                 // harder to recognise at a glance than a slightly smaller one.
                 Text(action.title)
@@ -350,6 +360,20 @@ struct PaletteButton: View {
                     .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var symbol: some View {
+        if action.id == "goal", let goalActivation, !reduceMotion {
+            Image(systemName: action.symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .imageScale(.medium)
+                .symbolEffect(.bounce.wholeSymbol, value: goalActivation)
+        } else {
+            Image(systemName: action.symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .imageScale(.medium)
         }
     }
 
