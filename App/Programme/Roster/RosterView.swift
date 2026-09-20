@@ -275,6 +275,16 @@ struct PlayerEditorView: View {
                     .disabled(!canSave)
                     .fontWeight(.semibold)
             }
+            // The number pad has no Return key, so the jersey field gets
+            // native keyboard actions. Name fields keep hardware Return
+            // behavior and show no accessory.
+            if focusedField == .jerseyNumber {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Next") { focusedField = .classYear }
+                    Button("Done") { focusedField = nil }
+                }
+            }
         }
         .onAppear {
             guard let snapshot = editingSnapshot else {
