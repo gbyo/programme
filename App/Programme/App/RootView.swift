@@ -114,6 +114,7 @@ struct RootView: View {
                             SeasonStatsView(teamID: teamID, seasonID: id)
                         }
                     case .eventLog(let id): MatchEventLogScreen(matchID: id)
+                    case .review(let id): MatchReviewView(matchID: id)
                     }
                 }
         }

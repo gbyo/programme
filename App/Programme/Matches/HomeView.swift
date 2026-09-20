@@ -69,7 +69,7 @@ struct HomeView: View {
                 if !needsReview.isEmpty {
                     Section {
                         ForEach(needsReview) { match in
-                            NavigationLink(value: AppRoute.match(match.id)) {
+                            NavigationLink(value: AppRoute.review(match.id)) {
                                 MatchRowContent(match: match)
                             }
                         }

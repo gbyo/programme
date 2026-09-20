@@ -49,6 +49,9 @@ enum AppRoute: Hashable {
     case player(PlayerID)
     case season(SeasonID?)
     case eventLog(MatchID)
+    /// The review queue for one match: the focused triage screen, not the
+    /// generic detail page. Resolution still runs through the scorer.
+    case review(MatchID)
 }
 
 /// Navigation state: where the user is. Persistence lookups (which team owns
@@ -110,6 +113,10 @@ final class NavigationModel {
             matchesPath = NavigationPath()
             matchesPath.append(AppRoute.match(id))
             matchesPath.append(AppRoute.eventLog(id))
+        case .review(let id):
+            section = .matches
+            matchesPath = NavigationPath()
+            matchesPath.append(AppRoute.review(id))
         }
     }
 
@@ -161,6 +168,7 @@ final class NavigationModel {
         case .player(let id): URL(string: "programme://player/\(id.rawValue.uuidString)")
         case .season: URL(string: "programme://season")
         case .eventLog(let id): URL(string: "programme://match/\(id.rawValue.uuidString)")
+        case .review(let id): URL(string: "programme://review/\(id.rawValue.uuidString)")
         }
     }
 }

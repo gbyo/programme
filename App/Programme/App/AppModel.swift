@@ -702,6 +702,11 @@ final class AppModel {
             navigation.open(route)
         case .eventLog:
             navigation.open(route)
+        case .review(let id):
+            if let owner = try? await store.teamID(forMatch: id) {
+                await ensureTeamSelected(owner)
+            }
+            navigation.open(route)
         }
     }
 
@@ -724,6 +729,10 @@ final class AppModel {
             } else {
                 navigation.section = .stats
             }
+            return true
+        case "review":
+            guard let identifier, let uuid = UUID(uuidString: identifier) else { return false }
+            await open(.review(MatchID(uuid)))
             return true
         case "live":
             if let identifier, let uuid = UUID(uuidString: identifier) {
