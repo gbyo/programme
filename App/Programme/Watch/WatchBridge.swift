@@ -14,23 +14,27 @@ import WatchConnectivity
 /// Pure push/activation policy: decides when a snapshot may go out and
 /// retains the latest one across pre-activation pushes. Tested directly;
 /// `WCSession` itself is never instantiated outside the bridge.
+///
+/// The pending value stays a typed snapshot: encoding happens only when a
+/// delivery is actually attempted, so devices with no Watch destination
+/// never pay serialization per push.
 struct WatchPushPolicy {
-    private(set) var pending: Data?
+    private(set) var pending: WatchSnapshot?
 
     /// Records the snapshot, delivering it only when the session may
-    /// legally send. Returns the payload to deliver now, if any.
+    /// legally send. Returns the snapshot to deliver now, if any.
     /// Latest wins: an older pending snapshot is simply replaced. The
     /// snapshot stays pending until the caller acknowledges successful
     /// delivery, so a failed send is retried instead of lost.
-    mutating func push(_ data: Data, canDeliver: Bool) -> Data? {
-        pending = data
+    mutating func push(_ snapshot: WatchSnapshot, canDeliver: Bool) -> WatchSnapshot? {
+        pending = snapshot
         guard canDeliver else { return nil }
-        return data
+        return snapshot
     }
 
     /// Takes the latest pending snapshot for an activation flush without
     /// clearing it; `acknowledge()` clears it after delivery succeeds.
-    mutating func activated() -> Data? {
+    mutating func activated() -> WatchSnapshot? {
         pending
     }
 
@@ -45,6 +49,10 @@ struct WatchPushPolicy {
 final class WatchBridge: NSObject, WCSessionDelegate {
     private static let snapshotKey = "programme.watchSnapshot"
     private var policy = WatchPushPolicy()
+
+    /// Encodes a snapshot for delivery. A seam so tests can count encodes
+    /// without a live Watch session.
+    var encoder: @Sendable (WatchSnapshot) throws -> Data = { try JSONEncoder().encode($0) }
 
     override init() {
         super.init()
@@ -61,11 +69,16 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// companion-installed Watch; pushes before activation are retained
     /// and flushed when activation completes — the first snapshot is never
     /// silently lost. Stale snapshots are simply replaced by the next push.
+    /// Encoding happens only when delivery is actually attempted.
     func push(_ snapshot: WatchSnapshot) {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        guard let payload = policy.push(data, canDeliver: Self.canDeliver()) else { return }
+        guard let pending = policy.push(snapshot, canDeliver: Self.canDeliver()) else { return }
+        deliver(pending)
+    }
+
+    private func deliver(_ snapshot: WatchSnapshot) {
+        guard let data = try? encoder(snapshot) else { return }
         do {
-            try WCSession.default.updateApplicationContext([Self.snapshotKey: payload])
+            try WCSession.default.updateApplicationContext([Self.snapshotKey: data])
             policy.acknowledge()
         } catch {
             // Delivery failed; the snapshot stays pending so the next
@@ -81,13 +94,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     private func flushPending() {
-        guard let payload = policy.activated(), Self.canDeliver() else { return }
-        do {
-            try WCSession.default.updateApplicationContext([Self.snapshotKey: payload])
-            policy.acknowledge()
-        } catch {
-            // Stays pending for the next activation or push.
-        }
+        guard let pending = policy.activated(), Self.canDeliver() else { return }
+        deliver(pending)
     }
 
     // MARK: - WCSessionDelegate

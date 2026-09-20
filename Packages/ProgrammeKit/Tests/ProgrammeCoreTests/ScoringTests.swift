@@ -283,6 +283,53 @@ struct OpponentTrackingTests {
         #expect(snapshot.team.us.corners == 0)
     }
 
+    @Test("Both Teams secondary events use the same attributed stat engine")
+    func bothTeamsSecondaryEvents() throws {
+        var fixture = MatchFixture(profile: .advanced, tracking: .bothTeams)
+        fixture.context.opponentRoster = opponentRoster()
+        try fixture.startMatch()
+
+        let kessler = try #require(fixture.context.opponentRoster.players.first { $0.jerseyNumber == 9 })
+        let pettit = try #require(fixture.context.opponentRoster.players.first { $0.jerseyNumber == 8 })
+
+        fixture.seek(period: 1, minutes: 18)
+        try fixture.perform(
+            .recordShot(
+                ShotEvent(
+                    side: .opponent,
+                    shooter: .player(kessler.id),
+                    outcome: .saved,
+                    phase: .penaltyKick)))
+        try fixture.perform(.recordSteal(side: .opponent, player: .player(pettit.id)))
+        try fixture.perform(.recordFoul(side: .opponent, player: .player(pettit.id)))
+        try fixture.perform(.recordOffside(side: .opponent, player: .player(kessler.id)))
+        try fixture.perform(
+            .recordCard(
+                CardEvent(side: .opponent, player: .player(pettit.id), card: .secondYellow)))
+
+        let snapshot = fixture.snapshot
+        let shooter = snapshot.player(kessler.id)
+        let midfielder = snapshot.player(pettit.id)
+        let keeper = snapshot.keeper(ProgrammeSample.keeper)
+
+        #expect(shooter.penaltyAttempts == 1)
+        #expect(shooter.offsides == 1)
+        #expect(midfielder.steals == 1)
+        #expect(midfielder.fouls == 1)
+        #expect(midfielder.yellowCards == 1)
+        #expect(midfielder.redCards == 1)
+
+        #expect(snapshot.team.opponent.steals == 1)
+        #expect(snapshot.team.opponent.fouls == 1)
+        #expect(snapshot.team.opponent.offsides == 1)
+        #expect(snapshot.team.opponent.yellowCards == 1)
+        #expect(snapshot.team.opponent.redCards == 1)
+
+        #expect(keeper.penaltiesFaced == 1)
+        #expect(keeper.penaltySaves == 1)
+        #expect(keeper.saves == 1)
+    }
+
     @Test("Opponent statistics stay out of our season totals")
     func opponentStatsExcludedFromSeason() throws {
         var fixture = MatchFixture(tracking: .bothTeams)

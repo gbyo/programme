@@ -65,25 +65,43 @@ public actor SyncOutbox {
     /// Stages a record save, superseding any staged delete of the same
     /// record (resurrecting then re-saving is just a save).
     public func stageSave(_ record: CKRecord) throws {
-        let zoneName = record.recordID.zoneID.zoneName
-        let key = Self.key(zoneName: zoneName, recordName: record.recordID.recordName)
-        let archived = try NSKeyedArchiver.archivedData(
-            withRootObject: record, requiringSecureCoding: true)
-        manifest.saves[key] = StagedSave(
-            zoneName: zoneName, recordName: record.recordID.recordName,
-            recordType: record.recordType, archivedRecord: archived)
-        manifest.deletes.removeValue(forKey: key)
+        try stageSaves([record])
+    }
+
+    /// Batch variant used by imports and other multi-record mutations. The
+    /// manifest remains crash-durable, but one logical mutation pays for one
+    /// atomic file replacement instead of rewriting the entire outbox per row.
+    public func stageSaves(_ records: [CKRecord]) throws {
+        guard !records.isEmpty else { return }
+        for record in records {
+            let zoneName = record.recordID.zoneID.zoneName
+            let key = Self.key(zoneName: zoneName, recordName: record.recordID.recordName)
+            let archived = try NSKeyedArchiver.archivedData(
+                withRootObject: record, requiringSecureCoding: true)
+            manifest.saves[key] = StagedSave(
+                zoneName: zoneName, recordName: record.recordID.recordName,
+                recordType: record.recordType, archivedRecord: archived)
+            manifest.deletes.removeValue(forKey: key)
+        }
         try persist()
     }
 
     /// Stages a record delete, collapsing any staged save of the same record.
     public func stageDelete(recordID: CKRecord.ID, recordType: String) throws {
-        let key = Self.key(
-            zoneName: recordID.zoneID.zoneName, recordName: recordID.recordName)
-        manifest.saves.removeValue(forKey: key)
-        manifest.deletes[key] = StagedDelete(
-            zoneName: recordID.zoneID.zoneName, ownerName: recordID.zoneID.ownerName,
-            recordName: recordID.recordName, recordType: recordType)
+        try stageDeletes([(recordID, recordType)])
+    }
+
+    /// Batch delete counterpart to stageSaves.
+    public func stageDeletes(_ records: [(CKRecord.ID, String)]) throws {
+        guard !records.isEmpty else { return }
+        for (recordID, recordType) in records {
+            let key = Self.key(
+                zoneName: recordID.zoneID.zoneName, recordName: recordID.recordName)
+            manifest.saves.removeValue(forKey: key)
+            manifest.deletes[key] = StagedDelete(
+                zoneName: recordID.zoneID.zoneName, ownerName: recordID.zoneID.ownerName,
+                recordName: recordID.recordName, recordType: recordType)
+        }
         try persist()
     }
 

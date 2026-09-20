@@ -89,23 +89,33 @@ public final class RecoveryJournal: @unchecked Sendable {
         }
     }
 
-    /// Append effects and flush. Synchronous by design: durability is the point,
-    /// and an append plus flush costs far less than a frame.
+    /// Append one committed action and flush it once. The on-disk representation
+    /// remains one JournalLine per effect for backward-compatible replay, but
+    /// all of the action's bytes are written together before the single fsync.
     public func append(_ effects: [MatchEffect], for matchID: MatchID) throws {
+        guard !effects.isEmpty else { return }
+        var data = Data()
         for effect in effects {
-            try write(.effect(effect), to: matchID)
+            var line = try ProgrammeCoding.encoder.encode(JournalLine.effect(effect))
+            line.append(0x0A)
+            data.append(line)
         }
+        try write(data, to: matchID)
     }
 
     private func write(_ line: JournalLine, to matchID: MatchID) throws {
         var data = try ProgrammeCoding.encoder.encode(line)
         data.append(0x0A)
+        try write(data, to: matchID)
+    }
+
+    private func write(_ data: Data, to matchID: MatchID) throws {
         lock.lock()
         defer { lock.unlock() }
         let handle = try handleLocked(for: matchID)
         try handle.seekToEnd()
         try handle.write(contentsOf: data)
-        // Push the bytes past the app's buffers so a crash cannot lose them.
+        // Push the complete action past the app's buffers before success returns.
         fsync(handle.fileDescriptor)
     }
 
@@ -146,31 +156,76 @@ public final class RecoveryJournal: @unchecked Sendable {
         return context
     }
 
+    /// Streams newline-delimited lines with a bounded buffer, never
+    /// materializing the whole file. A trailing partial line (a crash
+    /// mid-write) is delivered once and skipped by decoders, exactly as
+    /// the old whole-file split behaved.
+    private func streamLines(from fileURL: URL, body: (Data) throws -> Void) throws {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        var buffer = Data()
+        buffer.reserveCapacity(64 * 1024)
+        while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            buffer.append(chunk)
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                try body(Data(buffer[..<newline]))
+                buffer.removeSubrange(...newline)
+            }
+        }
+        if !buffer.isEmpty { try body(buffer) }
+    }
+
     /// Everything the journal knows without replaying: used by the launch check.
     public func summary(matchID: MatchID) -> JournalSummary? {
         let fileURL = url(for: matchID)
-        guard let contents = try? Data(contentsOf: fileURL) else { return nil }
         var header: JournalHeader?
         var eventCount = 0
         var lastEventAt: Date?
         var closed = false
-        for lineData in contents.split(separator: 0x0A) {
-            guard let line = try? ProgrammeCoding.decoder.decode(JournalLine.self, from: Data(lineData))
-            else { continue }
-            switch line {
-            case .header(let value): header = value
-            case .effect(let effect):
-                if case .appendEvent(let event) = effect {
-                    eventCount += 1
-                    lastEventAt = event.recordedAt
+        do {
+            try streamLines(from: fileURL) { lineData in
+                guard let line = try? ProgrammeCoding.decoder.decode(JournalLine.self, from: lineData)
+                else { return }
+                switch line {
+                case .header(let value): header = value
+                case .effect(let effect):
+                    if case .appendEvent(let event) = effect {
+                        eventCount += 1
+                        lastEventAt = event.recordedAt
+                    }
+                case .closed: closed = true
                 }
-            case .closed: closed = true
             }
+        } catch {
+            return nil
         }
         guard let header else { return nil }
         return JournalSummary(
             matchID: matchID, descriptor: header.descriptor, eventCount: eventCount,
             lastEventAt: lastEventAt, isClosed: closed)
+    }
+
+    /// Closed-state probe reading only a bounded tail. The close marker is
+    /// always the last line, so pruning never decodes event history. A
+    /// truncated tail reads as not-closed, which keeps the journal.
+    public func isClosed(matchID: MatchID) -> Bool {
+        let fileURL = url(for: matchID)
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return false }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd(), size > 0 else { return false }
+        let tailLength = min(size, 512)
+        guard
+            (try? handle.seek(toOffset: size - tailLength)) != nil,
+            let tail = try? handle.read(upToCount: Int(tailLength)), !tail.isEmpty
+        else { return false }
+        var text = tail
+        while text.last == 0x0A { text = text.dropLast() }
+        let start = text.lastIndex(of: 0x0A).map { text.index(after: $0) } ?? text.startIndex
+        guard
+            let line = try? ProgrammeCoding.decoder.decode(JournalLine.self, from: Data(text[start...]))
+        else { return false }
+        if case .closed = line { return true }
+        return false
     }
 
     /// Journals for every match that was left open.
@@ -207,8 +262,13 @@ public final class RecoveryJournal: @unchecked Sendable {
         try? FileManager.default.removeItem(at: url(for: matchID))
     }
 
-    /// Remove journals for matches closed more than `age` ago. Suitable
-    /// background maintenance; never required for correctness.
+    /// Remove journals for matches closed more than `age` ago. Opportunistic
+    /// foreground upkeep only; never required for correctness. Recovery never
+    /// depends on this running: every journal stays replayable until it is
+    /// pruned, and pruning only removes journals already marked closed.
+    /// Returns the number of journals removed, so callers can decide whether
+    /// anything downstream needs to react (nothing in the widgets reads
+    /// recovery journals, so pruning alone never refreshes them).
     @discardableResult
     public func pruneClosedJournals(olderThan age: TimeInterval = 60 * 60 * 24 * 30) -> Int {
         guard
@@ -218,7 +278,7 @@ public final class RecoveryJournal: @unchecked Sendable {
         var removed = 0
         for file in files where file.pathExtension == "journal" {
             guard let uuid = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { continue }
-            guard let summary = summary(matchID: MatchID(uuid)), summary.isClosed else { continue }
+            guard isClosed(matchID: MatchID(uuid)) else { continue }
             let modified =
                 (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
                 ?? Date()
@@ -228,6 +288,40 @@ public final class RecoveryJournal: @unchecked Sendable {
             }
         }
         return removed
+    }
+}
+
+/// Testable policy for closed-journal housekeeping. Pruning is tiny work that
+/// used to be scheduled as a recurring background processing task; it now
+/// runs opportunistically at naturally occurring foreground points (launch,
+/// scorer close, moving to the background). The policy keeps that cheap by
+/// throttling scans to `minimumInterval` while preserving the retention
+/// window, and it never touches anything the widgets read.
+public struct JournalUpkeepPolicy: Hashable, Sendable {
+    /// Closed journals older than this are removed. Defaults to 30 days.
+    public var retention: TimeInterval
+    /// Minimum time between upkeep scans. Defaults to 24 hours.
+    public var minimumInterval: TimeInterval
+
+    public init(
+        retention: TimeInterval = 60 * 60 * 24 * 30,
+        minimumInterval: TimeInterval = 60 * 60 * 24
+    ) {
+        self.retention = retention
+        self.minimumInterval = minimumInterval
+    }
+
+    /// Whether a scan is due. Always due when upkeep has never run.
+    public func isDue(now: Date, lastRunAt: Date?) -> Bool {
+        guard let lastRunAt else { return true }
+        return now.timeIntervalSince(lastRunAt) >= minimumInterval
+    }
+
+    /// Prune closed journals older than `retention`. Returns the number
+    /// removed. Open journals are never touched.
+    @discardableResult
+    public func perform(on journal: RecoveryJournal) -> Int {
+        journal.pruneClosedJournals(olderThan: retention)
     }
 }
 
