@@ -25,12 +25,6 @@ struct HomeView: View {
                         appModel.navigation.isPresentingNewMatch = true
                     }
                 }
-                ToolbarItem(placement: .secondaryAction) {
-                    Button("Settings", systemImage: "gearshape") {
-                        appModel.navigation.isPresentingSettings = true
-                    }
-                    .accessibilityIdentifier("home.settings")
-                }
             }
             .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await load() }
     }

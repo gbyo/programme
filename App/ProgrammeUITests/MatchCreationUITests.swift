@@ -11,9 +11,8 @@ final class MatchCreationUITests: ProgrammeUITestCase {
         let app = launch()
         waitForHome(app)
 
-        // Settings → Manage Teams… → Add Team…
-        tapToolbarButton(app, "home.settings", label: "Settings")
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        // Team switcher → Settings… → Manage Teams… → Add Team…
+        openSettings(app)
         app.staticTexts["Manage Teams…"].tap()
         XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
         app.buttons["Add Team…"].tap()
@@ -24,9 +23,16 @@ final class MatchCreationUITests: ProgrammeUITestCase {
         replaceText(app, app.textFields["Short name for the scoreboard"], with: "JV Test")
         app.buttons["Create"].tap()
 
-        // Creating a team selects it: Home now shows the new, empty workspace.
-        // The previous team owns matches, so the native empty state proves the
-        // new team was selected; team identity itself lives in the nav bar.
+        // Creating a team selects it, but only dismisses the New Team
+        // sheet: walk back out to the new, empty Home workspace.
+        XCTAssertTrue(
+            app.navigationBars["Manage Teams"].waitForExistence(timeout: 10),
+            "The New Team sheet did not dismiss back to Manage Teams")
+        app.navigationBars["Manage Teams"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.navigationBars["Settings"].buttons["Done"].tap()
+        // The previous team owns matches, so the native empty state proves
+        // the new team was selected.
         XCTAssertTrue(element(app, "home.content").waitForExistence(timeout: 10))
         XCTAssertTrue(
             app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
@@ -36,27 +42,16 @@ final class MatchCreationUITests: ProgrammeUITestCase {
             "The previous team's matches leaked into the new workspace")
 
         // Editing the team updates it in place rather than creating another one.
-        tapToolbarButton(app, "home.settings", label: "Settings")
-        // The toolbar can still be rebuilding from the sheet dismissal when
-        // the tap lands, opening nothing; retry once if no menu appeared.
-        if !app.staticTexts["Manage Teams…"].waitForExistence(timeout: 5) {
-            tapToolbarButton(app, "home.settings", label: "Settings")
-        }
-        XCTAssertTrue(app.staticTexts["Manage Teams…"].waitForExistence(timeout: 5))
+        openSettings(app)
         app.staticTexts["Manage Teams…"].tap()
         // The push lands inside the Settings sheet. Use the same global
         // navigation-bar query as the first half of this test: scoped
         // sheet queries do not resolve the pushed bar reliably.
-        if !app.navigationBars["Manage Teams"].waitForExistence(timeout: 5) {
-            // The tap dismissed the menu without activating the entry;
-            // reopen Settings and tap it again.
-            tapToolbarButton(app, "home.settings", label: "Settings")
-            XCTAssertTrue(app.staticTexts["Manage Teams…"].waitForExistence(timeout: 5))
-            app.staticTexts["Manage Teams…"].tap()
-            XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 10))
-        }
-        // Home's header and sidebar behind the sheet show the same team
-        // name, so scope the row to its unique subtitle: the new team has
+        XCTAssertTrue(
+            app.navigationBars["Manage Teams"].waitForExistence(timeout: 10),
+            "Manage Teams did not open from Settings")
+        // The sidebar switcher behind the sheet shows the same team name,
+        // so scope the row to its unique subtitle: the new team has
         // no players yet, which neither Home's chrome nor the other team's
         // row can match.
         let teamCell = app.cells.containing(.staticText, identifier: "0 players · 1 seasons").firstMatch

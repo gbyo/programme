@@ -23,29 +23,6 @@ final class CompactTeamSwitcherUITests: ProgrammeUITestCase {
         return app
     }
 
-    /// Opens the title menu from whichever title SwiftUI is showing: the
-    /// inline-bar title after scrolling, or the large title above content.
-    /// The menu-entry lookup that follows proves the menu actually opened,
-    /// so no production control is added just to expose the title for
-    /// testing.
-    private func openTitleMenu(_ app: XCUIApplication, title: String) {
-        let inlineButton = app.navigationBars[title].buttons[title].firstMatch
-        if inlineButton.waitForExistence(timeout: 3) {
-            inlineButton.tap()
-            return
-        }
-        let inlineText = app.navigationBars[title].staticTexts[title].firstMatch
-        if inlineText.waitForExistence(timeout: 3) {
-            inlineText.tap()
-            return
-        }
-        let largeTitle = app.staticTexts[title].firstMatch
-        XCTAssertTrue(
-            largeTitle.waitForExistence(timeout: 5),
-            "No tappable navigation title for \(title)")
-        largeTitle.tap()
-    }
-
     /// The page title stays visible with the team as its subtitle, no
     /// separate team control crowds the bar, the four destinations remain
     /// bottom tabs, and the title menu switches the workspace.

@@ -83,11 +83,6 @@ struct MatchesView: View {
                     appModel.navigation.isPresentingNewMatch = true
                 }
             }
-            ToolbarItem(placement: .secondaryAction) {
-                Button("Settings", systemImage: "gearshape") {
-                    appModel.navigation.isPresentingSettings = true
-                }
-            }
         }
         .overlay {
             if matches.isEmpty {

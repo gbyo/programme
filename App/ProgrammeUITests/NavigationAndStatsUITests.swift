@@ -115,8 +115,7 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         let app = launch()
         waitForHome(app)
 
-        tapToolbarButton(app, "home.settings", label: "Settings")
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        openSettings(app)
         app.staticTexts["Manage Teams…"].tap()
         XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
 

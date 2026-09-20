@@ -257,6 +257,14 @@ struct TeamSwitcherMenu: View {
         Button("Manage Teams…", systemImage: "person.3") {
             appModel.navigation.isPresentingManageTeams = true
         }
+        // Settings is application context, not a per-screen action: one
+        // separated entry here reaches it from every presentation (sidebar
+        // bottom bar, top-bar icon, compact title menu) instead of a gear
+        // repeated on each destination.
+        Divider()
+        Button("Settings…", systemImage: "gearshape") {
+            appModel.navigation.isPresentingSettings = true
+        }
     }
 }
 
@@ -269,6 +277,10 @@ struct ProgrammeCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Match…") { appModel.navigation.isPresentingNewMatch = true }
                 .keyboardShortcut("n", modifiers: .command)
+        }
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { appModel.navigation.isPresentingSettings = true }
+                .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo Last Event") { appModel.liveSession?.undo() }

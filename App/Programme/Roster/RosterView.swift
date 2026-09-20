@@ -75,11 +75,6 @@ struct RosterView: View {
                     Toggle("Show Former Players", isOn: $showsFormer)
                 }
             }
-            ToolbarItem(placement: .secondaryAction) {
-                Button("Settings", systemImage: "gearshape") {
-                    appModel.navigation.isPresentingSettings = true
-                }
-            }
         }
         .dropDestination(for: Data.self) { items, _ in
             guard let data = items.first, let text = String(data: data, encoding: .utf8) else { return false }
