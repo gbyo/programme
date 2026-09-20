@@ -131,6 +131,55 @@ struct SyncServiceTests {
         #expect(await service.stagedChanges(for: .match(MatchID())).isEmpty)
     }
 
+    @Test("Event staging maps only the changed events")
+    func eventStagingIsSelective() async throws {
+        let store = try makeStore()
+        let (teamID, matchID) = try await makeTeamAndMatch(store)
+        let first = MatchEvent(matchID: matchID, time: .kickoff, sequence: 1, payload: .note("One"))
+        let second = MatchEvent(matchID: matchID, time: .kickoff, sequence: 2, payload: .note("Two"))
+        let third = MatchEvent(matchID: matchID, time: .kickoff, sequence: 3, payload: .note("Three"))
+        try await store.apply([.appendEvent(first), .appendEvent(second), .appendEvent(third)], to: matchID)
+        let service = try makeService(store)
+
+        // One changed event stages exactly one record in the owning zone.
+        let single = await service.stagedChanges(for: .events(matchID: matchID, eventIDs: [second.id]))
+        #expect(single.count == 1)
+        if case .save(let record, let scope) = single.first {
+            #expect(record.recordType == EventRecord.recordType)
+            #expect(record.recordID.zoneID.zoneName == TeamZone.zoneName(for: teamID))
+            #expect(scope == .private)
+            #expect(EventRecord(record: record)?.event.id == second.id)
+        } else {
+            Issue.record("Expected one event save")
+        }
+
+        // A correction stages the post-write state for the same record.
+        var corrected = second
+        corrected.payload = .note("Two corrected")
+        try await store.apply([.replaceEvent(corrected)], to: matchID)
+        let restaged = await service.stagedChanges(for: .events(matchID: matchID, eventIDs: [second.id]))
+        #expect(restaged.count == 1)
+        if case .save(let record, _) = restaged.first {
+            let event = EventRecord(record: record)?.event
+            #expect(event?.id == second.id)
+            #expect(event?.payload == .note("Two corrected"))
+        } else {
+            Issue.record("Expected one corrected event save")
+        }
+
+        // A bulk mutation stages every named event and nothing else.
+        let bulk = await service.stagedChanges(
+            for: .events(matchID: matchID, eventIDs: [first.id, second.id, third.id]))
+        #expect(bulk.count == 3)
+
+        // Unknown event IDs and matches stage nothing rather than failing.
+        #expect(
+            await service.stagedChanges(for: .events(matchID: matchID, eventIDs: [EventID()])).isEmpty)
+        #expect(
+            await service.stagedChanges(for: .events(matchID: MatchID(), eventIDs: [second.id]))
+                .isEmpty)
+    }
+
     @Test("Accepted shares route participant writes to the shared database")
     func sharedRouting() async throws {
         let store = try makeStore()

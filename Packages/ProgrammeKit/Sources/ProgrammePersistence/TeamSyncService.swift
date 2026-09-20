@@ -156,8 +156,11 @@ public actor TeamSyncService: Sendable {
     /// nothing.
     public func stage(_ mutation: OutboundMutation) async {
         guard started else { return }
-        await ensureZoneIfNeeded(for: mutation)
-        for change in await stagedChanges(for: mutation) {
+        // The owning team resolves once here and is reused for zone
+        // creation and record staging; neither runs a second lookup.
+        let teamID = await self.teamID(for: mutation)
+        await ensureZoneIfNeeded(teamID: teamID)
+        for change in await stagedChanges(for: mutation, teamID: teamID) {
             switch change {
             case .save(let record, let scope):
                 do { try await coordinator.stageSave(record, in: scope) } catch {
@@ -176,17 +179,24 @@ public actor TeamSyncService: Sendable {
     /// Pure record building for a mutation: no engines, no container, no
     /// network. The offline-testable core of outbound staging.
     func stagedChanges(for mutation: OutboundMutation) async -> [StagedChange] {
+        await stagedChanges(for: mutation, teamID: nil)
+    }
+
+    /// Record building with an already-resolved owning team. `stage(_:)`
+    /// resolves once and reuses it; the single-argument seam resolves
+    /// internally so tests and other callers stage identically.
+    func stagedChanges(for mutation: OutboundMutation, teamID: TeamID?) async -> [StagedChange] {
         switch mutation {
         case .events(let matchID, let eventIDs):
-            guard let context = try? await store.context(for: matchID) else { return [] }
-            let zone = await zone(for: context.descriptor.teamID)
-            let wanted = Set(eventIDs)
-            return context.events.filter { wanted.contains($0.id) }.map {
+            guard let staged = try? await store.stagedEvents(matchID: matchID, eventIDs: Set(eventIDs))
+            else { return [] }
+            let zone = await zone(for: teamID ?? staged.teamID)
+            return staged.events.map {
                 .save(EventRecord(event: $0, matchID: matchID).makeRecord(in: zone.id), zone.scope)
             }
         case .match(let matchID):
             guard let context = try? await store.context(for: matchID) else { return [] }
-            let zone = await zone(for: context.descriptor.teamID)
+            let zone = await zone(for: teamID ?? context.descriptor.teamID)
             let record = MatchRecord(
                 descriptor: context.descriptor, phase: context.phase,
                 finalizedAt: context.finalizedAt, roster: context.roster,
@@ -290,19 +300,24 @@ public actor TeamSyncService: Sendable {
         return Zone(id: TeamZone.zoneID(for: teamID), scope: .private)
     }
 
-    private func ensureZoneIfNeeded(for mutation: OutboundMutation) async {
-        let teamID: TeamID? =
-            switch mutation {
-            case .events(let matchID, _):
-                try? await store.teamID(forMatch: matchID)
-            case .match(let matchID):
-                try? await store.teamID(forMatch: matchID)
-            case .team(let id): id
-            case .season(let id, _): id
-            case .players(let id, _): id
-            case .deletedMatch(_, let id, _): id
-            case .deletedPlayers(let id, _): id
-            }
+    /// Owning team for a mutation, resolved once per `stage(_:)` call.
+    /// Match-scoped mutations look the team up from the match row; every
+    /// other mutation carries it.
+    private func teamID(for mutation: OutboundMutation) async -> TeamID? {
+        switch mutation {
+        case .events(let matchID, _):
+            try? await store.teamID(forMatch: matchID)
+        case .match(let matchID):
+            try? await store.teamID(forMatch: matchID)
+        case .team(let id): id
+        case .season(let id, _): id
+        case .players(let id, _): id
+        case .deletedMatch(_, let id, _): id
+        case .deletedPlayers(let id, _): id
+        }
+    }
+
+    private func ensureZoneIfNeeded(teamID: TeamID?) async {
         guard let teamID, await owners.ownerName(for: teamID) == nil else { return }
         await ensureZone(for: teamID)
     }

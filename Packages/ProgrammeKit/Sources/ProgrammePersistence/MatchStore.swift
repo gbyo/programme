@@ -407,6 +407,20 @@ public actor MatchStore {
         return try MatchMapper.context(from: model, teamName: team.name, teamShortName: team.shortName)
     }
 
+    /// Changed events plus the owning team for outbound staging. Maps only
+    /// the requested event rows and never reconstructs the full match
+    /// history; unknown event IDs simply match nothing.
+    public func stagedEvents(matchID: MatchID, eventIDs: Set<EventID>) throws -> (
+        teamID: TeamID, events: [MatchEvent]
+    ) {
+        guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        let wanted = Set(eventIDs.map(\.rawValue))
+        let events = try model.events.filter { wanted.contains($0.identifier) }.map {
+            try $0.domainEvent()
+        }
+        return (TeamID(model.teamIdentifier), events)
+    }
+
     /// Persist a batch of effects. Called after the in-memory session has
     /// already applied them, so the scorer never waits on the database.
     public func apply(_ effects: [MatchEffect], to matchID: MatchID) throws {
