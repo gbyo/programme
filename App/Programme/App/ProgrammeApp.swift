@@ -55,7 +55,7 @@ struct ProgrammeApp: App {
 
         // A second window shows a large, readable scoreboard — useful on an
         // external display beside the field while the iPad stays with the scorer.
-        WindowGroup(id: ProgrammeScene.scoreboard.rawValue) {
+        WindowGroup("Scoreboard", id: ProgrammeScene.scoreboard.rawValue) {
             ScoreboardWindow()
                 .environment(appModel)
         }

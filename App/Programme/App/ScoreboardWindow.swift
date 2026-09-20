@@ -52,12 +52,25 @@ struct ScoreboardWindow: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+        .navigationTitle(windowTitle)
         // Apple's DevicePicker documentation presents the picker as a
         // full-screen modal, not a sheet.
         .fullScreenCover(isPresented: $isConnectingNearby) {
             NearbyConnectSheet()
                 .environment(appModel.nearby)
         }
+    }
+
+    /// A semantic scene title lets iPadOS distinguish this display from the
+    /// scoring window in App Switcher without adding visible chrome here.
+    private var windowTitle: String {
+        if let session = appModel.liveSession {
+            return "Scoreboard — \(session.descriptor.title)"
+        }
+        if let received = appModel.nearby.received {
+            return "Scoreboard — \(received.teamShortName) vs \(received.opponentShortName)"
+        }
+        return "Scoreboard"
     }
 
     private func content(session: LiveMatchSession) -> some View {
