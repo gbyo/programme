@@ -181,6 +181,12 @@ enum WidgetRefresher {
             WidgetCenter.shared.reloadAllTimelines()
         #endif
     }
+
+    static func reloadMatchStatus() {
+        #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadTimelines(ofKind: "com.gbyo.programme.matchStatus")
+        #endif
+    }
 }
 
 /// Closed-journal housekeeping runs opportunistically in the foreground —

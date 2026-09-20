@@ -89,23 +89,33 @@ public final class RecoveryJournal: @unchecked Sendable {
         }
     }
 
-    /// Append effects and flush. Synchronous by design: durability is the point,
-    /// and an append plus flush costs far less than a frame.
+    /// Append one committed action and flush it once. The on-disk representation
+    /// remains one JournalLine per effect for backward-compatible replay, but
+    /// all of the action's bytes are written together before the single fsync.
     public func append(_ effects: [MatchEffect], for matchID: MatchID) throws {
+        guard !effects.isEmpty else { return }
+        var data = Data()
         for effect in effects {
-            try write(.effect(effect), to: matchID)
+            var line = try ProgrammeCoding.encoder.encode(JournalLine.effect(effect))
+            line.append(0x0A)
+            data.append(line)
         }
+        try write(data, to: matchID)
     }
 
     private func write(_ line: JournalLine, to matchID: MatchID) throws {
         var data = try ProgrammeCoding.encoder.encode(line)
         data.append(0x0A)
+        try write(data, to: matchID)
+    }
+
+    private func write(_ data: Data, to matchID: MatchID) throws {
         lock.lock()
         defer { lock.unlock() }
         let handle = try handleLocked(for: matchID)
         try handle.seekToEnd()
         try handle.write(contentsOf: data)
-        // Push the bytes past the app's buffers so a crash cannot lose them.
+        // Push the complete action past the app's buffers before success returns.
         fsync(handle.fileDescriptor)
     }
 

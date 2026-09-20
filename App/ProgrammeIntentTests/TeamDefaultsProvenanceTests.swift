@@ -111,9 +111,8 @@ final class TeamDefaultsProvenanceTests: XCTestCase {
             XCTAssertEqual(
                 TeamWorkspace.restoredExplicitSelection(
                     from: [
-                        TeamListItem(
-                            id: legacy, name: "Legacy", shortName: "LEG", playerCount: 0,
-                            seasonCount: 0)
+                        TeamIdentity(
+                            id: legacy, name: "Legacy", shortName: "LEG")
                     ]),
                 legacy)
             // Second run is a no-op for already-flagged storage.

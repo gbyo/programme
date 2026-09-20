@@ -78,7 +78,10 @@ enum TeamMatchDefaults {
 @MainActor
 @Observable
 final class TeamWorkspace {
-    var teams: [TeamListItem] = []
+    /// Identity-only roster of teams. Count summaries for management UI live
+    /// in `AppModel.teamSummaries`, loaded on demand, so routine workspace
+    /// reads never fault player/season relationships.
+    var teams: [TeamIdentity] = []
     var selectedTeamID: TeamID?
     /// Current season belongs to the team; used by Home, New Match, default
     /// Matches filtering, player stats and widgets.
@@ -94,7 +97,7 @@ final class TeamWorkspace {
     /// suggestion can still apply while a real user choice always wins.
     static let explicitSelectionKey = "programme.selectedTeamID.userChosen"
 
-    var selectedTeam: TeamListItem? {
+    var selectedTeam: TeamIdentity? {
         guard let selectedTeamID else { return nil }
         return teams.first { $0.id == selectedTeamID }
     }
@@ -104,7 +107,7 @@ final class TeamWorkspace {
     /// The stored selection, but only when a user explicitly chose it.
     /// Automatic fallbacks and applied MDM suggestions never count, so a
     /// device with no real user selection stays eligible for suggestions.
-    static func restoredExplicitSelection(from teams: [TeamListItem]) -> TeamID? {
+    static func restoredExplicitSelection(from teams: [TeamIdentity]) -> TeamID? {
         guard UserDefaults.standard.bool(forKey: explicitSelectionKey) else { return nil }
         guard
             let raw = UserDefaults.standard.string(forKey: selectedTeamKey),
@@ -164,6 +167,11 @@ final class AppModel {
 
     /// The match currently being scored. There is at most one.
     var liveSession: LiveMatchSession?
+
+    /// Central owner of the app-wide idle-timer setting. `LiveMatchView`
+    /// reports its visibility and the preference here; this controller applies
+    /// `ScreenAwakePolicy` so no view writes the global setting directly.
+    let screenAwake = ScreenAwakeController()
 
     /// Matches that were being scored when Programme last stopped. Never
     /// discarded silently.
@@ -227,8 +235,10 @@ final class AppModel {
     /// database.
     func shareScope(teamID: TeamID) async -> TeamShareScope {
         guard let service = try? syncing() else { return .owned }
-        let owners = await service.sharedZoneOwners()
-        guard let owner = owners[teamID] else { return .owned }
+        // Actor-local cache read: answering which scope a team is in must
+        // not perform a CloudKit zone-list fetch, and stays correct offline
+        // from the last known local state.
+        guard let owner = await service.cachedOwnerName(for: teamID) else { return .owned }
         return .shared(ownerName: owner)
     }
 
@@ -368,19 +378,23 @@ final class AppModel {
     func startSyncIfAvailable() async {
         guard cloudAccount.state.isUsable else { return }
         guard let service = try? syncing() else { return }
-        await store?.setMutationHandler { [weak self] mutation in
-            Task { await self?.stageForSync(mutation) }
-        }
         await service.setWorkspaceChangedHandler { [weak self] in
             // Reload-only: preserve the selection's provenance so an
             // automatic fallback stays eligible for MDM suggestions.
             Task { await self?.reloadWorkspace() }
+            // Remote structure genuinely changed, so the index rebuilds;
+            // this is the only full reindex outside launch and recovery.
+            Task { await self?.intentProvider?.reindexSpotlight() }
         }
         await service.start()
     }
 
     private func stageForSync(_ mutation: OutboundMutation) async {
         await syncService?.stage(mutation)
+    }
+
+    private func indexForSpotlight(_ mutation: OutboundMutation) async {
+        intentProvider?.noteMutation(mutation)
     }
 
     /// If the on-disk store cannot be opened at all, the app still launches into
@@ -412,11 +426,13 @@ final class AppModel {
         var isUITest = false
         var seedsSampleData = false
         var opensLiveMatch = false
+        var skipsFinalizeConfirm = false
 
         init(arguments: [String] = ProcessInfo.processInfo.arguments) {
             isUITest = arguments.contains("-programme-uitest")
             seedsSampleData = isUITest || arguments.contains("-programme-sample")
             opensLiveMatch = arguments.contains("-programme-open-live")
+            skipsFinalizeConfirm = arguments.contains("-programme-no-finalize-confirm")
         }
     }
 
@@ -438,6 +454,13 @@ final class AppModel {
                     directory: FileManager.default.temporaryDirectory
                         .appending(path: "ProgrammeTestRecovery/\(UUID().uuidString)"))
                 : try? RecoveryJournal.makeDefault()
+            // UI tests control the finalize-confirmation preference through a
+            // launch flag, resetting it to the default otherwise so runs are
+            // hermetic on a reused simulator.
+            if launchOptions.isUITest {
+                UserDefaults.standard.set(
+                    !launchOptions.skipsFinalizeConfirm, forKey: "confirmBeforeFinalizing")
+            }
             if launchOptions.seedsSampleData {
                 do {
                     try ProgrammeStore.seedSampleData(
@@ -530,6 +553,14 @@ final class AppModel {
         guard !isReady else { return }
         defer { isReady = true }
         guard let container, let store else { return }
+        // One fanout for every local-truth mutation, with or without
+        // iCloud: sync staging no-ops until the service starts, and
+        // Spotlight indexing is always mutation-driven, never tied to
+        // widget refreshes or team switches.
+        await store.setMutationHandler { [weak self] mutation in
+            Task { await self?.stageForSync(mutation) }
+            Task { await self?.indexForSpotlight(mutation) }
+        }
         // Pre-provenance selections were always user choices; mark them
         // before any reload can treat them as automatic fallbacks.
         TeamWorkspace.migrateSelectionProvenance()
@@ -594,9 +625,17 @@ final class AppModel {
         await refreshWidgetSnapshot()
 
         storeObserver.start(container: container) { [weak self] in
-            self?.noteStoreChanged()
-            await self?.refreshWidgetSnapshot()
-            await self?.refreshRecoveryCandidates()
+            guard let self else { return }
+
+            // Live scoring owns its own lightweight companion refresh path.
+            // SwiftData history is a persistence signal, not a reason to
+            // recompute season stats, recovery journals, Spotlight, or widgets
+            // after every event.
+            guard self.liveSession == nil else { return }
+
+            self.noteStoreChanged()
+            await self.refreshWidgetSnapshot()
+            await self.refreshRecoveryCandidates()
         }
     }
 
@@ -604,7 +643,7 @@ final class AppModel {
     /// team was just created), select it.
     func reloadWorkspace(selecting preferred: TeamID? = nil) async {
         guard let store else { return }
-        let teams = (try? await store.teams()) ?? []
+        let teams = (try? await store.teamIdentities()) ?? []
         workspace.teams = teams
         guard !teams.isEmpty else {
             workspace.selectedTeamID = nil
@@ -669,6 +708,16 @@ final class AppModel {
         await refreshWidgetSnapshot()
     }
 
+    /// Count summaries for management UI, loaded on demand. The workspace
+    /// team list itself stays identity-only so routine reads never fault
+    /// player/season relationships.
+    var teamSummaries: [TeamListItem] = []
+
+    func refreshTeamSummaries() async {
+        guard let store else { return }
+        teamSummaries = (try? await store.teams()) ?? []
+    }
+
     /// Select another team workspace. Keeps the section, clears pushed
     /// team-specific state, resolves the new current season and resets the
     /// viewed stats season.
@@ -692,7 +741,7 @@ final class AppModel {
         do {
             try ProgrammeStore.seedSampleData(into: container.mainContext)
             // Select the sample team explicitly rather than relying on ordering.
-            let teams = (try? await store.teams()) ?? []
+            let teams = (try? await store.teamIdentities()) ?? []
             let sample = teams.first { $0.id == ProgrammeSample.teamID } ?? teams.first
             await reloadWorkspace(selecting: sample?.id)
         } catch {
@@ -876,7 +925,7 @@ final class AppModel {
                 // Journal-only recovery: import into the journal's own team,
                 // never into whichever workspace happens to be selected.
                 let ownerID = journaled.descriptor.teamID
-                let ownerTeams = (try? await store.teams()) ?? []
+                let ownerTeams = (try? await store.teamIdentities()) ?? []
                 guard ownerTeams.contains(where: { $0.id == ownerID }) else {
                     throw StoreError.teamNotFound
                 }
@@ -889,7 +938,7 @@ final class AppModel {
             // Resuming a stored match selects its owning team first, so closing
             // the scorer returns to the correct workspace.
             let ownerID = context.descriptor.teamID
-            let ownerTeams = (try? await store.teams()) ?? []
+            let ownerTeams = (try? await store.teamIdentities()) ?? []
             if ownerTeams.contains(where: { $0.id == ownerID }) {
                 await ensureTeamSelected(ownerID)
             }
@@ -897,6 +946,7 @@ final class AppModel {
                 LiveMatchSession(context: context, store: store, journal: journal, appModel: self)
             }
             liveSession = session
+            await refreshLiveCompanionSnapshot()
             ProgrammeStateReporter.reportWorkflow(.liveScoring)
             dismissRecovery(for: matchID)
             navigation.presentLiveMatch()
@@ -911,6 +961,10 @@ final class AppModel {
     func closeLiveSession() async {
         await liveSession?.flush()
         liveSession = nil
+        // The scorer is gone regardless of view-disappearance ordering, so
+        // restore normal sleep here rather than trusting appearance callbacks.
+        screenAwake.isScorerVisible = false
+        screenAwake.refresh()
         nearby.stopAdvertising()
         ProgrammeStateReporter.reportWorkflow(.browsing)
         navigation.isShowingLiveMatch = false
@@ -918,22 +972,122 @@ final class AppModel {
         // now eligible for future retention pruning. Throttled by policy, and
         // never a widget input.
         JournalUpkeep.runIfDue(journal: journal)
+
+        // Live event writes deliberately do not churn browsing projections.
+        // Publish one revision when the scorer closes, then rebuild the
+        // heavyweight derived surfaces once from the final local state.
+        noteStoreChanged()
         await refreshWidgetSnapshot()
+        await refreshRecoveryCandidates()
     }
 
     // MARK: - Scene phase
 
     func scenePhaseChanged(to phase: ScenePhase) {
+        // The display must never stay awake while backgrounded or inactive,
+        // even mid-match: the policy restores normal sleep on any
+        // deactivation and re-applies it when the scene is active again.
+        screenAwake.isSceneActive = (phase == .active)
+        screenAwake.refresh()
         guard phase == .background || phase == .inactive else { return }
         // Make sure everything recorded has reached the database before the app
-        // can be suspended or killed.
-        Task { await liveSession?.flush() }
+        // can be suspended or killed. When actually backgrounding, request one
+        // Match widget reload after writing the latest live snapshot; WidgetKit
+        // can then budget the refresh rather than Programme requesting one for
+        // every event while it is in the foreground.
+        Task { [weak self] in
+            guard let self else { return }
+            await self.liveSession?.flush()
+            if phase == .background, self.liveSession != nil {
+                await self.refreshLiveCompanionSnapshot(reloadWidget: true)
+            }
+        }
         // Moving to the background is a natural upkeep point. Throttled by
         // policy; recovery never depends on this running.
         if phase == .background { JournalUpkeep.runIfDue(journal: journal) }
     }
 
     // MARK: - Widgets (selected-team scoped)
+
+    /// Refresh only live companion presentation. The expensive season/recovery
+    /// projections stay unchanged until the scorer leaves the match.
+    func refreshLiveCompanionSnapshot(reloadWidget: Bool = false) async {
+        guard let session = liveSession,
+            workspace.selectedTeamID == session.descriptor.teamID
+        else { return }
+
+        guard var snapshot = ProgrammeSharedContainer.read() else {
+            await refreshWidgetSnapshot()
+            return
+        }
+
+        snapshot.live = ProgrammeWidgetSnapshot.LiveMatch(
+            matchID: session.matchID.rawValue.uuidString,
+            teamShortName: session.descriptor.teamShortName,
+            opponentShortName: session.descriptor.opponentShortName,
+            scoreUs: session.snapshot.score.us,
+            scoreOpponent: session.snapshot.score.opponent,
+            periodLabel: session.context.currentPeriod?.shortLabel ?? "",
+            clockText: session.clock.displayText,
+            isClockRunning: session.clock.isRunning,
+            needsReviewCount: session.snapshot.needsReviewCount,
+            lastEventText: session.lastEventDescription?.oneLine)
+        snapshot.updatedAt = Date()
+        ProgrammeSharedContainer.write(snapshot)
+
+        let syncReviewCount: Int
+        if let syncService {
+            let conflicts = await syncService.unresolvedConflicts(teamID: session.descriptor.teamID)
+            syncReviewCount = conflicts.count
+        } else {
+            syncReviewCount = 0
+        }
+
+        let watchLive = WatchSnapshot.Live(
+            matchID: session.matchID,
+            teamShortName: session.descriptor.teamShortName,
+            opponentShortName: session.descriptor.opponentShortName,
+            scoreUs: session.snapshot.score.us,
+            scoreOpponent: session.snapshot.score.opponent,
+            clock: session.context.clock,
+            rules: session.context.rules,
+            phase: session.context.phase,
+            needsReviewCount: session.snapshot.needsReviewCount,
+            lastEventText: session.lastEventDescription?.oneLine)
+
+        let watchUpcoming = snapshot.upcoming.flatMap { item -> WatchSnapshot.Upcoming? in
+            guard let uuid = UUID(uuidString: item.matchID) else { return nil }
+            return WatchSnapshot.Upcoming(
+                matchID: MatchID(uuid),
+                opponentShortName: item.opponentShortName,
+                venueLabel: item.venueLabel,
+                kickoff: item.kickoff)
+        }
+        let watchRecent = snapshot.recent.compactMap { item -> WatchSnapshot.Recent? in
+            guard let uuid = UUID(uuidString: item.matchID) else { return nil }
+            return WatchSnapshot.Recent(
+                matchID: MatchID(uuid),
+                opponentShortName: item.opponentShortName,
+                resultLetter: item.resultLetter,
+                scoreUs: item.scoreUs,
+                scoreOpponent: item.scoreOpponent,
+                kickoff: item.kickoff)
+        }
+
+        watchBridge.push(
+            WatchSnapshot(
+                teamName: snapshot.teamName,
+                teamShortName: snapshot.teamShortName,
+                recordText: snapshot.recordText,
+                live: watchLive,
+                upcoming: watchUpcoming,
+                recent: watchRecent,
+                reviewCount: session.snapshot.needsReviewCount + syncReviewCount))
+
+        if reloadWidget {
+            WidgetRefresher.reloadMatchStatus()
+        }
+    }
 
     /// The widget snapshot represents the currently selected team. While a
     /// match is live, its team identity comes from the live session's
@@ -951,7 +1105,12 @@ final class AppModel {
         let teamName = details?.name ?? workspace.selectedTeam?.name ?? "Programme"
         let teamShort = details?.shortName ?? workspace.selectedTeam?.shortName ?? "Programme"
         let matches = (try? await store.matches(teamID: selectedTeamID, limit: 40)) ?? []
-        let season = try? await store.seasonStats(teamID: selectedTeamID, seasonID: currentSeasonID)
+        // Record text only: a full seasonStats derivation here would rebuild
+        // every finalized match context and re-derive every player total just
+        // to render a W-L-D string.
+        let recordText =
+            (try? await store.seasonRecord(teamID: selectedTeamID, seasonID: currentSeasonID))
+            ?? "0-0-0"
 
         let live: ProgrammeWidgetSnapshot.LiveMatch? = liveSession.map { session in
             ProgrammeWidgetSnapshot.LiveMatch(
@@ -997,16 +1156,18 @@ final class AppModel {
             + (await syncConflicts(teamID: selectedTeamID).count)
         pushWatchSnapshot(
             teamID: selectedTeamID, teamName: teamName, teamShort: teamShort,
-            recordText: season?.recordText ?? "0-0-0", matches: matches,
+            recordText: recordText, matches: matches,
             reviewCount: reviewCount)
 
-        Task { await intentProvider?.reindexSpotlight() }
+        // Spotlight is its own invalidation domain: local-truth mutations
+        // reach it incrementally through noteMutation, so widget refreshes
+        // never trigger full-library reindexing.
         ProgrammeSharedContainer.write(
             ProgrammeWidgetSnapshot(
                 teamName: teamName,
                 teamShortName: teamShort,
                 seasonName: nil,
-                recordText: season?.recordText ?? "0-0-0",
+                recordText: recordText,
                 live: live,
                 upcoming: upcoming,
                 recent: Array(recent)))

@@ -23,15 +23,22 @@ public struct TeamSyncApplier: Sendable {
         self.conflicts = conflicts
     }
 
+    /// Materializes one fetched change. Outcomes match `drain([change])`;
+    /// corrupt input throws instead of landing in `failed`.
     @discardableResult
     public func apply(_ change: IncomingChange) async throws -> AppliedChange {
-        if change.deleted { return try await applyDeletion(change) }
-        return try await applySave(change)
+        let result = await drain([change])
+        if let failure = result.failed.first { throw failure.error }
+        return result.applied.first ?? .ignored
     }
 
     /// Drains buffered inbox changes in dependency order
     /// (Team → Season → Player → Match → Event) so a single fetch carrying a
-    /// whole workspace materializes parents before children. Returns applied
+    /// whole workspace materializes parents before children. Event saves and
+    /// deletions group by match: local event state loads once per match,
+    /// records reconcile sequentially in memory, and accepted effects
+    /// persist in one journal write per match — one logical invalidation
+    /// however many remote events the match carried. Returns applied
     /// outcomes alongside changes that could not materialize yet:
     /// - `deferred`: the parent is not local yet (it may arrive in a later
     ///   fetch). The caller re-buffers these; they are never dropped.
@@ -42,16 +49,197 @@ public struct TeamSyncApplier: Sendable {
         var applied: [AppliedChange] = []
         var deferred: [IncomingChange] = []
         var failed: [(change: IncomingChange, error: Error)] = []
+        var batches = EventBatches()
         for change in Self.ordered(changes) {
+            if change.deleted {
+                await drainDeletion(
+                    change, batches: &batches, applied: &applied, failed: &failed)
+            } else if change.recordType == EventRecord.recordType {
+                await drainEventSave(
+                    change, batches: &batches, applied: &applied, deferred: &deferred,
+                    failed: &failed)
+            } else {
+                do {
+                    let outcome = try await applySave(change)
+                    applied.append(outcome)
+                    if case .deferred = outcome { deferred.append(change) }
+                } catch {
+                    failed.append((change, error))
+                }
+            }
+        }
+        // One persist and one observer invalidation per touched match. A
+        // flush failure converts only that match's write outcomes back to
+        // deferred so they retry later; outcomes that wrote nothing stand.
+        for matchID in batches.order {
+            guard let batch = batches.batches[matchID], !batch.effects.isEmpty else { continue }
             do {
-                let outcome = try await apply(change)
-                applied.append(outcome)
-                if case .deferred = outcome { deferred.append(change) }
+                try await journal.writeEffects(batch.effects, to: matchID)
             } catch {
-                failed.append((change, error))
+                for written in batch.written {
+                    applied[written.slot] = .deferred
+                    deferred.append(written.change)
+                }
             }
         }
         return DrainResult(applied: applied, deferred: deferred, failed: failed)
+    }
+
+    /// In-memory write batch for one match: the evolving local event list,
+    /// the accumulated effects flushed once, and the `applied` slots holding
+    /// write outcomes for flush-failure conversion.
+    private final class EventBatch {
+        var events: [MatchEvent]
+        var effects: [MatchEffect] = []
+        var written: [(slot: Int, change: IncomingChange)] = []
+
+        init(events: [MatchEvent]) { self.events = events }
+    }
+
+    private struct EventBatches {
+        var batches: [MatchID: EventBatch] = [:]
+        var order: [MatchID] = []
+    }
+
+    /// The batch for a match, loading local event state once. Saves defer
+    /// when the match is not local yet; structural records sort before
+    /// events, so parents materialized earlier in the same drain are
+    /// already visible here.
+    private func batch(
+        for matchID: MatchID, teamID: TeamID, batches: inout EventBatches
+    ) async throws -> EventBatch? {
+        if let existing = batches.batches[matchID] { return existing }
+        guard try await journal.matchExists(matchID, inTeam: teamID) else { return nil }
+        return try await openBatch(for: matchID, batches: &batches)
+    }
+
+    /// The batch for a match without the existence check. Deletions void
+    /// whatever the locator found even when the match record itself has not
+    /// materialized, exactly as the single-event path always has.
+    private func openBatch(
+        for matchID: MatchID, batches: inout EventBatches
+    ) async throws -> EventBatch {
+        if let existing = batches.batches[matchID] { return existing }
+        let fresh = EventBatch(events: try await journal.readEvents(for: matchID))
+        batches.batches[matchID] = fresh
+        batches.order.append(matchID)
+        return fresh
+    }
+
+    private func drainEventSave(
+        _ change: IncomingChange, batches: inout EventBatches, applied: inout [AppliedChange],
+        deferred: inout [IncomingChange], failed: inout [(change: IncomingChange, error: Error)]
+    ) async {
+        guard let teamID = TeamZone.teamID(forZoneName: change.zoneName) else {
+            applied.append(.ignored)
+            return
+        }
+        guard let data = change.archivedRecord else {
+            failed.append((change, SyncApplyError.missingPayload(recordName: change.recordName)))
+            return
+        }
+        guard
+            let archived = try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKRecord.self, from: data),
+            let incoming = EventRecord(record: archived)
+        else {
+            failed.append(
+                (
+                    change,
+                    SyncApplyError.undecodable(
+                        recordName: change.recordName, recordType: change.recordType)
+                ))
+            return
+        }
+        do {
+            guard let batch = try await batch(for: incoming.matchID, teamID: teamID, batches: &batches)
+            else {
+                applied.append(.deferred)
+                deferred.append(change)
+                return
+            }
+            if let index = batch.events.firstIndex(where: { $0.id == incoming.event.id }) {
+                switch EventMerge.reconcile(local: batch.events[index], remote: incoming.event) {
+                case .takeRemote(let event):
+                    batch.events[index] = event
+                    batch.effects.append(.replaceEvent(event))
+                    applied.append(.applied(event.id))
+                    batch.written.append((slot: applied.count - 1, change: change))
+                case .keepLocal:
+                    applied.append(.keptLocal(incoming.event.id))
+                case .conflict(let localEvent, let remoteEvent):
+                    try await conflicts.report(
+                        TeamConflict(
+                            teamID: teamID,
+                            matchID: incoming.matchID, eventID: localEvent.id,
+                            zoneName: TeamZone.zoneName(for: teamID),
+                            localRevision: localEvent.revision, remoteRevision: remoteEvent.revision,
+                            receivedAt: Date()))
+                    applied.append(.conflict(localEvent.id))
+                }
+            } else {
+                batch.events.append(incoming.event)
+                batch.effects.append(.appendEvent(incoming.event))
+                applied.append(.applied(incoming.event.id))
+                batch.written.append((slot: applied.count - 1, change: change))
+            }
+        } catch {
+            failed.append((change, error))
+        }
+    }
+
+    /// Remote event deletions descope into the match batch: the local event
+    /// is voided, never removed, so history stays complete. Structural
+    /// deletions stay ignored; revocations arrive as zone deletions, never
+    /// tombstones.
+    private func drainDeletion(
+        _ change: IncomingChange, batches: inout EventBatches, applied: inout [AppliedChange],
+        failed: inout [(change: IncomingChange, error: Error)]
+    ) async {
+        guard change.recordType == EventRecord.recordType,
+            let teamID = TeamZone.teamID(forZoneName: change.zoneName),
+            let eventUUID = TeamZone.uuid(fromRecordName: change.recordName, prefix: "event")
+        else {
+            applied.append(.ignored)
+            return
+        }
+        let eventID = EventID(eventUUID)
+        do {
+            // Pending appends from earlier in this drain are visible too, so
+            // a save and a deletion of the same event converge in order.
+            let snapshot = batches.batches
+            let pending = batches.order.lazy.compactMap { matchID -> MatchID? in
+                guard
+                    let batch = snapshot[matchID],
+                    batch.events.contains(where: { $0.id == eventID })
+                else { return nil }
+                return matchID
+            }.first
+            let matchID: MatchID?
+            if let pending {
+                matchID = pending
+            } else {
+                matchID = try await journal.locateEvent(eventID, inTeam: teamID)
+            }
+            guard let matchID else {
+                applied.append(.ignored)
+                return
+            }
+            let batch = try await openBatch(for: matchID, batches: &batches)
+            guard var local = batch.events.first(where: { $0.id == eventID }), local.isActive else {
+                applied.append(.keptLocal(eventID))
+                return
+            }
+            local = local.appendingRevision(kind: .voided, summary: "Removed by a collaborator", at: Date())
+            local.voidedAt = Date()
+            if let index = batch.events.firstIndex(where: { $0.id == eventID }) {
+                batch.events[index] = local
+            }
+            batch.effects.append(.replaceEvent(local))
+            applied.append(.voided(eventID))
+            batch.written.append((slot: applied.count - 1, change: change))
+        } catch {
+            failed.append((change, error))
+        }
     }
 
     private static func ordered(_ changes: [IncomingChange]) -> [IncomingChange] {
@@ -122,74 +310,10 @@ public struct TeamSyncApplier: Sendable {
             }
             try await journal.ensureMatch(match)
             return .appliedMatch(match.descriptor.id)
-        case EventRecord.recordType:
-            guard let incoming = EventRecord(record: archived) else {
-                throw SyncApplyError.undecodable(
-                    recordName: change.recordName, recordType: change.recordType)
-            }
-            return try await applyEvent(incoming, teamID: teamID)
         default:
             // Unknown future record types wait for their own applier.
             return .ignored
         }
-    }
-
-    /// Events remain truth for statistics, but they still need their match:
-    /// an event whose match has not materialized yet defers like any other
-    /// child record instead of failing the drain.
-    private func applyEvent(_ incoming: EventRecord, teamID: TeamID) async throws -> AppliedChange {
-        guard try await journal.matchExists(incoming.matchID, inTeam: teamID) else { return .deferred }
-        let local = try await journal.readEvents(for: incoming.matchID).first { $0.id == incoming.event.id }
-        guard let local else {
-            try await journal.writeEffects([.appendEvent(incoming.event)], to: incoming.matchID)
-            return .applied(incoming.event.id)
-        }
-        switch EventMerge.reconcile(local: local, remote: incoming.event) {
-        case .takeRemote(let event):
-            try await journal.writeEffects([.replaceEvent(event)], to: incoming.matchID)
-            return .applied(event.id)
-        case .keepLocal:
-            return .keptLocal(local.id)
-        case .conflict(let localEvent, let remoteEvent):
-            try await conflicts.report(
-                TeamConflict(
-                    teamID: teamID,
-                    matchID: incoming.matchID, eventID: localEvent.id,
-                    zoneName: TeamZone.zoneName(for: teamID),
-                    localRevision: localEvent.revision, remoteRevision: remoteEvent.revision,
-                    receivedAt: Date()))
-            return .conflict(localEvent.id)
-        }
-    }
-
-    // MARK: - Deletions
-
-    /// Only event deletions materialize. A remote event deletion is a
-    /// descope: the local event is voided, never removed, so history stays
-    /// complete and derived statistics stay
-    /// recomputable. Structural deletions (team, season, player, match) are
-    /// ignored: removing shared structure is an explicit local action, never
-    /// a sync side effect. A revoked share arrives as a zone deletion
-    /// through the coordinator, not as record tombstones. The tombstone
-    /// carries a strictly newer revision than whatever it supersedes, so
-    /// both sides converge on voided through the normal merge rule without
-    /// wall-clock comparisons.
-    private func applyDeletion(_ change: IncomingChange) async throws -> AppliedChange {
-        guard change.recordType == EventRecord.recordType else { return .ignored }
-        guard let teamID = TeamZone.teamID(forZoneName: change.zoneName),
-            let eventUUID = TeamZone.uuid(fromRecordName: change.recordName, prefix: "event")
-        else { return .ignored }
-        let eventID = EventID(eventUUID)
-        guard let matchID = try await journal.locateEvent(eventID, inTeam: teamID) else {
-            // Already absent locally (or never received). Idempotent no-op.
-            return .ignored
-        }
-        let local = try await journal.readEvents(for: matchID).first { $0.id == eventID }
-        guard var local, local.isActive else { return .keptLocal(eventID) }
-        local = local.appendingRevision(kind: .voided, summary: "Removed by a collaborator", at: Date())
-        local.voidedAt = Date()
-        try await journal.writeEffects([.replaceEvent(local)], to: matchID)
-        return .voided(eventID)
     }
 }
 
