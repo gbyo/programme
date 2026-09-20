@@ -18,7 +18,10 @@ struct SeasonStatsView: View {
     @State private var season: SeasonStats?
     @State private var roster: RosterSnapshot = .empty
     @State private var isExporting = false
-    @State private var contexts: [MatchContext] = []
+    @State private var isPreparingExport = false
+    @State private var exportPayload: ExportPayload?
+    @State private var preparedExportKey: String?
+    @State private var exportTask: Task<Void, Never>?
     @State private var seasons: [SeasonListItem] = []
     @State private var teamDetails: TeamDetails?
 
@@ -60,22 +63,28 @@ struct SeasonStatsView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button("Export", systemImage: "square.and.arrow.up") { isExporting = true }
-                    .disabled(contexts.isEmpty)
+                if isPreparingExport {
+                    ProgressView()
+                        .accessibilityLabel("Preparing export")
+                } else {
+                    Button("Export", systemImage: "square.and.arrow.up") {
+                        exportTask?.cancel()
+                        exportTask = Task { await prepareAndPresentExport() }
+                    }
+                    .disabled(season?.matchesPlayed ?? 0 == 0)
+                }
             }
         }
         .sheet(isPresented: $isExporting) {
-            NavigationStack {
-                ExportSheet(
-                    payload: ExportPayload(
-                        teamName: teamDetails?.name ?? "",
-                        teamShortName: teamDetails?.shortName,
-                        seasonName: seasons.first { $0.id == viewedSeasonID }?.name,
-                        contexts: contexts),
-                    exporters: ProgrammeExporters.forSeason())
+            if let exportPayload {
+                NavigationStack {
+                    ExportSheet(
+                        payload: exportPayload,
+                        exporters: ProgrammeExporters.forSeason())
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
         }
         .task(
             id: [
@@ -95,19 +104,49 @@ struct SeasonStatsView: View {
 
     private func load() async {
         guard let store = appModel.store else { return }
+        // A season change cancels any in-flight export preparation and drops
+        // the prepared payload; export contexts are rebuilt on demand only.
+        exportTask?.cancel()
+        exportTask = nil
+        exportPayload = nil
+        preparedExportKey = nil
         seasons = (try? await store.seasons(teamID: teamID)) ?? []
         teamDetails = try? await store.teamDetails(teamID: teamID)
         let summaries =
             (try? await store.seasonSummaries(teamID: teamID, seasonID: viewedSeasonID)) ?? []
         season = SeasonEngine.aggregate(summaries)
         roster = (try? await store.roster(teamID: teamID, includeFormer: true)) ?? .empty
+    }
 
-        let items = (try? await store.matches(teamID: teamID, seasonID: viewedSeasonID)) ?? []
+    /// Builds the season export payload on demand and presents the sheet.
+    /// A cached payload is reused while the team, season, and store revision
+    /// are unchanged; preparation cooperatively cancels on season changes.
+    private func prepareAndPresentExport() async {
+        guard let store = appModel.store, let seasonID = viewedSeasonID else { return }
+        let key = [
+            teamID.rawValue.uuidString, seasonID.rawValue.uuidString, "\(appModel.storeRevision)",
+        ].joined(separator: "#")
+        if preparedExportKey == key, exportPayload != nil {
+            isExporting = true
+            return
+        }
+        isPreparingExport = true
+        defer { isPreparingExport = false }
+        let items = (try? await store.matches(teamID: teamID, seasonID: seasonID)) ?? []
         var loaded: [MatchContext] = []
         for item in items where item.phase == .finalized {
+            if Task.isCancelled { return }
             if let context = try? await store.context(for: item.id) { loaded.append(context) }
         }
-        contexts = loaded.sorted { $0.descriptor.kickoff < $1.descriptor.kickoff }
+        if Task.isCancelled { return }
+        loaded.sort { $0.descriptor.kickoff < $1.descriptor.kickoff }
+        exportPayload = ExportPayload(
+            teamName: teamDetails?.name ?? "",
+            teamShortName: teamDetails?.shortName,
+            seasonName: seasons.first { $0.id == seasonID }?.name,
+            contexts: loaded)
+        preparedExportKey = key
+        isExporting = true
     }
 
     private func content(_ season: SeasonStats) -> some View {
