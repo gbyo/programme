@@ -191,3 +191,98 @@ private final class MutationLog: @unchecked Sendable {
         lock.withLock { _mutations = [] }
     }
 }
+
+@Suite("Sync identity lookups answer from indexed rows, never snapshots")
+struct SyncIdentityLookupTests {
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    @Test("Missing parents answer false without building anything")
+    func missingParentsAreFalse() async throws {
+        let store = try makeStore()
+        let team = TeamID(ProgrammeSample.id("team.lookup-missing"))
+        #expect(try await store.teamExists(team) == false)
+        #expect(
+            try await store.seasonExists(SeasonID(ProgrammeSample.id("season.missing")), inTeam: team)
+                == false)
+        #expect(
+            try await store.playerExists(PlayerID(ProgrammeSample.id("player.missing")), inTeam: team)
+                == false)
+        #expect(
+            try await store.matchExists(MatchID(ProgrammeSample.id("match.missing")), inTeam: team)
+                == false)
+        #expect(
+            try await store.locateEvent(EventID(ProgrammeSample.id("event.missing")), inTeam: team)
+                == nil)
+    }
+
+    @Test("Lookups stay scoped to the owning team")
+    func lookupsStayTeamScoped() async throws {
+        let store = try makeStore()
+        let teamA = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        let teamB = try await store.createTeam(name: "Dixie", shortName: nil)
+        let seasonA = try await store.createSeason(
+            teamID: teamA, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        let playerA = try await store.addPlayer(
+            teamID: teamA,
+            PlayerSnapshot(
+                id: PlayerID(ProgrammeSample.id("player.lookup-a")), firstName: "Ava",
+                lastName: "Adams", jerseyNumber: 7, position: .midfielder, classYear: nil,
+                isOnRoster: true))
+        let matchA = try await store.createMatch(
+            teamID: teamA, seasonID: seasonA, opponentName: "Foe", opponentShortName: "FOE",
+            kickoff: ProgrammeSample.kickoff(daysFromNow: -1), venue: .home, rules: .highSchool,
+            statProfile: .maxPreps, tracking: .ourTeam, competition: nil,
+            roster: ProgrammeSample.roster)
+
+        #expect(try await store.teamExists(teamA))
+        #expect(try await store.seasonExists(seasonA, inTeam: teamA))
+        #expect(try await store.playerExists(playerA, inTeam: teamA))
+        #expect(try await store.matchExists(matchA, inTeam: teamA))
+        // Same rows, asked from the wrong team, must not resolve.
+        #expect(try await store.seasonExists(seasonA, inTeam: teamB) == false)
+        #expect(try await store.playerExists(playerA, inTeam: teamB) == false)
+        #expect(try await store.matchExists(matchA, inTeam: teamB) == false)
+    }
+
+    @Test("Event IDs resolve to their owning team's match")
+    func eventParentResolution() async throws {
+        let store = try makeStore()
+        let teamA = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        let teamB = try await store.createTeam(name: "Dixie", shortName: nil)
+        let seasonA = try await store.createSeason(
+            teamID: teamA, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+
+        var context = MatchContext(
+            descriptor: ProgrammeSample.descriptor(seed: "lookup.event"),
+            roster: ProgrammeSample.roster)
+        var date = Date(timeIntervalSince1970: 1_800_000_000)
+        for command: MatchCommand in [
+            .setLineup(
+                LineupEvent(
+                    side: .us, onField: ProgrammeSample.startingEleven,
+                    goalkeeper: ProgrammeSample.keeper)),
+            .startNextPeriod,
+            .recordShot(
+                ShotEvent(side: .us, shooter: .player(ProgrammeSample.carter), outcome: .goal)),
+        ] {
+            let effects = try MatchEngine.perform(command, on: context, at: date)
+            MatchEngine.apply(effects, to: &context)
+            date = date.addingTimeInterval(1)
+        }
+        let matchID = try await store.importMatch(context, teamID: teamA, seasonID: seasonA)
+        let eventID = try #require(
+            context.events.first { if case .shot = $0.payload { true } else { false } }?.id)
+
+        #expect(try await store.locateEvent(eventID, inTeam: teamA) == matchID)
+        // Unknown events and other teams' events never resolve here.
+        #expect(
+            try await store.locateEvent(EventID(ProgrammeSample.id("event.unknown")), inTeam: teamA)
+                == nil)
+        #expect(try await store.locateEvent(eventID, inTeam: teamB) == nil)
+    }
+}
