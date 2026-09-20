@@ -647,7 +647,9 @@ struct LiveMatchView: View {
     private func handle(action: PaletteAction) {
         switch action.id {
         case "save":
-            session.recordSave()
+            recordShot(
+                ShotEvent(side: .opponent, shooter: .untracked, outcome: .saved),
+                side: .opponent)
             session.armedPlayer = nil
         default:
             guard let pending = action.pending else { return }
@@ -660,13 +662,9 @@ struct LiveMatchView: View {
         case .pending(let action):
             begin(action)
         case .opponentPenalty:
-            session.run(
-                .recordShot(
-                    ShotEvent(
-                        side: .opponent, shooter: .untracked, outcome: .goal, phase: .penaltyKick)),
-                feedback: .goal)
+            recordGoal(shooter: .untracked, phase: .penaltyKick, side: .opponent)
         case .opponentCard:
-            session.run(.recordCard(CardEvent(side: .opponent, player: .untracked, card: .yellow)))
+            complete(.card(.yellow), side: .opponent, with: .untracked)
         case .addNote:
             isAddingNote = true
         }
@@ -748,7 +746,9 @@ struct LiveMatchView: View {
         case .goal: begin(.goal(.openPlay))
         case .shot: begin(.shotAttempt(.openPlay))
         case .save:
-            session.recordSave()
+            recordShot(
+                ShotEvent(side: .opponent, shooter: .untracked, outcome: .saved),
+                side: .opponent)
             session.armedPlayer = nil
         case .corner: begin(.corner)
         case .substitution: beginSubstitution()
