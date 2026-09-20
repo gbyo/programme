@@ -13,6 +13,7 @@ struct FinalizeView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var isConfirming = false
+    @AppStorage("confirmBeforeFinalizing") private var confirmBeforeFinalizing = true
 
     var body: some View {
         List {
@@ -80,7 +81,11 @@ struct FinalizeView: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Finalize") {
-                    isConfirming = true
+                    if confirmBeforeFinalizing {
+                        isConfirming = true
+                    } else {
+                        performFinalization()
+                    }
                 }
                 .programmeConfirmationTint()
                 .disabled(!blockingIssues.isEmpty)
@@ -91,14 +96,21 @@ struct FinalizeView: View {
             "Finalize this match?", isPresented: $isConfirming, titleVisibility: .visible
         ) {
             Button("Finalize") {
-                session.finalize()
-                onFinalized()
+                performFinalization()
             }
         } message: {
             Text(
                 "The match becomes read-only for everyday use. You can still reopen it later to make a correction, and Programme records that as a revision."
             )
         }
+    }
+
+    /// The one finalization path: the confirmation preference decides
+    /// whether this runs immediately or after the native dialog, never
+    /// what it does.
+    private func performFinalization() {
+        session.finalize()
+        onFinalized()
     }
 
     private var matchSummary: some View {
