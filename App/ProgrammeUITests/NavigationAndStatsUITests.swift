@@ -205,6 +205,45 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Sidebar team menu")
     }
 
+    /// Switching teams keeps the shell — same section, same sidebar — while
+    /// team-scoped state goes away: pushed destinations clear and no Team A
+    /// content lingers under Team B. This is what the old whole-TabView
+    /// identity reset used to do by brute force.
+    func testSwitchingTeamsKeepsSectionAndClearsTeamContent() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "The sidebar team menu only exists in a regular-width sidebar.")
+        let app = launch()
+        waitForHome(app)
+        createTeam(app, name: "JV Test Team", shortName: "JV Test")
+        element(app, "sidebar.teamSwitcher").tap()
+        tapTeamMenuEntry(app, "Ninety Six Boys Soccer")
+
+        openSection(app, "Matches")
+        element(app, "match.Emerald").tap()
+        XCTAssertTrue(
+            app.staticTexts["Box Score"].waitForExistence(timeout: 10),
+            "Match detail did not open")
+
+        element(app, "sidebar.teamSwitcher").tap()
+        tapTeamMenuEntry(app, "JV Test Team")
+
+        // Same section, back at its root: the detail is gone.
+        XCTAssertTrue(
+            app.navigationBars["Matches"].waitForExistence(timeout: 10),
+            "Switching teams left the Matches section")
+        XCTAssertFalse(
+            app.staticTexts["Box Score"].exists,
+            "Team A's pushed match detail survived the team switch")
+        // No stale Team A content: the new team has no matches at all.
+        XCTAssertFalse(
+            element(app, "match.Emerald").exists,
+            "Team A's match still shows under Team B")
+        XCTAssertTrue(
+            app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
+            "Team B's empty Matches did not load after the switch")
+    }
+
     /// Universal search is a pull-down field on Matches — not a tab — and
     /// finds a match by opponent in both scopes before opening its detail.
     func testUniversalSearchFindsMatchAndOpensDetail() throws {
