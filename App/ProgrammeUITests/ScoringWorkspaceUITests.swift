@@ -123,7 +123,7 @@ final class ScoringWorkspaceUITests: ProgrammeUITestCase {
         waitForScorer(app)
 
         // The sample live match opens with the clock running.
-        element(app, "palette.sog").tap()
+        element(app, "palette.shot").tap()
         XCTAssertTrue(element(app, "pick.wide.Player Unknown").waitForExistence(timeout: 5))
 
         XCTAssertFalse(

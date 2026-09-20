@@ -19,11 +19,14 @@ enum ComposerStep: Equatable {
     /// there is no event to record.
     case choosePlayer(PlayerPrompt)
 
-    /// A penalty has a taker but no outcome yet. The outcome is a primary fact,
-    /// not enrichment: a penalty attempt with an unknown outcome would be a
-    /// score that might or might not have happened, so nothing is recorded until
-    /// the scorer answers.
-    case penaltyOutcome(taker: PlayerRef)
+    /// A shot has a shooter but no outcome yet. The outcome is a primary fact,
+    /// not enrichment: a shot whose outcome is unknown may or may not have been
+    /// a goal, so nothing is recorded until the scorer answers.
+    ///
+    /// One step serves an open-play shot and a penalty kick. The question is the
+    /// same — *what happened?* — and only the honest set of answers differs,
+    /// which is what `ShotOutcomeContext` carries.
+    case shotOutcome(shooter: PlayerRef, side: TeamSide, context: ShotOutcomeContext)
 
     /// The goal is **already recorded** with an unresolved assist. This step
     /// revises it.
@@ -42,7 +45,7 @@ enum ComposerStep: Equatable {
     var isSafeToAbandon: Bool {
         switch self {
         case .assist, .shotLocation, .substitution: true
-        case .choosePlayer, .penaltyOutcome: false
+        case .choosePlayer, .shotOutcome: false
         }
     }
 
@@ -60,7 +63,7 @@ enum ComposerStep: Equatable {
     var title: String {
         switch self {
         case .choosePlayer(let prompt): prompt.title
-        case .penaltyOutcome: "What happened?"
+        case .shotOutcome: "What happened?"
         case .assist: "Who assisted?"
         case .shotLocation: "Where was it struck?"
         case .substitution: "Substitution"
@@ -87,10 +90,26 @@ struct EventComposer: Equatable {
 /// An action waiting for the player it belongs to.
 enum PendingAction: Equatable {
     case goal(PlayPhase)
+
+    /// A shot whose outcome the scorer has not stated yet.
+    ///
+    /// This is what tapping **Shot** means. Programme knows an attempt is being
+    /// recorded and still needs the shooter, the outcome, or both; it does not
+    /// know that the ball missed. Nothing reaches the event log until both
+    /// facts exist.
+    ///
+    /// A penalty kick is the same intent with a different phase, which is why
+    /// there is no separate penalty case: *who took it → what happened* is one
+    /// flow, and the phase decides the wording and which outcomes are offered.
+    case shotAttempt(PlayPhase)
+
+    /// A shot whose outcome is already settled by the action that started it.
+    ///
+    /// The opponent's one-tap Shot in Our Team mode is the only thing that
+    /// produces one — see `LiveMatchView.handleOpponent`, which explains why
+    /// that tap stays a single tap.
     case shot(ShotOutcome)
-    /// A penalty *attempt*. The outcome is not known until the scorer says so,
-    /// so this never implies a goal.
-    case penaltyAttempt
+
     case corner
     case steal
     case foul
@@ -101,10 +120,9 @@ enum PendingAction: Equatable {
 
     var title: String {
         switch self {
-        case .penaltyAttempt: "Who took the penalty?"
         case .goal: "Who scored?"
-        case .shot(.saved): "Who took the shot?"
-        case .shot: "Who took the shot?"
+        case .shotAttempt(.penaltyKick): "Who took the penalty?"
+        case .shotAttempt, .shot: "Who took the shot?"
         case .corner: "Who took the corner?"
         case .steal: "Who won the ball?"
         case .foul: "Who committed the foul?"
@@ -129,7 +147,7 @@ enum PendingAction: Equatable {
     var attributionCategory: AttributionCategory {
         switch self {
         case .goal, .shot: .shot
-        case .penaltyAttempt: .penaltyKick
+        case .shotAttempt(let phase): phase == .penaltyKick ? .penaltyKick : .shot
         case .ownGoal: .ownGoal
         case .corner: .corner
         case .steal: .steal
@@ -139,6 +157,81 @@ enum PendingAction: Equatable {
         case .goalkeeper: .goalkeeperChange
         }
     }
+}
+
+/// Which kind of shot the outcome question is being asked about.
+///
+/// Programme asks one question of every unresolved shot — *what happened?* — and
+/// the only thing that varies is the honest set of answers. Nobody blocks a
+/// penalty kick before it reaches the keeper, and a penalty that misses the frame
+/// is "missed" rather than "off target". Carrying that as a case here is what
+/// lets open play and penalties share a single outcome stage instead of two views
+/// drifting apart with duplicated strings.
+enum ShotOutcomeContext: Equatable {
+    case openPlay
+    case penaltyKick
+
+    init(phase: PlayPhase) {
+        self = phase == .penaltyKick ? .penaltyKick : .openPlay
+    }
+
+    /// The phase the resulting `ShotEvent` is recorded with.
+    var phase: PlayPhase {
+        switch self {
+        case .openPlay: .openPlay
+        case .penaltyKick: .penaltyKick
+        }
+    }
+
+    /// What the stage says it is asking about, beside the shooter's name.
+    var label: String {
+        switch self {
+        case .openPlay: "Shot"
+        case .penaltyKick: "Penalty kick"
+        }
+    }
+
+    /// The outcomes worth offering, in the order they are offered. Goal is first
+    /// because it is the one the scorer is most likely to be reaching for in a
+    /// hurry, not because it is the default — there is no default.
+    var choices: [ShotOutcomeChoice] {
+        switch self {
+        case .openPlay:
+            [
+                ShotOutcomeChoice(.goal, "Goal", "soccerball.inverse"),
+                ShotOutcomeChoice(.saved, "Saved", "hand.raised.fill"),
+                ShotOutcomeChoice(.offTarget, "Off Target", "arrow.up.forward"),
+                ShotOutcomeChoice(.blocked, "Blocked", "shield"),
+                ShotOutcomeChoice(.woodwork, "Post or Crossbar", "diamond"),
+            ]
+        case .penaltyKick:
+            // Deliberately no Blocked: a penalty is struck with every outfield
+            // player behind the ball, so there is nobody there to block it.
+            [
+                ShotOutcomeChoice(.goal, "Goal", "soccerball.inverse"),
+                ShotOutcomeChoice(.saved, "Saved", "hand.raised.fill"),
+                ShotOutcomeChoice(.offTarget, "Missed", "arrow.up.forward"),
+                ShotOutcomeChoice(.woodwork, "Post or Crossbar", "diamond"),
+            ]
+        }
+    }
+}
+
+/// One answer to *what happened?*: a domain `ShotOutcome` plus the words and
+/// symbol Programme uses for it in this context.
+struct ShotOutcomeChoice: Identifiable, Equatable {
+    let outcome: ShotOutcome
+    let title: String
+    let symbolName: String
+
+    init(_ outcome: ShotOutcome, _ title: String, _ symbolName: String) {
+        self.outcome = outcome
+        self.title = title
+        self.symbolName = symbolName
+    }
+
+    var id: String { outcome.rawValue }
+    var isGoal: Bool { outcome.isGoal }
 }
 
 struct PlayerPrompt: Equatable, Identifiable {

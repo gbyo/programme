@@ -284,3 +284,101 @@ struct ShotLocationStage: View {
         .sensoryFeedback(.selection, trigger: location)
     }
 }
+
+/// *What happened?* — the outcome of a shot whose shooter is known and whose
+/// result is not.
+///
+/// Programme asks rather than assuming. A shot is an attempt, and a saved one is
+/// not a goal that failed to appear; the wording and the state stay neutral until
+/// the scorer answers. Nothing has been recorded when this appears, because an
+/// outcome is a primary fact rather than enrichment — which is also why Cancel is
+/// "Cancel" here and "Not now" on the stages that revise an existing event.
+///
+/// One view serves an open-play shot and a penalty kick. `ShotOutcomeContext`
+/// supplies the context line and the answers; nothing about the layout or the
+/// behaviour differs between them, which is the whole point of it being one view.
+struct ShotOutcomeStage: View {
+    let shooterName: String
+    let context: ShotOutcomeContext
+    var onPick: (ShotOutcome) -> Void
+    var onCancel: () -> Void
+
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @ScaledMetric(relativeTo: .title3) private var outcomeHeight: CGFloat = 66
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What happened?")
+                        .font(.title3.weight(.semibold))
+                    Text("\(context.label) · \(shooterName)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                // One heading that says both what is being asked and what it is
+                // about, so VoiceOver does not read the question without the
+                // shooter it belongs to.
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("outcome.prompt")
+                Spacer()
+                Button("Cancel") { onCancel() }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("outcome.cancel")
+                    .accessibilityHint("Discards this attempt. Nothing has been recorded yet.")
+            }
+
+            // Deliberately no default and no Return shortcut. There is no safe
+            // guess about what happened to a shot, and the distance between two
+            // of these answers is a goal.
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(context.choices) { choice in
+                        outcomeButton(choice)
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .padding(16)
+    }
+
+    @ViewBuilder
+    private func outcomeButton(_ choice: ShotOutcomeChoice) -> some View {
+        let button = Button {
+            onPick(choice.outcome)
+        } label: {
+            Label(choice.title, systemImage: choice.symbolName)
+                .font(.title3.weight(.semibold))
+                .frame(minHeight: outcomeHeight)
+        }
+        .buttonSizing(.flexible)
+        .accessibilityIdentifier("outcome.\(choice.outcome.rawValue)")
+        .accessibilityLabel(choice.title)
+        .accessibilityHint(
+            choice.isGoal
+                ? "Records the goal and updates the score." : "Records the shot.")
+
+        // Goal is the filled control among bordered ones and the only one
+        // carrying a ball, so it is distinguishable by shape and by label rather
+        // than by colour. When the system asks us not to lean on colour, the
+        // brand tint goes and the fill stays.
+        if choice.isGoal {
+            if differentiateWithoutColor {
+                button
+                    .buttonStyle(.borderedProminent)
+                    .tint(.secondary)
+                    .buttonBorderShape(.roundedRectangle(radius: 14))
+            } else {
+                button
+                    .programmePrimaryAction()
+                    .buttonBorderShape(.roundedRectangle(radius: 14))
+            }
+        } else {
+            button.programmeTile(shape: .roundedRectangle(radius: 14))
+        }
+    }
+}

@@ -515,10 +515,13 @@ struct LiveMatchView: View {
                 onCancel: { composer.finish() }
             )
 
-        case .penaltyOutcome(let taker):
-            PenaltyOutcomeStage(
-                takerName: session.context.roster.label(for: taker),
-                onPick: { outcome in recordPenalty(taker: taker, outcome: outcome) },
+        case .shotOutcome(let shooter, let side, let context):
+            ShotOutcomeStage(
+                shooterName: session.context.roster(for: side).label(for: shooter),
+                context: context,
+                onPick: { outcome in
+                    resolve(outcome: outcome, shooter: shooter, side: side, context: context)
+                },
                 onCancel: { composer.finish() }
             )
 
@@ -632,22 +635,37 @@ struct LiveMatchView: View {
     }
 
     private func handleOpponent(_ quick: OpponentQuickAction) {
-        let action: PendingAction =
-            switch quick {
-            case .goal: .goal(.openPlay)
-            case .shot: .shot(.offTarget)
-            case .corner: .corner
-            }
-
         guard session.context.hasStarted else {
             session.show(
                 notice: LiveNotice(text: "The match hasn't kicked off yet.", kind: .warning))
             return
         }
 
-        if session.descriptor.tracking == .bothTeams,
-            !session.context.opponentRoster.players.isEmpty
-        {
+        // Whether the opponent's players are tracked at all decides both how much
+        // Programme may ask and how much it is worth asking.
+        let attributesOpponent =
+            session.descriptor.tracking == .bothTeams
+            && !session.context.opponentRoster.players.isEmpty
+
+        let action: PendingAction =
+            switch quick {
+            case .goal: .goal(.openPlay)
+            // In Our Team mode the opponent's Shot stays a single tap and keeps
+            // the meaning it has always had: off target. An opponent shot that
+            // reached the frame is recorded as our goalkeeper's Save, which is
+            // the faster tap for the same fact and the one the goalkeeping
+            // statistics are derived from. Asking for an outcome here would slow
+            // ordinary tracking down to buy nothing.
+            //
+            // With an opponent roster the scorer is already going through a
+            // player picker, and a shot attributed to an opponent deserves a real
+            // outcome: it is the only way an on-target opponent shot is credited
+            // to the player who took it.
+            case .shot: attributesOpponent ? .shotAttempt(.openPlay) : .shot(.offTarget)
+            case .corner: .corner
+            }
+
+        if attributesOpponent {
             composer.ask(.choosePlayer(PlayerPrompt(action: action, side: .opponent)))
         } else {
             complete(action, side: .opponent, with: .untracked)
@@ -690,8 +708,7 @@ struct LiveMatchView: View {
     private func perform(_ request: LiveActionRequest) {
         switch request.kind {
         case .goal: begin(.goal(.openPlay))
-        case .shotOnGoal: begin(.shot(.saved))
-        case .shot: begin(.shot(.offTarget))
+        case .shot: begin(.shotAttempt(.openPlay))
         case .save:
             session.recordSave()
             session.armedPlayer = nil
@@ -705,14 +722,12 @@ struct LiveMatchView: View {
     /// already exists.
     private func complete(_ action: PendingAction, side: TeamSide = .us, with ref: PlayerRef) {
         switch action {
-        case .penaltyAttempt where side == .us:
-            // The outcome is a primary fact, not enrichment: a penalty whose
+        case .shotAttempt(let phase):
+            // The outcome is a primary fact, not enrichment: a shot whose
             // outcome is unknown is a score that may or may not have happened.
-            composer.ask(.penaltyOutcome(taker: ref))
-
-        case .penaltyAttempt:
-            recordShot(
-                ShotEvent(side: side, shooter: ref, outcome: .goal, phase: .penaltyKick), side: side)
+            // Nothing is recorded until the scorer answers.
+            composer.ask(
+                .shotOutcome(shooter: ref, side: side, context: ShotOutcomeContext(phase: phase)))
 
         case .goal(let phase):
             recordGoal(shooter: ref, phase: phase, side: side)
@@ -752,6 +767,25 @@ struct LiveMatchView: View {
         }
     }
 
+    /// The scorer answered *what happened?*, and there is exactly one path from
+    /// here for each answer.
+    ///
+    /// A goal is a goal however the scorer arrived at it. Choosing Goal here goes
+    /// through the same `recordGoal` the Goal button uses — same event, same
+    /// score, same feedback, same assist handling — rather than appending a
+    /// second kind of goal that happens to look like one.
+    private func resolve(
+        outcome: ShotOutcome, shooter: PlayerRef, side: TeamSide, context: ShotOutcomeContext
+    ) {
+        guard outcome.isGoal else {
+            recordShot(
+                ShotEvent(side: side, shooter: shooter, outcome: outcome, phase: context.phase),
+                side: side)
+            return
+        }
+        recordGoal(shooter: shooter, phase: context.phase, side: side)
+    }
+
     /// A goal is a goal the moment the scorer says so.
     ///
     /// The event is written, the score moves, the journal is flushed and the goal
@@ -759,8 +793,10 @@ struct LiveMatchView: View {
     /// recorded as unresolved so that walking away leaves a correct goal and one
     /// Review item, rather than no goal at all.
     private func recordGoal(shooter: PlayerRef, phase: PlayPhase, side: TeamSide) {
+        // A penalty goal is never assisted, so Programme does not ask.
         let asksAssist =
-            session.profile.prompts.assistOnGoal
+            phase != .penaltyKick
+            && session.profile.prompts.assistOnGoal
             && (side == .us || !session.candidates(for: .assist, side: side).isEmpty)
 
         let shot = ShotEvent(
@@ -776,7 +812,9 @@ struct LiveMatchView: View {
         }
 
         guard asksAssist else {
-            composer.finish()
+            // Nothing to attribute, so the optional map is the only thing left
+            // worth offering — the same enrichment every other shot gets.
+            offerShotLocation(for: shot, id: goalID, side: side)
             return
         }
         composer.ask(
@@ -793,21 +831,21 @@ struct LiveMatchView: View {
             composer.finish()
             return
         }
+        offerShotLocation(for: shot, id: shotID, side: side)
+    }
+
+    /// Optional enrichment on an event that already exists, offered on the same
+    /// terms whatever the outcome was. Walking away leaves the shot recorded.
+    private func offerShotLocation(for shot: ShotEvent, id: EventID, side: TeamSide) {
         guard session.profile.prompts.shotLocation, side == .us else {
             composer.finish()
             return
         }
         composer.ask(
             .shotLocation(
-                shot: shotID,
+                shot: id,
                 shooterName: session.context.roster(for: side).label(for: shot.shooter),
                 outcome: shot.outcome))
-    }
-
-    private func recordPenalty(taker: PlayerRef, outcome: ShotOutcome) {
-        // A penalty goal is never assisted, so there is no assist question here.
-        recordShot(
-            ShotEvent(side: .us, shooter: taker, outcome: outcome, phase: .penaltyKick), side: .us)
     }
 
     private func startPeriod() {
@@ -957,67 +995,5 @@ struct IdleWorkspace: View {
             )
         }
         .frame(maxWidth: 420)
-    }
-}
-
-/// A penalty attempt, after the taker is known.
-///
-/// Programme asks *what happened* rather than assuming a goal: a penalty is an
-/// attempt, and a saved one is not a goal that failed to appear. The wording and
-/// the state stay neutral until the scorer answers, and nothing is recorded until
-/// then either — an outcome is a primary fact, not enrichment.
-struct PenaltyOutcomeStage: View {
-    let takerName: String
-    var onPick: (ShotOutcome) -> Void
-    var onCancel: () -> Void
-
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("What happened?")
-                        .font(.title3.weight(.semibold))
-                    Text("Penalty kick · \(takerName)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Cancel") { onCancel() }
-                    .buttonStyle(.bordered)
-                    .keyboardShortcut(.escape, modifiers: [])
-            }
-
-            VStack(spacing: 10) {
-                outcomeButton("Goal", "soccerball.inverse", .goal, isGoal: true)
-                outcomeButton("Saved", "hand.raised.fill", .saved, isGoal: false)
-                outcomeButton("Missed", "arrow.up.forward", .offTarget, isGoal: false)
-                outcomeButton("Post or Crossbar", "diamond", .woodwork, isGoal: false)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-    }
-
-    @ViewBuilder
-    private func outcomeButton(
-        _ title: String, _ symbol: String, _ outcome: ShotOutcome, isGoal: Bool
-    ) -> some View {
-        let button = Button {
-            onPick(outcome)
-        } label: {
-            Label(title, systemImage: symbol)
-                .font(.title3.weight(.semibold))
-                .frame(minHeight: 66)
-        }
-        .buttonSizing(.flexible)
-        .accessibilityIdentifier("penalty.\(outcome.rawValue)")
-
-        if isGoal {
-            button
-                .programmePrimaryAction()
-                .buttonBorderShape(.roundedRectangle(radius: 14))
-        } else {
-            button.programmeTile(shape: .roundedRectangle(radius: 14))
-        }
     }
 }

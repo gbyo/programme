@@ -602,10 +602,14 @@ final class LiveMatchSession {
 /// A live action asked for from the menu bar rather than from the palette.
 /// Carrying an identity means asking for the same action twice in a row still
 /// registers as two requests.
+///
+/// There is one kind per palette action and no more: a keyboard shortcut is an
+/// accelerator for a command the interface already has, not a second command
+/// with its own meaning. `shot` enters the same unresolved-shot workflow that
+/// tapping Shot does, outcome question included.
 struct LiveActionRequest: Equatable, Identifiable {
     enum Kind: Equatable {
         case goal
-        case shotOnGoal
         case shot
         case save
         case corner

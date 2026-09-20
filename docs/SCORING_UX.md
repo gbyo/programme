@@ -39,9 +39,9 @@ The primary event palette does not reorder itself based on usage. Muscle memory 
 
 Frequency is expressed *statically*, in size and position, never in ordering:
 
-- **Primary block** — Goal, Shot on Goal, Shot, Save, as a large 2×2 grid. These are almost every event in a match.
+- **Primary block** — Goal, Shot, Save. Goal spans the first row; Shot and Save share the second. Shot asks for its outcome instead of encoding one in the action itself.
 - **Secondary block** — Corner, Steal, Penalty Kick, Yellow, Red, More. Shorter tiles, still well past a 44pt target.
-- **Pinned opponent bar** — the opponent's Goal / Shot / Corner, below the palette's scroll view and never below the fold. An opponent shot is how our goalkeeper's shots-faced and save percentage are recorded.
+- **Pinned opponent bar** — the opponent's Goal / Shot / Corner, below the palette's scroll view and never below the fold.
 
 Against a bottom bar, do **not** leave the lineup's `scrollEdgeEffectStyle` at `.automatic`. It resolves to a hard edge effect whose view sits over the last ~114pt of the list and swallows touches — the bottom rows look tappable, report as hittable, and do nothing. The lineup is half of the scorer's two-tap path, so that is fatal. `.soft` gives the same fade with no interactive overlay, and is set explicitly for that reason.
 
@@ -157,7 +157,9 @@ Short secondary tasks may still use appropriate native sheets/popovers/inspector
 
 ## Shots and goals
 
-A shot workflow records the shooter and outcome. A goal is one shot outcome; it must not require separately incrementing Shot, SOG, and Goal.
+A shot workflow records the shooter and outcome. There is one ordinary Shot action, followed by the neutral question *what happened?* with Goal / Saved / Off Target / Blocked / Post or Crossbar. The scorer can use either *player → Shot → outcome* or *Shot → player → outcome*. No shot event is written until both the shooter and outcome are known.
+
+Goal remains a primary fast path, but Goal selected from the Shot outcome stage uses the same goal-recording path, including score feedback and assist handling. Save also remains primary because it records our goalkeeper stopping an opponent shot; that is a different observation from recording one of our attacking shots.
 
 Typical outcomes include off target, blocked, woodwork, saved, and goal.
 
@@ -167,13 +169,15 @@ Goal attribution should make scorer and assist selection fast. Most goals are un
 
 A penalty is an **attempt**, not a goal that has yet to be confirmed. The flow is *who took it* → *what happened* (Goal / Saved / Missed / Post or Crossbar), and neither the wording nor the state implies a goal until the outcome is chosen. A penalty goal is never assisted, so Programme does not ask.
 
-Secondary event selection (blocked, woodwork, second yellow, foul, offside, own goal, change goalkeeper) is a native `Menu`, not a sheet. Choosing one drops straight into the centre stage that asks who it belonged to. A sheet is only correct when the task genuinely deserves its own workspace — the lineup, the clock correction, finalization.
+Secondary event selection (second yellow, foul, offside, own goal, change goalkeeper) is a native `Menu`, not a sheet. Blocked and woodwork belong to Shot's outcome stage rather than More. Choosing a secondary event drops straight into the centre stage that asks who it belonged to. A sheet is only correct when the task genuinely deserves its own workspace — the lineup, the clock correction, finalization.
 
 ## Opponent events
 
 In **Our Team** mode, opponent actions should capture only what Programme needs to derive our team's official statistics. Do not force player attribution Programme does not need.
 
-In **Both Teams** mode, the same event engine accepts an opponent roster and full attribution.
+The pinned opponent Shot stays the existing one-tap off-target team attempt in this mode. An on-target opponent attempt stopped by our goalkeeper is entered with the primary Save action, which keeps that common goalkeeper observation to one tap.
+
+In **Both Teams** mode, the same event engine accepts an opponent roster and full attribution. Because opponent Shot already proceeds through that roster picker, it also uses the shared outcome stage so the attributed opponent attempt can be recorded accurately.
 
 Do not build separate stat logic for the two modes.
 
@@ -303,8 +307,7 @@ Every live shortcut is declared **once**, in `ProgrammeCommands`, so the system'
 | --- | --- |
 | `space` | start/stop the clock |
 | `g` | goal |
-| `s` | shot on goal |
-| `h` | shot |
+| `s` | shot |
 | `v` | save |
 | `c` | corner |
 | `b` | substitution |
