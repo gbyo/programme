@@ -43,6 +43,8 @@ struct RootView: View {
         }
         .sheet(isPresented: $navigation.isPresentingSettings) {
             SettingsView()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $navigation.isPresentingManageTeams) {
             NavigationStack { ManageTeamsView(presentation: .sheet) }

@@ -167,7 +167,7 @@ struct EventLogRow: View {
                 .frame(width: 52, alignment: .trailing)
 
             Image(systemName: description.symbolName)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .frame(width: 20)
                 .foregroundStyle(
                     description.category == .goal && !differentiateWithoutColor
