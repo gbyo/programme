@@ -41,7 +41,7 @@ final class UniversalSearchModel {
     struct ScopedSeason: Identifiable {
         let teamID: TeamID
         let teamShortName: String
-        let season: SeasonListItem
+        let season: SeasonIdentity
         var id: SeasonID { season.id }
     }
 
@@ -95,7 +95,7 @@ final class UniversalSearchModel {
                     teamID: teamID, teamShortName: teamNames[teamID] ?? "",
                     player: $0)
             }
-            let teamSeasons = (try? await store.seasons(teamID: teamID)) ?? []
+            let teamSeasons = (try? await store.seasonIdentities(teamID: teamID)) ?? []
             loadedSeasons += teamSeasons.map {
                 ScopedSeason(
                     teamID: teamID, teamShortName: teamNames[teamID] ?? "",
@@ -173,6 +173,9 @@ final class UniversalSearchModel {
 /// universe.
 struct UniversalSearchResults: View {
     @Bindable var search: UniversalSearchModel
+    /// The owning section: search acts on its content, so the results keep
+    /// its navigation title instead of renaming the destination "Search".
+    let section: AppSection
 
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismissSearch) private var dismissSearch
@@ -218,7 +221,7 @@ struct UniversalSearchResults: View {
             }
         }
         .listStyle(.insetGrouped)
-        .teamWorkspaceTitle("Search")
+        .teamWorkspaceTitle(section.rootTitle)
         .task(id: reloadKey) {
             guard let store = appModel.store else { return }
             await search.reload(store: store, selectedTeamID: selectedTeamID)
