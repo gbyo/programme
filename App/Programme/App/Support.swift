@@ -9,8 +9,26 @@ import WidgetKit
     import UIKit
 #endif
 
-/// Short, physical confirmation that an event landed. A scorer who is looking at
-/// the pitch needs to feel that the tap registered.
+/// One global preference for Programme-added haptics.
+///
+/// System controls such as switches and pickers may still provide their own
+/// platform feedback. This key governs feedback Programme explicitly adds to
+/// custom interactions and completed operations.
+enum HapticPreferences {
+    static let key = "hapticFeedbackEnabled"
+
+    static var isEnabled: Bool {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+}
+
+/// Short, semantic physical confirmation for Programme-owned interactions.
+///
+/// View-local state changes should prefer SwiftUI `sensoryFeedback` through
+/// `programmeSensoryFeedback` below. Imperative domain/async operations use
+/// this helper so scoring, creation and failure feedback all respect the same
+/// setting.
 @MainActor
 enum Haptics {
     #if canImport(UIKit)
@@ -20,6 +38,7 @@ enum Haptics {
     #endif
 
     static func prepare() {
+        guard HapticPreferences.isEnabled else { return }
         #if canImport(UIKit)
             impact.prepare()
             selection.prepare()
@@ -28,6 +47,7 @@ enum Haptics {
 
     /// An event was recorded.
     static func recorded() {
+        guard HapticPreferences.isEnabled else { return }
         #if canImport(UIKit)
             impact.impactOccurred(intensity: 0.7)
         #endif
@@ -36,27 +56,95 @@ enum Haptics {
     /// A goal. Noticeably stronger, but still momentary — never a celebration
     /// that gets in the way of the next event.
     static func goal() {
+        guard HapticPreferences.isEnabled else { return }
         #if canImport(UIKit)
             notification.notificationOccurred(.success)
         #endif
     }
 
     static func selectionChanged() {
+        guard HapticPreferences.isEnabled else { return }
         #if canImport(UIKit)
             selection.selectionChanged()
         #endif
     }
 
     static func undone() {
+        guard HapticPreferences.isEnabled else { return }
         #if canImport(UIKit)
             impact.impactOccurred(intensity: 0.45)
         #endif
     }
 
     static func rejected() {
+        guard HapticPreferences.isEnabled else { return }
         #if canImport(UIKit)
             notification.notificationOccurred(.warning)
         #endif
+    }
+
+    /// A user-requested operation completed successfully.
+    static func success() {
+        guard HapticPreferences.isEnabled else { return }
+        #if canImport(UIKit)
+            notification.notificationOccurred(.success)
+        #endif
+    }
+
+    /// A user-requested operation failed and the interface is showing the error.
+    static func error() {
+        guard HapticPreferences.isEnabled else { return }
+        #if canImport(UIKit)
+            notification.notificationOccurred(.error)
+        #endif
+    }
+}
+
+private struct ProgrammeHapticsEnabledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var programmeHapticsEnabled: Bool {
+        get { self[ProgrammeHapticsEnabledKey.self] }
+        set { self[ProgrammeHapticsEnabledKey.self] = newValue }
+    }
+}
+
+private struct ProgrammeSensoryFeedbackModifier<Trigger: Equatable>: ViewModifier {
+    @Environment(\.programmeHapticsEnabled) private var hapticsEnabled
+
+    let feedback: SensoryFeedback
+    let trigger: Trigger
+    let condition: ((Trigger, Trigger) -> Bool)?
+
+    func body(content: Content) -> some View {
+        content.sensoryFeedback(feedback, trigger: trigger) { oldValue, newValue in
+            hapticsEnabled && (condition?(oldValue, newValue) ?? true)
+        }
+    }
+}
+
+extension View {
+    /// Programme-owned semantic feedback that obeys the app's Haptic Feedback
+    /// setting. Native controls keep their own system-provided feedback.
+    func programmeSensoryFeedback<Trigger: Equatable>(
+        _ feedback: SensoryFeedback,
+        trigger: Trigger
+    ) -> some View {
+        modifier(
+            ProgrammeSensoryFeedbackModifier(
+                feedback: feedback, trigger: trigger, condition: nil))
+    }
+
+    func programmeSensoryFeedback<Trigger: Equatable>(
+        _ feedback: SensoryFeedback,
+        trigger: Trigger,
+        condition: @escaping (Trigger, Trigger) -> Bool
+    ) -> some View {
+        modifier(
+            ProgrammeSensoryFeedbackModifier(
+                feedback: feedback, trigger: trigger, condition: condition))
     }
 }
 
