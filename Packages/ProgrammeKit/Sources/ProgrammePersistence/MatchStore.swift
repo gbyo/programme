@@ -560,6 +560,33 @@ public actor MatchStore {
         SeasonEngine.aggregate(try seasonSummaries(teamID: teamID, seasonID: seasonID))
     }
 
+    /// W-L-D record text without deriving a single player total.
+    ///
+    /// Counts the cached results of finalized matches only — the same
+    /// population and the same win/loss/draw rule as
+    /// `SeasonEngine.aggregate` — but never decodes an event or runs
+    /// `StatEngine.snapshot`. The cache is written from each match's final
+    /// snapshot, so this agrees with `seasonStats(...).recordText` while
+    /// staying proportional to the match count. For call sites (widget,
+    /// Watch) that only render the record string.
+    public func seasonRecord(teamID: TeamID, seasonID: SeasonID?) throws -> String {
+        let models = try modelContext.fetch(FetchDescriptor<MatchModel>())
+        var wins = 0
+        var losses = 0
+        var draws = 0
+        for model in models where model.teamIdentifier == teamID.rawValue {
+            if let seasonID, model.season?.identifier != seasonID.rawValue { continue }
+            guard model.phase == .finalized else { continue }
+            switch model.result {
+            case .win: wins += 1
+            case .loss: losses += 1
+            case .draw: draws += 1
+            case nil: break
+            }
+        }
+        return "\(wins)-\(losses)-\(draws)"
+    }
+
     /// Snapshot a single match without keeping the model around.
     public func snapshot(for matchID: MatchID) throws -> MatchSnapshot {
         StatEngine.snapshot(context: try context(for: matchID))

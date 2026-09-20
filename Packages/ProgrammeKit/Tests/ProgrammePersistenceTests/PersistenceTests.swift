@@ -722,3 +722,117 @@ struct MatchReminderPreferenceTests {
         #expect(try await store.reminderMinutesBefore(for: item.id) == nil)
     }
 }
+
+@Suite("Season record text projects cached results without deriving totals")
+struct SeasonRecordProjectionTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makeTeamAndRoster(_ store: MatchStore) async throws -> (TeamID, RosterSnapshot) {
+        let teamID = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        try await store.addPlayers(teamID: teamID, ProgrammeSample.roster.players)
+        return (teamID, try await store.roster(teamID: teamID))
+    }
+
+    private func play(_ command: MatchCommand, on context: inout MatchContext, date: inout Date)
+        throws
+    {
+        let effects = try MatchEngine.perform(command, on: context, at: date)
+        MatchEngine.apply(effects, to: &context)
+        date = date.addingTimeInterval(1)
+    }
+
+    /// Plays a match to the given score and imports it into `seasonID`,
+    /// finalizing unless asked not to (a live match must not count).
+    private func importMatch(
+        _ store: MatchStore, teamID: TeamID, seasonID: SeasonID?, seed: String, ourGoals: Int,
+        opponentGoals: Int, finalize: Bool = true
+    ) async throws {
+        var context = MatchContext(
+            descriptor: ProgrammeSample.descriptor(seed: seed), roster: ProgrammeSample.roster)
+        var date = Date(timeIntervalSince1970: 1_800_000_000)
+        try play(
+            .setLineup(
+                LineupEvent(
+                    side: .us, onField: ProgrammeSample.startingEleven,
+                    goalkeeper: ProgrammeSample.keeper)), on: &context, date: &date)
+        try play(.startNextPeriod, on: &context, date: &date)
+        for _ in 0..<ourGoals {
+            try play(
+                .recordShot(
+                    ShotEvent(
+                        side: .us, shooter: .player(ProgrammeSample.carter), outcome: .goal)),
+                on: &context, date: &date)
+        }
+        for _ in 0..<opponentGoals {
+            try play(
+                .recordShot(ShotEvent(side: .opponent, shooter: .untracked, outcome: .goal)),
+                on: &context, date: &date)
+        }
+        if finalize {
+            try play(.finalize, on: &context, date: &date)
+        }
+        _ = try await store.importMatch(context, teamID: teamID, seasonID: seasonID)
+    }
+
+    @Test("Record projection matches the derived season record for wins, losses, and draws")
+    func recordMatchesDerivedSeasonRecord() async throws {
+        let store = try makeStore()
+        let (teamID, _) = try await makeTeamAndRoster(store)
+        let seasonID = try await store.createSeason(
+            teamID: teamID, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.win", ourGoals: 2,
+            opponentGoals: 1)
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.loss", ourGoals: 0,
+            opponentGoals: 1)
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.draw", ourGoals: 1,
+            opponentGoals: 1)
+        // Still live: counted by neither path.
+        try await importMatch(
+            store, teamID: teamID, seasonID: seasonID, seed: "record.live", ourGoals: 3,
+            opponentGoals: 0, finalize: false)
+
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: seasonID) == "1-1-1")
+        #expect(
+            try await store.seasonRecord(teamID: teamID, seasonID: seasonID)
+                == store.seasonStats(teamID: teamID, seasonID: seasonID).recordText)
+    }
+
+    @Test("Record projection respects season scope and starts at zero")
+    func recordRespectsSeasonScope() async throws {
+        let store = try makeStore()
+        let (teamID, _) = try await makeTeamAndRoster(store)
+        let firstID = try await store.createSeason(
+            teamID: teamID, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        let secondID = try await store.createSeason(
+            teamID: teamID, name: "Spring", startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: nil, makeCurrent: false)
+
+        try await importMatch(
+            store, teamID: teamID, seasonID: firstID, seed: "scope.first", ourGoals: 1,
+            opponentGoals: 0)
+        try await importMatch(
+            store, teamID: teamID, seasonID: secondID, seed: "scope.second", ourGoals: 2,
+            opponentGoals: 0)
+
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: firstID) == "1-0-0")
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: secondID) == "1-0-0")
+        // No season filter aggregates every finalized match, like seasonStats.
+        #expect(try await store.seasonRecord(teamID: teamID, seasonID: nil) == "2-0-0")
+        #expect(
+            try await store.seasonRecord(teamID: teamID, seasonID: nil)
+                == store.seasonStats(teamID: teamID, seasonID: nil).recordText)
+
+        let otherTeamID = try await store.createTeam(name: "Dixie", shortName: nil)
+        #expect(try await store.seasonRecord(teamID: otherTeamID, seasonID: nil) == "0-0-0")
+    }
+}

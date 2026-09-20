@@ -1059,7 +1059,12 @@ final class AppModel {
         let teamName = details?.name ?? workspace.selectedTeam?.name ?? "Programme"
         let teamShort = details?.shortName ?? workspace.selectedTeam?.shortName ?? "Programme"
         let matches = (try? await store.matches(teamID: selectedTeamID, limit: 40)) ?? []
-        let season = try? await store.seasonStats(teamID: selectedTeamID, seasonID: currentSeasonID)
+        // Record text only: a full seasonStats derivation here would rebuild
+        // every finalized match context and re-derive every player total just
+        // to render a W-L-D string.
+        let recordText =
+            (try? await store.seasonRecord(teamID: selectedTeamID, seasonID: currentSeasonID))
+            ?? "0-0-0"
 
         let live: ProgrammeWidgetSnapshot.LiveMatch? = liveSession.map { session in
             ProgrammeWidgetSnapshot.LiveMatch(
@@ -1105,7 +1110,7 @@ final class AppModel {
             + (await syncConflicts(teamID: selectedTeamID).count)
         pushWatchSnapshot(
             teamID: selectedTeamID, teamName: teamName, teamShort: teamShort,
-            recordText: season?.recordText ?? "0-0-0", matches: matches,
+            recordText: recordText, matches: matches,
             reviewCount: reviewCount)
 
         Task { await intentProvider?.reindexSpotlight() }
@@ -1114,7 +1119,7 @@ final class AppModel {
                 teamName: teamName,
                 teamShortName: teamShort,
                 seasonName: nil,
-                recordText: season?.recordText ?? "0-0-0",
+                recordText: recordText,
                 live: live,
                 upcoming: upcoming,
                 recent: Array(recent)))
