@@ -95,7 +95,7 @@ final class IntentNavigationTests: XCTestCase {
 
         harness.provider.presentNewMatch()
 
-        XCTAssertTrue(harness.appModel.navigation.isPresentingNewMatch)
+        XCTAssertEqual(harness.appModel.navigation.presentedSheet, .newMatch)
         // Presenting the composer must not move the workspace.
         XCTAssertEqual(harness.appModel.workspace.selectedTeamID, harness.seed.teamB)
     }

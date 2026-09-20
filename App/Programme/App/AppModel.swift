@@ -822,7 +822,7 @@ final class AppModel {
             navigation.section = .home
             return true
         case "newmatch":
-            navigation.isPresentingNewMatch = true
+            navigation.presentedSheet = .newMatch
             return true
         default:
             return navigation.handle(url: url)

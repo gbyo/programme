@@ -81,7 +81,7 @@ struct MatchesView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("New Match", systemImage: "plus") {
-                    appModel.navigation.isPresentingNewMatch = true
+                    appModel.navigation.presentedSheet = .newMatch
                 }
             }
         }
@@ -92,7 +92,7 @@ struct MatchesView: View {
                 } description: {
                     Text("Create a match to prepare a lineup and start scoring.")
                 } actions: {
-                    Button("Create a Match") { appModel.navigation.isPresentingNewMatch = true }
+                    Button("Create a Match") { appModel.navigation.presentedSheet = .newMatch }
                         .programmePrimaryAction()
                 }
             }

@@ -317,7 +317,7 @@ final class ProgrammeIntentProvider {
     }
 
     func presentNewMatch() {
-        appModel.navigation.isPresentingNewMatch = true
+        appModel.navigation.presentedSheet = .newMatch
     }
 
     func startScoring(matchID: MatchID) async {
@@ -535,7 +535,7 @@ final class ProgrammeIntentProvider {
             [
                 appModel.workspace.selectedTeamID?.rawValue.uuidString ?? "",
                 appModel.navigation.section.rawValue,
-                appModel.navigation.isPresentingNewMatch ? "1" : "0",
+                appModel.navigation.presentedSheet == .newMatch ? "1" : "0",
                 appModel.liveSession?.matchID.rawValue.uuidString ?? "",
             ].joined(separator: "|")
         }

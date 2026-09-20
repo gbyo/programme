@@ -11,7 +11,6 @@ struct RootView: View {
     @Environment(UniversalSearchModel.self) private var search
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(HapticPreferences.key) private var hapticsEnabled = true
-    @State private var isCreatingTeam = false
 
     var body: some View {
         @Bindable var navigation = appModel.navigation
@@ -39,24 +38,8 @@ struct RootView: View {
         } message: { error in
             Text(error.message)
         }
-        .sheet(isPresented: $navigation.isPresentingNewMatch) {
-            if let teamID = appModel.workspace.selectedTeamID {
-                NewMatchView(teamID: teamID)
-            }
-        }
-        .sheet(isPresented: $navigation.isPresentingSettings) {
-            SettingsView()
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $navigation.isPresentingManageTeams) {
-            NavigationStack { ManageTeamsView(presentation: .sheet) }
-        }
-        .sheet(isPresented: $navigation.isPresentingNewTeam) {
-            NavigationStack { TeamSetupView() }
-        }
-        .sheet(isPresented: $isCreatingTeam) {
-            NavigationStack { TeamSetupView(onCreated: nil) }
+        .sheet(item: $navigation.presentedSheet) { sheet in
+            sheetContent(sheet)
         }
         .task(id: navigation.pendingMatchToOpen) {
             guard let matchID = navigation.pendingMatchToOpen else { return }
@@ -65,8 +48,39 @@ struct RootView: View {
         }
     }
 
+    /// Every sheet the shell presents, routed through the single
+    /// `presentedSheet` state. Asking for one sheet while another is up
+    /// swaps content deterministically instead of racing stacked sheets.
+    ///
+    /// Audit note — what stays outside this router and why:
+    /// - Match detail's export and calendar sheets are bound to that match's
+    ///   loaded context; lifting them here would need associated-value cases
+    ///   for presentations that can never usefully swap with app sheets.
+    /// - Settings' season-setup sheet is likewise bound to Settings' context.
+    /// - The scoreboard window is a separate scene with its own hierarchy;
+    ///   one value cannot present across scenes.
+    /// - The error alert above is global app state already, not a second
+    ///   sheet; confirmation dialogs stay call-site-local confirmations.
+    @ViewBuilder
+    private func sheetContent(_ sheet: NavigationModel.AppSheet) -> some View {
+        switch sheet {
+        case .newMatch:
+            if let teamID = appModel.workspace.selectedTeamID {
+                NewMatchView(teamID: teamID)
+            }
+        case .settings:
+            SettingsView()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        case .manageTeams:
+            NavigationStack { ManageTeamsView(presentation: .sheet) }
+        case .newTeam:
+            NavigationStack { TeamSetupView() }
+        }
+    }
+
     private var firstRun: some View {
-        FirstRunView(isCreatingTeam: $isCreatingTeam)
+        FirstRunView()
     }
 
     /// Four fixed sections. Each keeps its own NavigationStack/NavigationPath
@@ -318,10 +332,10 @@ struct TeamSwitcherMenu: View {
         }
         Divider()
         Button("Add Team…", systemImage: "plus") {
-            appModel.navigation.isPresentingNewTeam = true
+            appModel.navigation.presentedSheet = .newTeam
         }
         Button("Manage Teams…", systemImage: "person.3") {
-            appModel.navigation.isPresentingManageTeams = true
+            appModel.navigation.presentedSheet = .manageTeams
         }
         // Settings is application context, not a per-screen action: one
         // separated entry here reaches it from every presentation (sidebar
@@ -329,7 +343,7 @@ struct TeamSwitcherMenu: View {
         // repeated on each destination.
         Divider()
         Button("Settings…", systemImage: "gearshape") {
-            appModel.navigation.isPresentingSettings = true
+            appModel.navigation.presentedSheet = .settings
         }
     }
 }
@@ -342,7 +356,7 @@ struct ProgrammeCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Match…") { appModel.navigation.isPresentingNewMatch = true }
+            Button("New Match…") { appModel.navigation.presentedSheet = .newMatch }
                 .keyboardShortcut("n", modifiers: .command)
         }
         // The conventional search shortcut, routed into the native search
@@ -352,7 +366,7 @@ struct ProgrammeCommands: Commands {
                 .keyboardShortcut("f", modifiers: .command)
         }
         CommandGroup(replacing: .appSettings) {
-            Button("Settings…") { appModel.navigation.isPresentingSettings = true }
+            Button("Settings…") { appModel.navigation.presentedSheet = .settings }
                 .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(replacing: .undoRedo) {
