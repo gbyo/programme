@@ -3,13 +3,14 @@ import Observation
 import ProgrammeCore
 import SwiftUI
 
-/// The four top-level destinations. Team is context, not a destination:
+/// The top-level destinations. Team is context, not a destination:
 /// the selected team scopes what each section shows.
 enum AppSection: String, Hashable, Identifiable, CaseIterable {
     case home
     case matches
     case roster
     case stats
+    case search
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
         case .matches: "Matches"
         case .roster: "Roster"
         case .stats: "Stats"
+        case .search: "Search"
         }
     }
 
@@ -30,6 +32,7 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
         case .matches: "Matches"
         case .roster: "Roster"
         case .stats: "Season Stats"
+        case .search: "Search"
         }
     }
 
@@ -39,6 +42,7 @@ enum AppSection: String, Hashable, Identifiable, CaseIterable {
         case .matches: "calendar"
         case .roster: "person.3"
         case .stats: "chart.bar.xaxis"
+        case .search: "magnifyingglass"
         }
     }
 }
@@ -49,6 +53,9 @@ enum AppRoute: Hashable {
     case player(PlayerID)
     case season(SeasonID?)
     case eventLog(MatchID)
+    /// The review queue for one match: the focused triage screen, not the
+    /// generic detail page. Resolution still runs through the scorer.
+    case review(MatchID)
 }
 
 /// Navigation state: where the user is. Persistence lookups (which team owns
@@ -64,6 +71,7 @@ final class NavigationModel {
     var matchesPath = NavigationPath()
     var rosterPath = NavigationPath()
     var statsPath = NavigationPath()
+    var searchPath = NavigationPath()
 
     /// The live scorer takes over the window rather than living in a tab.
     var isShowingLiveMatch = false
@@ -89,6 +97,7 @@ final class NavigationModel {
         matchesPath = NavigationPath()
         rosterPath = NavigationPath()
         statsPath = NavigationPath()
+        searchPath = NavigationPath()
     }
 
     func open(_ route: AppRoute) {
@@ -110,6 +119,10 @@ final class NavigationModel {
             matchesPath = NavigationPath()
             matchesPath.append(AppRoute.match(id))
             matchesPath.append(AppRoute.eventLog(id))
+        case .review(let id):
+            section = .matches
+            matchesPath = NavigationPath()
+            matchesPath.append(AppRoute.review(id))
         }
     }
 
@@ -119,6 +132,7 @@ final class NavigationModel {
         case .matches: Binding(get: { self.matchesPath }, set: { self.matchesPath = $0 })
         case .roster: Binding(get: { self.rosterPath }, set: { self.rosterPath = $0 })
         case .stats: Binding(get: { self.statsPath }, set: { self.statsPath = $0 })
+        case .search: Binding(get: { self.searchPath }, set: { self.searchPath = $0 })
         }
     }
 
@@ -161,6 +175,7 @@ final class NavigationModel {
         case .player(let id): URL(string: "programme://player/\(id.rawValue.uuidString)")
         case .season: URL(string: "programme://season")
         case .eventLog(let id): URL(string: "programme://match/\(id.rawValue.uuidString)")
+        case .review(let id): URL(string: "programme://review/\(id.rawValue.uuidString)")
         }
     }
 }

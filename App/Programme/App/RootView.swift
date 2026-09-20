@@ -43,6 +43,8 @@ struct RootView: View {
         }
         .sheet(isPresented: $navigation.isPresentingSettings) {
             SettingsView()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $navigation.isPresentingManageTeams) {
             NavigationStack { ManageTeamsView(presentation: .sheet) }
@@ -64,7 +66,7 @@ struct RootView: View {
         FirstRunView(isCreatingTeam: $isCreatingTeam)
     }
 
-    /// Four fixed sections. Each keeps its own NavigationStack/NavigationPath
+    /// Five fixed sections. Each keeps its own NavigationStack/NavigationPath
     /// so switching tabs preserves where the person was; switching teams
     /// clears team-specific paths.
     private var tabShell: some View {
@@ -85,6 +87,12 @@ struct RootView: View {
             }
             Tab(AppSection.stats.title, systemImage: AppSection.stats.symbolName, value: AppSection.stats) {
                 sectionStack(for: .stats)
+            }
+            Tab(
+                AppSection.search.title, systemImage: AppSection.search.symbolName,
+                value: AppSection.search, role: .search
+            ) {
+                sectionStack(for: .search)
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -114,6 +122,7 @@ struct RootView: View {
                             SeasonStatsView(teamID: teamID, seasonID: id)
                         }
                     case .eventLog(let id): MatchEventLogScreen(matchID: id)
+                    case .review(let id): MatchReviewView(matchID: id)
                     }
                 }
         }
@@ -129,6 +138,7 @@ struct RootView: View {
             case .stats:
                 SeasonStatsView(
                     teamID: teamID, seasonID: appModel.workspace.viewedStatsSeasonID)
+            case .search: SearchView()
             }
         }
     }
@@ -257,6 +267,14 @@ struct TeamSwitcherMenu: View {
         Button("Manage Teams…", systemImage: "person.3") {
             appModel.navigation.isPresentingManageTeams = true
         }
+        // Settings is application context, not a per-screen action: one
+        // separated entry here reaches it from every presentation (sidebar
+        // bottom bar, top-bar icon, compact title menu) instead of a gear
+        // repeated on each destination.
+        Divider()
+        Button("Settings…", systemImage: "gearshape") {
+            appModel.navigation.isPresentingSettings = true
+        }
     }
 }
 
@@ -269,6 +287,10 @@ struct ProgrammeCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Match…") { appModel.navigation.isPresentingNewMatch = true }
                 .keyboardShortcut("n", modifiers: .command)
+        }
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { appModel.navigation.isPresentingSettings = true }
+                .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo Last Event") { appModel.liveSession?.undo() }

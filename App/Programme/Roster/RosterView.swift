@@ -75,11 +75,6 @@ struct RosterView: View {
                     Toggle("Show Former Players", isOn: $showsFormer)
                 }
             }
-            ToolbarItem(placement: .secondaryAction) {
-                Button("Settings", systemImage: "gearshape") {
-                    appModel.navigation.isPresentingSettings = true
-                }
-            }
         }
         .dropDestination(for: Data.self) { items, _ in
             guard let data = items.first, let text = String(data: data, encoding: .utf8) else { return false }
@@ -101,9 +96,13 @@ struct RosterView: View {
         }
         .sheet(isPresented: $isImporting) {
             NavigationStack { RosterImportView(teamID: teamID, initialText: nil) }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(get: { importText.map(IdentifiableText.init) }, set: { importText = $0?.text })) { item in
             NavigationStack { RosterImportView(teamID: teamID, initialText: item.text) }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await reload() }
     }
@@ -209,23 +208,52 @@ struct PlayerEditorView: View {
     @State private var position: PlayerPosition?
     @State private var classYear = ""
     @State private var isOnRoster = true
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case firstName
+        case lastName
+        case jerseyNumber
+        case classYear
+    }
+
+    private var canSave: Bool { !firstName.isEmpty || !lastName.isEmpty }
 
     var body: some View {
         Form {
             Section("Name") {
-                TextField("First name", text: $firstName).textInputAutocapitalization(.words)
-                TextField("Last name", text: $lastName).textInputAutocapitalization(.words)
+                TextField("First name", text: $firstName)
+                    .textInputAutocapitalization(.words)
+                    .focused($focusedField, equals: .firstName)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .lastName }
+                TextField("Last name", text: $lastName)
+                    .textInputAutocapitalization(.words)
+                    .focused($focusedField, equals: .lastName)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .jerseyNumber }
             }
             Section("Details") {
                 TextField("Jersey number", text: $jerseyNumber)
                     .keyboardType(.numberPad)
+                    .focused($focusedField, equals: .jerseyNumber)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .classYear }
                 Picker("Position", selection: $position) {
                     Text("Not set").tag(PlayerPosition?.none)
                     ForEach(PlayerPosition.allCases) { option in
                         Text(option.label).tag(PlayerPosition?.some(option))
                     }
                 }
-                TextField("Class (optional)", text: $classYear).textInputAutocapitalization(.words)
+                TextField("Class (optional)", text: $classYear)
+                    .textInputAutocapitalization(.words)
+                    .focused($focusedField, equals: .classYear)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if canSave {
+                            Task { await save() }
+                        }
+                    }
             }
             if existing != nil {
                 Section {
@@ -244,12 +272,16 @@ struct PlayerEditorView: View {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { Task { await save() } }
-                    .disabled(firstName.isEmpty && lastName.isEmpty)
+                    .disabled(!canSave)
                     .fontWeight(.semibold)
             }
         }
         .onAppear {
-            guard let snapshot = editingSnapshot else { return }
+            guard let snapshot = editingSnapshot else {
+                // A new player starts typing immediately.
+                focusedField = .firstName
+                return
+            }
             firstName = snapshot.firstName
             lastName = snapshot.lastName
             jerseyNumber = snapshot.jerseyNumber.map(String.init) ?? ""

@@ -205,7 +205,9 @@ final class AppModel {
         )
         .appending(path: "Programme/Sharing/shared-zones.json")
         let coordinator = TeamShareCoordinator(
-            makeContainer: { CKContainer(identifier: CollaborationEnvironment.containerIdentifier) }, sharedZones: try SharedZoneStore(url: url))
+            makeContainer: {
+                CKContainer(identifier: CollaborationEnvironment.containerIdentifier)
+            }, sharedZones: try SharedZoneStore(url: url))
         shareCoordinator = coordinator
         return coordinator
     }
@@ -351,7 +353,9 @@ final class AppModel {
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )
         .appending(path: "Programme/Sync")
-        let service = try TeamSyncService(store: store, directory: url) { CKContainer(identifier: CollaborationEnvironment.containerIdentifier) }
+        let service = try TeamSyncService(store: store, directory: url) {
+            CKContainer(identifier: CollaborationEnvironment.containerIdentifier)
+        }
         syncService = service
         return service
     }
@@ -702,6 +706,11 @@ final class AppModel {
             navigation.open(route)
         case .eventLog:
             navigation.open(route)
+        case .review(let id):
+            if let owner = try? await store.teamID(forMatch: id) {
+                await ensureTeamSelected(owner)
+            }
+            navigation.open(route)
         }
     }
 
@@ -724,6 +733,10 @@ final class AppModel {
             } else {
                 navigation.section = .stats
             }
+            return true
+        case "review":
+            guard let identifier, let uuid = UUID(uuidString: identifier) else { return false }
+            await open(.review(MatchID(uuid)))
             return true
         case "live":
             if let identifier, let uuid = UUID(uuidString: identifier) {

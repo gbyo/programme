@@ -27,6 +27,17 @@ final class IntentNavigationTests: XCTestCase {
         XCTAssertEqual(harness.appModel.navigation.matchesPath.count, 1)
     }
 
+    func testOpenReviewSelectsOwningTeamFirst() async throws {
+        let harness = try await IntentTestHarness.make()
+        await harness.selectTeamB()
+
+        await harness.provider.open(.review(harness.seed.matchA))
+
+        XCTAssertEqual(harness.appModel.workspace.selectedTeamID, harness.seed.teamA)
+        XCTAssertEqual(harness.appModel.navigation.section, .matches)
+        XCTAssertEqual(harness.appModel.navigation.matchesPath.count, 1)
+    }
+
     func testOpenPlayerSelectsOwningTeamFirst() async throws {
         let harness = try await IntentTestHarness.make()
         await harness.selectTeamB()

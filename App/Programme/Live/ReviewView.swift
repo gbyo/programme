@@ -98,7 +98,7 @@ struct IssueRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: issue.severity.symbolName)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(
                     differentiateWithoutColor ? AnyShapeStyle(.secondary) : AnyShapeStyle(issue.severity.tint)
                 )

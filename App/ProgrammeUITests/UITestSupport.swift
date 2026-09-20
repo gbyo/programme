@@ -236,8 +236,7 @@ class ProgrammeUITestCase: XCTestCase {
     func createTeam(
         _ app: XCUIApplication, name: String, shortName: String
     ) {
-        tapToolbarButton(app, "home.settings", label: "Settings")
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        openSettings(app)
         app.staticTexts["Manage Teams…"].tap()
         XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
         app.buttons["Add Team…"].tap()
@@ -259,6 +258,53 @@ class ProgrammeUITestCase: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
             "Creating a team did not select it")
+    }
+
+    /// Opens the team switcher from whichever presentation is showing: the
+    /// sidebar bottom bar, or the navigation title where the title menu
+    /// owns team switching. The menu-entry lookup that follows proves the
+    /// menu actually opened.
+    func openTeamSwitcher(_ app: XCUIApplication, title: String) {
+        let sidebar = element(app, "sidebar.teamSwitcher")
+        if sidebar.waitForExistence(timeout: 3) {
+            sidebar.tap()
+            return
+        }
+        openTitleMenu(app, title: title)
+    }
+
+    /// Opens the title menu from whichever title SwiftUI is showing: the
+    /// inline-bar title after scrolling, or the large title above content.
+    /// The menu-entry lookup that follows proves the menu actually opened,
+    /// so no production control is added just to expose the title for
+    /// testing.
+    func openTitleMenu(_ app: XCUIApplication, title: String) {
+        let inlineButton = app.navigationBars[title].buttons[title].firstMatch
+        if inlineButton.waitForExistence(timeout: 3) {
+            inlineButton.tap()
+            return
+        }
+        let inlineText = app.navigationBars[title].staticTexts[title].firstMatch
+        if inlineText.waitForExistence(timeout: 3) {
+            inlineText.tap()
+            return
+        }
+        let largeTitle = app.staticTexts[title].firstMatch
+        XCTAssertTrue(
+            largeTitle.waitForExistence(timeout: 5),
+            "No tappable navigation title for \(title)")
+        largeTitle.tap()
+    }
+
+    /// Opens Settings through the global workspace route: the team
+    /// switcher menu carries a separated Settings entry in every
+    /// presentation, so no per-screen gear is needed.
+    func openSettings(_ app: XCUIApplication) {
+        openTeamSwitcher(app, title: "Home")
+        tapTeamMenuEntry(app, "Settings…")
+        XCTAssertTrue(
+            app.navigationBars["Settings"].waitForExistence(timeout: 10),
+            "Settings did not open from the team switcher")
     }
 
     /// Taps a team-switcher menu entry, which can surface as either a menu

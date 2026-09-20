@@ -74,6 +74,8 @@ struct SeasonStatsView: View {
                         contexts: contexts),
                     exporters: ProgrammeExporters.forSeason())
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .task(
             id: [

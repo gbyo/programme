@@ -69,6 +69,8 @@ struct MatchDetailView: View {
                             contexts: [context]),
                         exporters: ProgrammeExporters.forMatch())
                 }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
         }
         .sheet(isPresented: $isPresentingCalendar) {
