@@ -87,6 +87,32 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Home awaiting finalization")
     }
 
+    /// With confirmation disabled, Finalize performs the same operation
+    /// immediately: no native dialog is inserted, and the match still
+    /// finalizes exactly once.
+    func testFinalizeWithoutConfirmationSkipsDialog() {
+        let app = launch(["-programme-open-live", "-programme-no-finalize-confirm"])
+        waitForScorer(app)
+
+        element(app, "live.endPeriod").tap()
+        XCTAssertTrue(app.staticTexts["Halftime"].waitForExistence(timeout: 10))
+        app.buttons["Start Second Half"].tap()
+
+        XCTAssertTrue(element(app, "live.endPeriod").waitForExistence(timeout: 10))
+        element(app, "live.endPeriod").tap()
+        XCTAssertTrue(app.navigationBars["Full Time"].waitForExistence(timeout: 10))
+        app.buttons["Finalize Match"].tap()
+
+        XCTAssertTrue(app.navigationBars["Finalize Match"].waitForExistence(timeout: 10))
+        element(app, "finalize.action").tap()
+
+        // No confirmation dialog is presented on the immediate path.
+        XCTAssertFalse(app.staticTexts["Finalize this match?"].exists)
+        // Finalization still completes: the sheet closes and Home returns.
+        waitForHome(app)
+        XCTAssertFalse(app.navigationBars["Finalize Match"].exists)
+    }
+
     /// Halftime keeps one obvious primary next action and offers review as
     /// a secondary toolbar action — never two competing giant CTAs, and the
     /// primary is never duplicated between a bar and the toolbar.
@@ -179,6 +205,45 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Sidebar team menu")
     }
 
+    /// Switching teams keeps the shell — same section, same sidebar — while
+    /// team-scoped state goes away: pushed destinations clear and no Team A
+    /// content lingers under Team B. This is what the old whole-TabView
+    /// identity reset used to do by brute force.
+    func testSwitchingTeamsKeepsSectionAndClearsTeamContent() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "The sidebar team menu only exists in a regular-width sidebar.")
+        let app = launch()
+        waitForHome(app)
+        createTeam(app, name: "JV Test Team", shortName: "JV Test")
+        element(app, "sidebar.teamSwitcher").tap()
+        tapTeamMenuEntry(app, "Ninety Six Boys Soccer")
+
+        openSection(app, "Matches")
+        element(app, "match.Emerald").tap()
+        XCTAssertTrue(
+            app.staticTexts["Box Score"].waitForExistence(timeout: 10),
+            "Match detail did not open")
+
+        element(app, "sidebar.teamSwitcher").tap()
+        tapTeamMenuEntry(app, "JV Test Team")
+
+        // Same section, back at its root: the detail is gone.
+        XCTAssertTrue(
+            app.navigationBars["Matches"].waitForExistence(timeout: 10),
+            "Switching teams left the Matches section")
+        XCTAssertFalse(
+            app.staticTexts["Box Score"].exists,
+            "Team A's pushed match detail survived the team switch")
+        // No stale Team A content: the new team has no matches at all.
+        XCTAssertFalse(
+            element(app, "match.Emerald").exists,
+            "Team A's match still shows under Team B")
+        XCTAssertTrue(
+            app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
+            "Team B's empty Matches did not load after the switch")
+    }
+
     /// Universal search is a pull-down field on Matches — not a tab — and
     /// finds a match by opponent in both scopes before opening its detail.
     func testUniversalSearchFindsMatchAndOpensDetail() throws {
@@ -219,6 +284,12 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
             XCTAssertTrue(
                 app.staticTexts["Recent Matches"].waitForExistence(timeout: 10),
                 "\(section) search shows no recent matches before typing")
+            // Search acts on the section: the navigation title stays the
+            // section's, never becoming a Search destination.
+            let expectedTitle = section == "Stats" ? "Season Stats" : section
+            XCTAssertTrue(
+                app.navigationBars[expectedTitle].waitForExistence(timeout: 10),
+                "\(section) search renamed the destination instead of keeping \(expectedTitle)")
             cancelSearch(app)
         }
 

@@ -112,6 +112,72 @@ public struct WatchSnapshot: Codable, Hashable, Sendable {
         guard live != nil else { return false }
         return updatedAt.addingTimeInterval(Self.liveStaleAfter) < now
     }
+
+    /// The instant after which a live presentation must read stale.
+    public var liveStaleAt: Date {
+        updatedAt.addingTimeInterval(Self.liveStaleAfter)
+    }
+
+    /// One-shot timeline entry guaranteeing `isLiveStale` reads true.
+    /// `isLiveStale` uses a strict `<`, so the transition fires just after
+    /// `liveStaleAt` rather than exactly on it.
+    public var liveStaleTransitionAt: Date {
+        liveStaleAt.addingTimeInterval(1)
+    }
+
+    /// Explicit one-shot schedule replacing the old 15-second staleness
+    /// poll: the initial entry plus a single stale transition. Derived
+    /// from the snapshot alone so the schedule is stable across renders.
+    public var liveTimelineEntries: [Date] {
+        [updatedAt, liveStaleTransitionAt].sorted()
+    }
+}
+
+extension WatchSnapshot.Live {
+    /// Count direction for a system timer view. Matches the Live Activity:
+    /// only `countDownInPeriod` counts down; both count-up modes count up.
+    public var countsDown: Bool {
+        rules.clockDisplay == .countDownInPeriod
+    }
+
+    /// Date range a system timer view should animate over, derived from
+    /// the clock anchor plus rules — the same anchor technique the Live
+    /// Activity uses. The period start (`runningSince - elapsedAtAnchor`
+    /// while running) is invariant in `now`, so any entry date yields the
+    /// same range. Cumulative display shifts the start back by prior
+    /// periods so the timer reads the match total, not just this period.
+    public func timerRange(at now: Date) -> ClosedRange<Date> {
+        let duration =
+            rules.period(at: clock.period)?.scheduledDuration
+            ?? rules.regulationPeriodDuration
+        let elapsed = clock.elapsed(at: now)
+        let periodStart = now.addingTimeInterval(-elapsed)
+        let start: Date
+        if rules.clockDisplay == .countUpCumulative {
+            var prior: TimeInterval = 0
+            for p in 1..<max(1, clock.period) {
+                prior += TimeInterval(rules.period(at: p)?.scheduledDuration ?? 0)
+            }
+            start = periodStart.addingTimeInterval(-prior)
+        } else {
+            start = periodStart
+        }
+        let end = periodStart.addingTimeInterval(TimeInterval(max(0, duration)))
+        let lower = min(start, end)
+        let upper = max(end, lower.addingTimeInterval(1))
+        return lower...upper
+    }
+
+    /// Frozen clock string: match time plus period label, e.g. "12:04 1st".
+    /// Used when the clock is stopped, and — evaluated at `updatedAt` —
+    /// when a running clock has gone stale, so an old anchor freezes at
+    /// the last known truth instead of advancing.
+    public func clockText(at date: Date) -> String {
+        let time = clock.matchTime(at: date)
+        let period = rules.period(at: clock.period)?.shortLabel ?? ""
+        return "\(time.displayText(rules: rules)) \(period)".trimmingCharacters(
+            in: .whitespaces)
+    }
 }
 
 /// Minimal match facts for glanceable selection. The app maps its list

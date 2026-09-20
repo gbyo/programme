@@ -82,17 +82,50 @@ struct EventEditView: View {
             if case .shot(let shot) = current.payload {
                 Section("Outcome") {
                     Picker("Outcome", selection: outcomeBinding(shot)) {
-                        ForEach(ShotOutcome.allCases, id: \.self) { outcome in
+                        ForEach(
+                            ShotOutcome.allCases.filter { $0.isValid(for: shot.phase) },
+                            id: \.self
+                        ) { outcome in
                             Text(outcome.label).tag(outcome)
                         }
                     }
                     Picker("Phase", selection: phaseBinding(shot)) {
-                        ForEach(PlayPhase.allCases, id: \.self) { phase in
+                        ForEach(
+                            PlayPhase.allCases.filter { shot.outcome.isValid(for: $0) },
+                            id: \.self
+                        ) { phase in
                             Text(phase.label).tag(phase)
                         }
                     }
                     Toggle("Own Goal", isOn: ownGoalBinding(shot))
                         .disabled(!shot.outcome.isGoal)
+                }
+            }
+
+            if case .shot(let shot) = current.payload,
+                shot.side == .us,
+                session.profile.tracks(.shotLocations)
+            {
+                Section("Shot Location") {
+                    PitchView(
+                        markers: session.shotMarkers.filter { $0.id != current.id },
+                        pendingLocation: shot.location,
+                        isPlacementActive: true,
+                        onPlace: { applyShotLocation($0) },
+                        onClearPendingLocation: { applyShotLocation(nil) }
+                    )
+                    .frame(height: 240)
+                    .accessibilityIdentifier("eventEdit.shotLocation")
+
+                    if shot.location != nil {
+                        Button("Clear Location", systemImage: "xmark.circle") {
+                            applyShotLocation(nil)
+                        }
+                    }
+
+                    Text("Tap the pitch to add or move this shot. Apple Pencil works here too.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -166,7 +199,7 @@ struct EventEditView: View {
                 playerPicker(
                     "Shooter", current: shot.shooter, slot: .primary, includeUnknown: true)
                 if shot.outcome.isGoal {
-                    assistPicker(current: shot.assist)
+                    assistPicker(current: shot.assist, excluding: shot.shooter.playerID)
                 }
             }
         case .corner(let action), .steal(let action), .foul(let action), .offside(let action):
@@ -197,7 +230,9 @@ struct EventEditView: View {
             if includeUnknown {
                 Text("Player unknown").tag(PlayerRef.unidentified)
             }
-            if current.payload.side == .opponent {
+            if eventSide == .opponent,
+                session.descriptor.tracking == .ourTeam || currentRef == .untracked
+            {
                 Text(session.descriptor.opponentShortName).tag(PlayerRef.untracked)
             }
             ForEach(candidates(fromFullRoster: fromFullRoster)) { player in
@@ -206,7 +241,7 @@ struct EventEditView: View {
         }
     }
 
-    private func assistPicker(current assist: PlayerRef?) -> some View {
+    private func assistPicker(current assist: PlayerRef?, excluding scorerID: PlayerID?) -> some View {
         Picker(
             "Assist",
             selection: Binding<String>(
@@ -234,7 +269,12 @@ struct EventEditView: View {
         ) {
             Text("Unassisted").tag("none")
             Text("Assist unknown").tag("unknown")
-            ForEach(candidates(fromFullRoster: false)) { player in
+            if eventSide == .opponent,
+                session.descriptor.tracking == .ourTeam || assist == .untracked
+            {
+                Text(session.descriptor.opponentShortName).tag("untracked")
+            }
+            ForEach(candidates(fromFullRoster: false).filter { $0.id != scorerID }) { player in
                 Text(player.shortLabel).tag(player.id.rawValue.uuidString)
             }
         }
@@ -248,10 +288,23 @@ struct EventEditView: View {
             message: "Recorded as unassisted")
     }
 
+    private var eventSide: TeamSide {
+        current.payload.side ?? .us
+    }
+
     private func candidates(fromFullRoster: Bool) -> [PlayerSnapshot] {
-        fromFullRoster
-            ? session.roster.activeRoster
-            : session.roster.sortedByNumber.filter {
+        let roster = session.context.roster(for: eventSide)
+
+        // Programme does not maintain an opponent lineup timeline. In Both Teams
+        // mode every opponent correction therefore comes from the opponent roster,
+        // never from our roster or our active-lineup state.
+        if eventSide == .opponent {
+            return roster.activeRoster
+        }
+
+        return fromFullRoster
+            ? roster.activeRoster
+            : roster.sortedByNumber.filter {
                 session.snapshot.player($0.id).appeared || session.snapshot.activeLineup.contains($0.id)
             }
     }
@@ -275,7 +328,6 @@ struct EventEditView: View {
             set: { newValue in
                 var updated = shot
                 updated.outcome = newValue
-                if !newValue.isGoal { updated.assist = nil }
                 session.edit(
                     .replacePayload(
                         current.id, .shot(updated), summary: "Outcome changed to \(newValue.label)"),
@@ -301,13 +353,36 @@ struct EventEditView: View {
             set: { newValue in
                 var updated = shot
                 updated.isOwnGoal = newValue
-                if newValue { updated.assist = nil }
                 session.edit(
                     .replacePayload(
                         current.id, .shot(updated),
                         summary: newValue ? "Marked as an own goal" : "No longer an own goal"),
                     message: newValue ? "Recorded as an own goal" : "Updated")
             })
+    }
+
+    private func applyShotLocation(_ location: PitchPoint?) {
+        guard case .shot(var shot) = current.payload, shot.location != location else { return }
+        let hadLocation = shot.location != nil
+        shot.location = location
+
+        let summary: String
+        let message: String
+        switch (hadLocation, location) {
+        case (_, nil):
+            summary = "Shot location cleared"
+            message = "Shot location cleared"
+        case (false, .some):
+            summary = "Shot location added"
+            message = "Shot location added"
+        case (true, .some):
+            summary = "Shot location moved"
+            message = "Shot location updated"
+        }
+
+        session.edit(
+            .replacePayload(current.id, .shot(shot), summary: summary),
+            message: message)
     }
 
     private func cardBinding(_ card: CardEvent) -> Binding<CardType> {
