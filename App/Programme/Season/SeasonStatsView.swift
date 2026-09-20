@@ -83,6 +83,7 @@ struct SeasonStatsView: View {
                         exporters: ProgrammeExporters.forSeason())
                 }
                 .presentationDetents([.medium, .large])
+                .presentationSizing(.form)
                 .presentationDragIndicator(.visible)
             }
         }

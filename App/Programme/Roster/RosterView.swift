@@ -117,7 +117,7 @@ struct RosterView: View {
                 NavigationStack { PlayerEditorView(teamID: teamID, player: nil) }
             case .importRoster(let initialText):
                 NavigationStack { RosterImportView(teamID: teamID, initialText: initialText) }
-                    .presentationDetents([.medium, .large])
+                    .presentationSizing(.page)
                     .presentationDragIndicator(.visible)
             }
         }
@@ -127,9 +127,7 @@ struct RosterView: View {
             // one open across a team switch would file Team A's half-written
             // player under Team B. The shell no longer resets our identity
             // on team switches, so these dismiss here where they live.
-            isAddingPlayer = false
-            isImporting = false
-            importText = nil
+            sheet = nil
         }
     }
 

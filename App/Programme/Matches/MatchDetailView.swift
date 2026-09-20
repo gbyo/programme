@@ -69,7 +69,7 @@ struct MatchDetailView: View {
                             contexts: [context]),
                         exporters: ProgrammeExporters.forMatch())
                 }
-                .presentationDetents([.medium, .large])
+                .presentationSizing(.form)
                 .presentationDragIndicator(.visible)
             }
         }
