@@ -64,7 +64,7 @@ struct RootView: View {
         FirstRunView(isCreatingTeam: $isCreatingTeam)
     }
 
-    /// Four fixed sections. Each keeps its own NavigationStack/NavigationPath
+    /// Five fixed sections. Each keeps its own NavigationStack/NavigationPath
     /// so switching tabs preserves where the person was; switching teams
     /// clears team-specific paths.
     private var tabShell: some View {
@@ -85,6 +85,12 @@ struct RootView: View {
             }
             Tab(AppSection.stats.title, systemImage: AppSection.stats.symbolName, value: AppSection.stats) {
                 sectionStack(for: .stats)
+            }
+            Tab(
+                AppSection.search.title, systemImage: AppSection.search.symbolName,
+                value: AppSection.search, role: .search
+            ) {
+                sectionStack(for: .search)
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -130,6 +136,7 @@ struct RootView: View {
             case .stats:
                 SeasonStatsView(
                     teamID: teamID, seasonID: appModel.workspace.viewedStatsSeasonID)
+            case .search: SearchView()
             }
         }
     }

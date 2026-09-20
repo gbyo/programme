@@ -121,11 +121,12 @@ this answers which nearby device displays this live match right now):
 ## App shell
 
 Programme is iPad-first, with one adaptive `TabView` (`.sidebarAdaptable`, modern
-`Tab` API) providing exactly four top-level sections: **Home | Matches | Roster
-| Stats**. SwiftUI renders those as a bottom tab bar on iPhone and an adaptable
-tab bar/sidebar on iPad; there is no hand-built navigation chrome and no
-device branching. Each section keeps its own `NavigationStack`/`NavigationPath`
-(`AppSection` + `homePath`/`matchesPath`/`rosterPath`/`statsPath` in
+`Tab` API) providing five top-level sections: **Home | Matches | Roster
+| Stats | Search** (Search carries `TabRole.search`). SwiftUI renders those as
+a bottom tab bar on iPhone and an adaptable tab bar/sidebar on iPad; there is
+no hand-built navigation chrome and no device branching. Each section keeps
+its own `NavigationStack`/`NavigationPath` (`AppSection` +
+`homePath`/`matchesPath`/`rosterPath`/`statsPath`/`searchPath` in
 `NavigationModel`, which describes where the user is, not how it is presented).
 
 A **Team is the workspace** in which those sections operate — never a

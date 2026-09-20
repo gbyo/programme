@@ -179,6 +179,33 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Sidebar team menu")
     }
 
+    /// Global Search finds a match by opponent and opens its detail, in the
+    /// current-team scope and across all teams.
+    func testGlobalSearchFindsMatchAndOpensDetail() throws {
+        let app = launch()
+        waitForHome(app)
+        openSection(app, "Search")
+
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(
+            field.waitForExistence(timeout: 10),
+            "The Search tab has no search field")
+        field.tap()
+        field.typeText("Emerald")
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10),
+            "Search did not find the seeded match by opponent")
+        app.buttons["All Teams"].tap()
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10),
+            "The match disappeared when widening search to all teams")
+        element(app, "match.Emerald").tap()
+        XCTAssertTrue(
+            app.staticTexts["Box Score"].waitForExistence(timeout: 10),
+            "Tapping a search result did not open match detail")
+        attachScreenshot(named: "Global search")
+    }
+
     /// A long team name stays on one truncated line: the four destinations
     /// remain reachable instead of being pushed out by a giant switcher.
     func testLongTeamNameKeepsFourDestinations() throws {
