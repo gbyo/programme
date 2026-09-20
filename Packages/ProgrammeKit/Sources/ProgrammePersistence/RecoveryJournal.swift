@@ -156,31 +156,76 @@ public final class RecoveryJournal: @unchecked Sendable {
         return context
     }
 
+    /// Streams newline-delimited lines with a bounded buffer, never
+    /// materializing the whole file. A trailing partial line (a crash
+    /// mid-write) is delivered once and skipped by decoders, exactly as
+    /// the old whole-file split behaved.
+    private func streamLines(from fileURL: URL, body: (Data) throws -> Void) throws {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        var buffer = Data()
+        buffer.reserveCapacity(64 * 1024)
+        while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            buffer.append(chunk)
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                try body(Data(buffer[..<newline]))
+                buffer.removeSubrange(...newline)
+            }
+        }
+        if !buffer.isEmpty { try body(buffer) }
+    }
+
     /// Everything the journal knows without replaying: used by the launch check.
     public func summary(matchID: MatchID) -> JournalSummary? {
         let fileURL = url(for: matchID)
-        guard let contents = try? Data(contentsOf: fileURL) else { return nil }
         var header: JournalHeader?
         var eventCount = 0
         var lastEventAt: Date?
         var closed = false
-        for lineData in contents.split(separator: 0x0A) {
-            guard let line = try? ProgrammeCoding.decoder.decode(JournalLine.self, from: Data(lineData))
-            else { continue }
-            switch line {
-            case .header(let value): header = value
-            case .effect(let effect):
-                if case .appendEvent(let event) = effect {
-                    eventCount += 1
-                    lastEventAt = event.recordedAt
+        do {
+            try streamLines(from: fileURL) { lineData in
+                guard let line = try? ProgrammeCoding.decoder.decode(JournalLine.self, from: lineData)
+                else { return }
+                switch line {
+                case .header(let value): header = value
+                case .effect(let effect):
+                    if case .appendEvent(let event) = effect {
+                        eventCount += 1
+                        lastEventAt = event.recordedAt
+                    }
+                case .closed: closed = true
                 }
-            case .closed: closed = true
             }
+        } catch {
+            return nil
         }
         guard let header else { return nil }
         return JournalSummary(
             matchID: matchID, descriptor: header.descriptor, eventCount: eventCount,
             lastEventAt: lastEventAt, isClosed: closed)
+    }
+
+    /// Closed-state probe reading only a bounded tail. The close marker is
+    /// always the last line, so pruning never decodes event history. A
+    /// truncated tail reads as not-closed, which keeps the journal.
+    public func isClosed(matchID: MatchID) -> Bool {
+        let fileURL = url(for: matchID)
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return false }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd(), size > 0 else { return false }
+        let tailLength = min(size, 512)
+        guard
+            (try? handle.seek(toOffset: size - tailLength)) != nil,
+            let tail = try? handle.read(upToCount: Int(tailLength)), !tail.isEmpty
+        else { return false }
+        var text = tail
+        while text.last == 0x0A { text = text.dropLast() }
+        let start = text.lastIndex(of: 0x0A).map { text.index(after: $0) } ?? text.startIndex
+        guard
+            let line = try? ProgrammeCoding.decoder.decode(JournalLine.self, from: Data(text[start...]))
+        else { return false }
+        if case .closed = line { return true }
+        return false
     }
 
     /// Journals for every match that was left open.
@@ -233,7 +278,7 @@ public final class RecoveryJournal: @unchecked Sendable {
         var removed = 0
         for file in files where file.pathExtension == "journal" {
             guard let uuid = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { continue }
-            guard let summary = summary(matchID: MatchID(uuid)), summary.isClosed else { continue }
+            guard isClosed(matchID: MatchID(uuid)) else { continue }
             let modified =
                 (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
                 ?? Date()

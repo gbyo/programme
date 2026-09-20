@@ -808,6 +808,89 @@ struct MatchReminderPreferenceTests {
     }
 }
 
+@Suite("Journal metadata reads stay cheap")
+struct JournalMetadataTests {
+    private func makeJournal() throws -> (RecoveryJournal, URL, MatchID) {
+        let directory = URL.temporaryDirectory.appending(path: "programme-tests-\(UUID().uuidString)")
+        let journal = try RecoveryJournal(directory: directory)
+        let matchID = MatchID()
+        try journal.open(
+            matchID: matchID, descriptor: ProgrammeSample.descriptor(), roster: ProgrammeSample.roster,
+            opponentRoster: .empty)
+        return (journal, directory, matchID)
+    }
+
+    private func appendEvents(_ journal: RecoveryJournal, _ count: Int, to matchID: MatchID) throws {
+        for index in 1...count {
+            let event = MatchEvent(
+                matchID: matchID, time: .kickoff, sequence: index, payload: .note("Event \(index)"))
+            try journal.append([.appendEvent(event)], for: matchID)
+        }
+    }
+
+    private func journalFile(in directory: URL, matchID: MatchID) -> URL {
+        directory.appending(path: "\(matchID.rawValue.uuidString).journal")
+    }
+
+    @Test("A long journal streams an exact summary without closing")
+    func longJournalSummary() throws {
+        let (journal, _, matchID) = try makeJournal()
+        try appendEvents(journal, 500, to: matchID)
+        let summary = try #require(journal.summary(matchID: matchID))
+        #expect(summary.eventCount == 500)
+        #expect(summary.lastEventAt != nil)
+        #expect(summary.isClosed == false)
+        #expect(journal.isClosed(matchID: matchID) == false)
+    }
+
+    @Test("Closing is visible in the tail probe and hides the journal")
+    func closedTailDetected() throws {
+        let (journal, _, matchID) = try makeJournal()
+        try appendEvents(journal, 3, to: matchID)
+        try journal.close(matchID: matchID)
+        #expect(journal.isClosed(matchID: matchID) == true)
+        #expect(journal.summary(matchID: matchID)?.isClosed == true)
+        #expect(journal.openJournals().isEmpty)
+    }
+
+    @Test("A truncated tail keeps prior events and never reads as closed")
+    func truncatedTailTolerated() throws {
+        let (journal, directory, matchID) = try makeJournal()
+        try appendEvents(journal, 5, to: matchID)
+        let file = journalFile(in: directory, matchID: matchID)
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{\"effect\":{truncated".utf8))
+        try handle.close()
+        #expect(journal.summary(matchID: matchID)?.eventCount == 5)
+        #expect(journal.isClosed(matchID: matchID) == false)
+        #expect(try journal.recover(matchID: matchID)?.events.count == 5)
+    }
+
+    @Test("Pruning removes only old closed journals, never open ones")
+    func pruneKeepsOpen() throws {
+        let directory = URL.temporaryDirectory.appending(path: "programme-tests-\(UUID().uuidString)")
+        let journal = try RecoveryJournal(directory: directory)
+        let openID = MatchID()
+        try journal.open(
+            matchID: openID, descriptor: ProgrammeSample.descriptor(), roster: ProgrammeSample.roster,
+            opponentRoster: .empty)
+        try appendEvents(journal, 2, to: openID)
+        let closedID = MatchID()
+        try journal.open(
+            matchID: closedID, descriptor: ProgrammeSample.descriptor(),
+            roster: ProgrammeSample.roster, opponentRoster: .empty)
+        try appendEvents(journal, 2, to: closedID)
+        try journal.close(matchID: closedID)
+        #expect(journal.pruneClosedJournals(olderThan: 0) == 1)
+        #expect(FileManager.default.fileExists(atPath: journalFile(in: directory, matchID: openID).path))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: journalFile(in: directory, matchID: closedID).path))
+        #expect(journal.summary(matchID: openID)?.eventCount == 2)
+    }
+}
+
 private func temporaryReadinessURL(_ name: String) -> URL {
     URL.temporaryDirectory.appending(path: "programme-tests-\(UUID().uuidString)").appending(path: name)
 }
