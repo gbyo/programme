@@ -55,7 +55,8 @@ struct SearchView: View {
     private var shownMatches: [ScopedMatch] {
         guard !trimmedQuery.isEmpty else {
             // Useful before text is entered: the current team's recent matches.
-            return matches
+            return
+                matches
                 .filter { $0.teamID == appModel.workspace.selectedTeamID }
                 .sorted { $0.match.kickoff > $1.match.kickoff }
                 .prefix(5)

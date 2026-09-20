@@ -205,7 +205,9 @@ final class AppModel {
         )
         .appending(path: "Programme/Sharing/shared-zones.json")
         let coordinator = TeamShareCoordinator(
-            makeContainer: { CKContainer(identifier: CollaborationEnvironment.containerIdentifier) }, sharedZones: try SharedZoneStore(url: url))
+            makeContainer: {
+                CKContainer(identifier: CollaborationEnvironment.containerIdentifier)
+            }, sharedZones: try SharedZoneStore(url: url))
         shareCoordinator = coordinator
         return coordinator
     }
@@ -351,7 +353,9 @@ final class AppModel {
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )
         .appending(path: "Programme/Sync")
-        let service = try TeamSyncService(store: store, directory: url) { CKContainer(identifier: CollaborationEnvironment.containerIdentifier) }
+        let service = try TeamSyncService(store: store, directory: url) {
+            CKContainer(identifier: CollaborationEnvironment.containerIdentifier)
+        }
         syncService = service
         return service
     }
