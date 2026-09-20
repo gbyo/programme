@@ -473,6 +473,7 @@ struct LiveMatchView: View {
             onAction: handle(action:),
             onOverflow: handle(overflow:),
             onOpponentAction: handleOpponent(_:),
+            onOpponentPending: beginOpponent(_:),
             onClearArmedPlayer: { session.armedPlayer = nil }
         )
     }
@@ -515,10 +516,14 @@ struct LiveMatchView: View {
                     for: prompt.action.attributionCategory, side: prompt.side),
                 goalkeeperID: prompt.side == .us ? session.snapshot.activeGoalkeeper : nil,
                 allowsUnknown: prompt.action.allowsUnknown,
-                unknownTitle: prompt.side == .us
-                    ? "Player Unknown" : "\(session.descriptor.opponentShortName) — No Player",
-                unknownSubtitle: prompt.side == .us
-                    ? "Record now, attribute later" : "Count it for the team only",
+                unknownTitle:
+                    prompt.side == .us || session.descriptor.tracking == .bothTeams
+                    ? "Player Unknown"
+                    : "\(session.descriptor.opponentShortName) — No Player",
+                unknownSubtitle:
+                    prompt.side == .us || session.descriptor.tracking == .bothTeams
+                    ? "Record now, attribute later"
+                    : "Count it for the team only",
                 showsTips: session.showsContextualTips,
                 onPick: { complete(prompt.action, side: prompt.side, with: $0) },
                 onCancel: { composer.finish() }
@@ -652,41 +657,46 @@ struct LiveMatchView: View {
     }
 
     private func handleOpponent(_ quick: OpponentQuickAction) {
+        let action: PendingAction =
+            switch quick {
+            case .goal:
+                .goal(.openPlay)
+            case .shot:
+                // Our Team keeps its one-tap team-total shortcut. Both Teams
+                // asks for the player and the real outcome.
+                session.descriptor.tracking == .bothTeams
+                    ? .shotAttempt(.openPlay)
+                    : .shot(.offTarget)
+            case .corner:
+                .corner
+            }
+        beginOpponent(action)
+    }
+
+    /// The opponent uses the same action -> player -> event composer as our side.
+    /// Both Teams never silently degrades to team totals when its roster is
+    /// missing; that would create data that contradicts the selected mode.
+    private func beginOpponent(_ action: PendingAction) {
         guard session.context.hasStarted else {
             session.show(
                 notice: LiveNotice(text: "The match hasn't kicked off yet.", kind: .warning))
             return
         }
 
-        // Whether the opponent's players are tracked at all decides both how much
-        // Programme may ask and how much it is worth asking.
-        let attributesOpponent =
-            session.descriptor.tracking == .bothTeams
-            && !session.context.opponentRoster.players.isEmpty
-
-        let action: PendingAction =
-            switch quick {
-            case .goal: .goal(.openPlay)
-            // In Our Team mode the opponent's Shot stays a single tap and keeps
-            // the meaning it has always had: off target. An opponent shot that
-            // reached the frame is recorded as our goalkeeper's Save, which is
-            // the faster tap for the same fact and the one the goalkeeping
-            // statistics are derived from. Asking for an outcome here would slow
-            // ordinary tracking down to buy nothing.
-            //
-            // With an opponent roster the scorer is already going through a
-            // player picker, and a shot attributed to an opponent deserves a real
-            // outcome: it is the only way an on-target opponent shot is credited
-            // to the player who took it.
-            case .shot: attributesOpponent ? .shotAttempt(.openPlay) : .shot(.offTarget)
-            case .corner: .corner
-            }
-
-        if attributesOpponent {
-            composer.ask(.choosePlayer(PlayerPrompt(action: action, side: .opponent)))
-        } else {
+        guard session.descriptor.tracking == .bothTeams else {
             complete(action, side: .opponent, with: .untracked)
+            return
         }
+
+        guard !session.context.opponentRoster.players.isEmpty else {
+            session.show(
+                notice: LiveNotice(
+                    text: "Add the opponent roster before recording player-level opponent events.",
+                    kind: .warning))
+            return
+        }
+
+        composer.ask(.choosePlayer(PlayerPrompt(action: action, side: .opponent)))
     }
 
     private func beginSubstitution() {
