@@ -327,7 +327,6 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
             // already resumes automatic sync when an account becomes
             // available, so status/local-state handling is all we need here.
             applyAccountChange(change.changeType)
-            onAccountChange?(change.changeType)
         case .fetchedRecordZoneChanges(let fetched):
             await applyFetched(
                 saved: fetched.modifications.map(\.record),
@@ -383,6 +382,7 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
                 .attentionNeeded(
                     "The iCloud account changed. Your matches stay on this device."))
         }
+        onAccountChange?(change)
     }
 
     func applyFetched(
