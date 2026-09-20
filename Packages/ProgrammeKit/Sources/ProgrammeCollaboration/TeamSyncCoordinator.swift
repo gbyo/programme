@@ -52,11 +52,18 @@ public actor SyncInbox {
         try persist()
     }
 
-    public func drain() throws -> [IncomingChange] {
-        let changes = buffered
-        buffered = []
+    /// Snapshot the buffered batch without removing it. The snapshot stays
+    /// durable while the applier works, so a crash mid-materialization
+    /// replays from the inbox instead of losing fetched changes.
+    public func peek() -> [IncomingChange] { buffered }
+
+    /// Atomically replace the consumed snapshot with the deferred subset.
+    /// Only the consumed prefix is removed, so changes appended while the
+    /// snapshot was processing survive, and one persist covers the drain.
+    public func complete(consumed count: Int, deferred: [IncomingChange]) throws {
+        buffered.removeFirst(min(count, buffered.count))
+        buffered.append(contentsOf: deferred)
         try persist()
-        return changes
     }
 
     public var count: Int { buffered.count }
@@ -231,16 +238,12 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
     /// the inbox: fetched server state advances in engine serializations,
     /// so only this method may drain.
     public func materialize(with applier: TeamSyncApplier) async -> DrainResult {
-        let changes: [IncomingChange]
-        do {
-            changes = try await inbox.drain()
-        } catch {
+        let changes = await inbox.peek()
+        guard !changes.isEmpty else {
             return DrainResult(applied: [], deferred: [], failed: [])
         }
         let result = await applier.drain(changes)
-        if !result.deferred.isEmpty {
-            try? await inbox.append(result.deferred)
-        }
+        try? await inbox.complete(consumed: changes.count, deferred: result.deferred)
         return result
     }
 
