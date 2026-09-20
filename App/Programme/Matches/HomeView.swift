@@ -26,7 +26,13 @@ struct HomeView: View {
                     }
                 }
             }
-            .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await load() }
+            .task(
+                id: [
+                    teamID.rawValue.uuidString, "\(appModel.storeRevision)",
+                    "\(appModel.scopeRevision(.matches(teamID)).count)",
+                    "\(appModel.scopeRevision(.teamEvents(teamID)).count)",
+                ]
+            ) { await load() }
     }
 
     @ViewBuilder

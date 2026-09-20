@@ -143,6 +143,23 @@ public actor MatchStore {
     /// (see `withoutOutboundStaging`) so they never echo back outbound.
     public var onMutation: (@Sendable (OutboundMutation) -> Void)?
 
+    /// Reports every persisted mutation — including suppressed remote
+    /// applies — for UI invalidation. The handler must return immediately;
+    /// scope fan-out happens off the mutation path. Always use
+    /// `noteMutation` at a save site so the two reporters can never drift.
+    public var onInvalidation: (@Sendable (OutboundMutation) -> Void)?
+
+    public func setInvalidationHandler(_ handler: (@Sendable (OutboundMutation) -> Void)?) {
+        onInvalidation = handler
+    }
+
+    /// Single funnel for mutation reporting: sync staging stays suppressed
+    /// for remote applies while invalidation always fires.
+    private func noteMutation(_ mutation: OutboundMutation) {
+        if !suppressOutbound { onMutation?(mutation) }
+        onInvalidation?(mutation)
+    }
+
     /// Set while applying remote changes so they never echo back outbound.
     var suppressOutbound = false
 
@@ -157,7 +174,7 @@ public actor MatchStore {
             primaryColorHex: primaryColorHex, secondaryColorHex: secondaryColorHex)
         modelContext.insert(team)
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.team(team.teamID)) }
+        noteMutation(.team(team.teamID))
         return team.teamID
     }
 
@@ -181,7 +198,7 @@ public actor MatchStore {
         team.primaryColorHex = primaryColorHex
         team.secondaryColorHex = secondaryColorHex
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.team(teamID)) }
+        noteMutation(.team(teamID))
     }
 
     // MARK: - Seasons
@@ -198,7 +215,7 @@ public actor MatchStore {
         season.team = team
         modelContext.insert(season)
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.season(teamID: teamID, seasonID: season.seasonID)) }
+        noteMutation(.season(teamID: teamID, seasonID: season.seasonID))
         return season.seasonID
     }
 
@@ -234,7 +251,7 @@ public actor MatchStore {
         }
         for season in team.seasons { season.isCurrent = (season.identifier == seasonID.rawValue) }
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.season(teamID: teamID, seasonID: seasonID)) }
+        noteMutation(.season(teamID: teamID, seasonID: seasonID))
     }
 
     public func teamID(forMatch matchID: MatchID) throws -> TeamID {
@@ -282,7 +299,7 @@ public actor MatchStore {
         player.team = team
         modelContext.insert(player)
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.players(teamID: teamID, playerIDs: [player.playerID])) }
+        noteMutation(.players(teamID: teamID, playerIDs: [player.playerID]))
         return player.playerID
     }
 
@@ -307,7 +324,7 @@ public actor MatchStore {
             ids.append(player.playerID)
         }
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.players(teamID: teamID, playerIDs: ids)) }
+        noteMutation(.players(teamID: teamID, playerIDs: ids))
         return ids
     }
 
@@ -320,8 +337,8 @@ public actor MatchStore {
         player.classYear = snapshot.classYear
         player.isOnRoster = snapshot.isOnRoster
         try modelContext.save()
-        if !suppressOutbound, let owner = player.team {
-            onMutation?(.players(teamID: owner.teamID, playerIDs: [snapshot.id]))
+        if let owner = player.team {
+            noteMutation(.players(teamID: owner.teamID, playerIDs: [snapshot.id]))
         }
     }
 
@@ -340,8 +357,8 @@ public actor MatchStore {
             archived = false
         }
         try modelContext.save()
-        if !suppressOutbound, let ownerID {
-            onMutation?(
+        if let ownerID {
+            noteMutation(
                 archived
                     ? .players(teamID: ownerID, playerIDs: [playerID])
                     : .deletedPlayers(teamID: ownerID, playerIDs: [playerID]))
@@ -397,7 +414,7 @@ public actor MatchStore {
         model.opponentRosterData = try ProgrammeCoding.encoder.encode(opponentRoster)
         modelContext.insert(model)
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.match(model.matchID)) }
+        noteMutation(.match(model.matchID))
         return model.matchID
     }
 
@@ -446,8 +463,8 @@ public actor MatchStore {
                     matchTouched = true
                 }
             }
-            if !eventIDs.isEmpty { onMutation?(.events(matchID: matchID, eventIDs: eventIDs)) }
-            if matchTouched { onMutation?(.match(matchID)) }
+            if !eventIDs.isEmpty { noteMutation(.events(matchID: matchID, eventIDs: eventIDs)) }
+            if matchTouched { noteMutation(.match(matchID)) }
         }
     }
 
@@ -477,7 +494,7 @@ public actor MatchStore {
         model.updatedAt = Date()
         try modelContext.save()
         onMatchChanged?(matchID)
-        if !suppressOutbound { onMutation?(.match(matchID)) }
+        noteMutation(.match(matchID))
     }
 
     public func updateMatchRoster(matchID: MatchID, roster: RosterSnapshot, opponentRoster: RosterSnapshot)
@@ -487,7 +504,7 @@ public actor MatchStore {
         model.rosterData = try ProgrammeCoding.encoder.encode(roster)
         model.opponentRosterData = try ProgrammeCoding.encoder.encode(opponentRoster)
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.match(matchID)) }
+        noteMutation(.match(matchID))
     }
 
     public func deleteMatch(_ matchID: MatchID) throws {
@@ -497,9 +514,7 @@ public actor MatchStore {
         modelContext.delete(model)
         try modelContext.save()
         onMatchChanged?(matchID)
-        if !suppressOutbound {
-            onMutation?(.deletedMatch(matchID: matchID, teamID: teamID, eventIDs: eventIDs))
-        }
+        noteMutation(.deletedMatch(matchID: matchID, teamID: teamID, eventIDs: eventIDs))
     }
 
     /// Device-local reminder preference, in minutes before kickoff. Nil means
@@ -577,7 +592,7 @@ public actor MatchStore {
             modelContext.insert(eventModel)
         }
         try modelContext.save()
-        if !suppressOutbound { onMutation?(.events(matchID: matchID, eventIDs: events.map(\.id))) }
+        noteMutation(.events(matchID: matchID, eventIDs: events.map(\.id)))
     }
 
     /// Insert a complete match reconstructed from an archive or a journal.
@@ -620,8 +635,8 @@ public actor MatchStore {
         MatchMapper.writeCache(snapshot: StatEngine.snapshot(context: context), into: model)
         try modelContext.save()
         if !suppressOutbound {
-            onMutation?(.match(model.matchID))
-            onMutation?(.events(matchID: model.matchID, eventIDs: context.events.map(\.id)))
+            noteMutation(.match(model.matchID))
+            noteMutation(.events(matchID: model.matchID, eventIDs: context.events.map(\.id)))
         }
         return model.matchID
     }
