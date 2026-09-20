@@ -102,6 +102,33 @@ struct EventEditView: View {
                 }
             }
 
+            if case .shot(let shot) = current.payload,
+                shot.side == .us,
+                session.profile.tracks(.shotLocations)
+            {
+                Section("Shot Location") {
+                    PitchView(
+                        markers: session.shotMarkers.filter { $0.id != current.id },
+                        pendingLocation: shot.location,
+                        isPlacementActive: true,
+                        onPlace: { applyShotLocation($0) },
+                        onClearPendingLocation: { applyShotLocation(nil) }
+                    )
+                    .frame(height: 240)
+                    .accessibilityIdentifier("eventEdit.shotLocation")
+
+                    if shot.location != nil {
+                        Button("Clear Location", systemImage: "xmark.circle") {
+                            applyShotLocation(nil)
+                        }
+                    }
+
+                    Text("Tap the pitch to add or move this shot. Apple Pencil works here too.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if case .card(let card) = current.payload {
                 Section("Card") {
                     Picker("Card", selection: cardBinding(card)) {
@@ -332,6 +359,30 @@ struct EventEditView: View {
                         summary: newValue ? "Marked as an own goal" : "No longer an own goal"),
                     message: newValue ? "Recorded as an own goal" : "Updated")
             })
+    }
+
+    private func applyShotLocation(_ location: PitchPoint?) {
+        guard case .shot(var shot) = current.payload, shot.location != location else { return }
+        let hadLocation = shot.location != nil
+        shot.location = location
+
+        let summary: String
+        let message: String
+        switch (hadLocation, location) {
+        case (_, nil):
+            summary = "Shot location cleared"
+            message = "Shot location cleared"
+        case (false, .some):
+            summary = "Shot location added"
+            message = "Shot location added"
+        case (true, .some):
+            summary = "Shot location moved"
+            message = "Shot location updated"
+        }
+
+        session.edit(
+            .replacePayload(current.id, .shot(shot), summary: summary),
+            message: message)
     }
 
     private func cardBinding(_ card: CardEvent) -> Binding<CardType> {
