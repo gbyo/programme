@@ -637,8 +637,12 @@ final class AppModel {
         switch mutation {
         case .team(let id):
             (teamID, matchID) = (id, nil)
-        case .season(let id, _), .players(let id, _), .deletedPlayers(let id, _),
-            .deletedMatch(_, let id, _):
+        case .season(let id, _):
+            (teamID, matchID) = (id, nil)
+            if workspace.selectedTeamID == id {
+                workspace.currentSeasonID = try? await store.currentSeasonID(teamID: id)
+            }
+        case .players(let id, _), .deletedPlayers(let id, _), .deletedMatch(_, let id, _):
             (teamID, matchID) = (id, nil)
         case .match(let id), .events(let id, _):
             (teamID, matchID) = (try? await store.teamID(forMatch: id), id)
@@ -655,12 +659,10 @@ final class AppModel {
         }
     }
 
-    /// HistoryObserver reports only a counter, with no model or record
-    /// detail — and it fires for our own saves too. So this path stays a
-    /// backstop: bursts collapse into one delayed pass, while typed
-    /// mutations above already refreshed their scopes immediately. Never
-    /// skipped or throttled away, because unattributed activity is exactly
-    /// what cross-window and out-of-band edits look like.
+    /// StoreChangeObserver filters out authored typed MatchStore saves before
+    /// reaching this backstop. External or unattributed history activity still
+    /// collapses into one delayed pass so out-of-band edits cannot leave
+    /// derived surfaces stale.
     private func noteStoreActivity() {
         pendingExternalNote?.cancel()
         pendingExternalNote = Task {
@@ -711,8 +713,14 @@ final class AppModel {
     /// Trailing refreshes may never fire once suspended; run anything owed
     /// before backgrounding so the widget and index never go stale silently.
     private func flushPendingSideWork() {
-        pendingExternalNote?.cancel()
-        pendingExternalNote = nil
+        if pendingExternalNote != nil {
+            noteStoreChanged()
+            requestWidgetRefresh()
+            requestSpotlightReindex()
+            Task { await refreshRecoveryCandidates() }
+            pendingExternalNote?.cancel()
+            pendingExternalNote = nil
+        }
         if pendingWidgetTask != nil {
             pendingWidgetTask?.cancel()
             pendingWidgetTask = nil

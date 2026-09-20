@@ -115,6 +115,13 @@ public enum StoreError: Error, Sendable {
     case noCurrentSeason
 }
 
+/// History author reserved for saves that are already described by a typed
+/// `OutboundMutation`. The app's history backstop ignores these transactions
+/// because `noteMutation` invalidates their exact scopes directly.
+public enum ProgrammeTransactionAuthor {
+    public static let typedMatchStoreMutation = "com.gbyo.programme.match-store.typed"
+}
+
 /// All database work that should not happen on the main actor.
 ///
 /// Live scoring keeps its state in memory and writes through here, so recording
@@ -160,6 +167,20 @@ public actor MatchStore {
         onInvalidation?(mutation)
     }
 
+    /// Saves a transaction that will immediately be described through
+    /// `noteMutation`. Transaction authors are used by the iOS 27 history
+    /// backstop; older platforms keep the ordinary save path.
+    private func saveTypedMutation() throws {
+        if #available(iOS 27.0, macOS 27.0, watchOS 27.0, *) {
+            let previousAuthor = modelContext.author
+            modelContext.author = ProgrammeTransactionAuthor.typedMatchStoreMutation
+            defer { modelContext.author = previousAuthor }
+            try modelContext.save()
+        } else {
+            try modelContext.save()
+        }
+    }
+
     /// Set while applying remote changes so they never echo back outbound.
     var suppressOutbound = false
 
@@ -173,7 +194,7 @@ public actor MatchStore {
             name: name, shortName: shortName, mascot: mascot,
             primaryColorHex: primaryColorHex, secondaryColorHex: secondaryColorHex)
         modelContext.insert(team)
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.team(team.teamID))
         return team.teamID
     }
@@ -197,7 +218,7 @@ public actor MatchStore {
         team.mascot = mascot
         team.primaryColorHex = primaryColorHex
         team.secondaryColorHex = secondaryColorHex
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.team(teamID))
     }
 
@@ -214,7 +235,7 @@ public actor MatchStore {
             name: name, startDate: startDate, endDate: endDate, isCurrent: makeCurrent)
         season.team = team
         modelContext.insert(season)
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.season(teamID: teamID, seasonID: season.seasonID))
         return season.seasonID
     }
@@ -250,7 +271,7 @@ public actor MatchStore {
             throw StoreError.teamNotFound
         }
         for season in team.seasons { season.isCurrent = (season.identifier == seasonID.rawValue) }
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.season(teamID: teamID, seasonID: seasonID))
     }
 
@@ -298,7 +319,7 @@ public actor MatchStore {
         )
         player.team = team
         modelContext.insert(player)
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.players(teamID: teamID, playerIDs: [player.playerID]))
         return player.playerID
     }
@@ -323,7 +344,7 @@ public actor MatchStore {
             modelContext.insert(player)
             ids.append(player.playerID)
         }
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.players(teamID: teamID, playerIDs: ids))
         return ids
     }
@@ -336,9 +357,14 @@ public actor MatchStore {
         player.position = snapshot.position
         player.classYear = snapshot.classYear
         player.isOnRoster = snapshot.isOnRoster
-        try modelContext.save()
-        if let owner = player.team {
-            noteMutation(.players(teamID: owner.teamID, playerIDs: [snapshot.id]))
+        let ownerID = player.team?.teamID
+        if ownerID != nil {
+            try saveTypedMutation()
+        } else {
+            try modelContext.save()
+        }
+        if let ownerID {
+            noteMutation(.players(teamID: ownerID, playerIDs: [snapshot.id]))
         }
     }
 
@@ -356,7 +382,11 @@ public actor MatchStore {
             modelContext.delete(player)
             archived = false
         }
-        try modelContext.save()
+        if ownerID != nil {
+            try saveTypedMutation()
+        } else {
+            try modelContext.save()
+        }
         if let ownerID {
             noteMutation(
                 archived
@@ -413,7 +443,7 @@ public actor MatchStore {
         model.rosterData = try ProgrammeCoding.encoder.encode(roster)
         model.opponentRosterData = try ProgrammeCoding.encoder.encode(opponentRoster)
         modelContext.insert(model)
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.match(model.matchID))
         return model.matchID
     }
@@ -428,12 +458,15 @@ public actor MatchStore {
     /// already applied them, so the scorer never waits on the database.
     public func apply(_ effects: [MatchEffect], to matchID: MatchID) throws {
         guard let model = try match(matchID) else { throw StoreError.matchNotFound }
+        var eventIDs: [EventID] = []
+        var matchTouched = false
         for effect in effects {
             switch effect {
             case .appendEvent(let event):
                 let eventModel = try MatchEventModel(event: event)
                 eventModel.match = model
                 modelContext.insert(eventModel)
+                eventIDs.append(event.id)
             case .replaceEvent(let event):
                 if let existing = model.events.first(where: { $0.identifier == event.id.rawValue }) {
                     try existing.update(from: event)
@@ -442,30 +475,26 @@ public actor MatchStore {
                     eventModel.match = model
                     modelContext.insert(eventModel)
                 }
+                eventIDs.append(event.id)
             case .setClock(let clock):
                 model.clockAnchor = clock
+                matchTouched = true
             case .setPhase(let phase):
                 model.phase = phase
+                matchTouched = true
             case .setFinalized(let date):
                 model.finalizedAt = date
+                matchTouched = true
             }
         }
         model.updatedAt = Date()
-        try modelContext.save()
-        if !suppressOutbound {
-            var eventIDs: [EventID] = []
-            var matchTouched = false
-            for effect in effects {
-                switch effect {
-                case .appendEvent(let event), .replaceEvent(let event):
-                    eventIDs.append(event.id)
-                case .setClock, .setPhase, .setFinalized:
-                    matchTouched = true
-                }
-            }
-            if !eventIDs.isEmpty { noteMutation(.events(matchID: matchID, eventIDs: eventIDs)) }
-            if matchTouched { noteMutation(.match(matchID)) }
+        if eventIDs.isEmpty && !matchTouched {
+            try modelContext.save()
+        } else {
+            try saveTypedMutation()
         }
+        if !eventIDs.isEmpty { noteMutation(.events(matchID: matchID, eventIDs: eventIDs)) }
+        if matchTouched { noteMutation(.match(matchID)) }
     }
 
     /// Refresh the denormalised list values from an authoritative snapshot.
@@ -492,7 +521,7 @@ public actor MatchStore {
         model.competition = competition
         model.location = location
         model.updatedAt = Date()
-        try modelContext.save()
+        try saveTypedMutation()
         onMatchChanged?(matchID)
         noteMutation(.match(matchID))
     }
@@ -503,7 +532,7 @@ public actor MatchStore {
         guard let model = try match(matchID) else { throw StoreError.matchNotFound }
         model.rosterData = try ProgrammeCoding.encoder.encode(roster)
         model.opponentRosterData = try ProgrammeCoding.encoder.encode(opponentRoster)
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.match(matchID))
     }
 
@@ -512,7 +541,7 @@ public actor MatchStore {
         let eventIDs = model.events.map { EventID($0.identifier) }
         let teamID = TeamID(model.teamIdentifier)
         modelContext.delete(model)
-        try modelContext.save()
+        try saveTypedMutation()
         onMatchChanged?(matchID)
         noteMutation(.deletedMatch(matchID: matchID, teamID: teamID, eventIDs: eventIDs))
     }
@@ -591,7 +620,7 @@ public actor MatchStore {
             eventModel.match = model
             modelContext.insert(eventModel)
         }
-        try modelContext.save()
+        try saveTypedMutation()
         noteMutation(.events(matchID: matchID, eventIDs: events.map(\.id)))
     }
 
@@ -633,11 +662,9 @@ public actor MatchStore {
             modelContext.insert(eventModel)
         }
         MatchMapper.writeCache(snapshot: StatEngine.snapshot(context: context), into: model)
-        try modelContext.save()
-        if !suppressOutbound {
-            noteMutation(.match(model.matchID))
-            noteMutation(.events(matchID: model.matchID, eventIDs: context.events.map(\.id)))
-        }
+        try saveTypedMutation()
+        noteMutation(.match(model.matchID))
+        noteMutation(.events(matchID: model.matchID, eventIDs: context.events.map(\.id)))
         return model.matchID
     }
 

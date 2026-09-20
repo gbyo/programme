@@ -49,6 +49,9 @@ struct PlayerDetailView: View {
             id: [
                 playerID.rawValue.uuidString, "\(appModel.storeRevision)",
                 "\(appModel.scopeRevision(.player(playerID)).count)",
+                ownerTeamID.map {
+                    "\($0.rawValue.uuidString):\(appModel.scopeRevision(.teamEvents($0)).count)"
+                } ?? "owner-unresolved",
             ]
         ) { await load() }
     }
