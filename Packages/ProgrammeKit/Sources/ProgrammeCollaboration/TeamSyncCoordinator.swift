@@ -105,6 +105,7 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
     private var onIncoming: (@Sendable ([IncomingChange]) -> Void)?
     private var onZoneDeleted: (@Sendable (SyncDatabase, CKRecordZone.ID) -> Void)?
     private var onStatusChange: (@Sendable (Status) -> Void)?
+    private var onAccountChanged: (@Sendable () -> Void)?
 
     public func setIncomingHandler(_ handler: (@Sendable ([IncomingChange]) -> Void)?) {
         onIncoming = handler
@@ -118,6 +119,13 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
 
     public func setStatusHandler(_ handler: (@Sendable (Status) -> Void)?) {
         onStatusChange = handler
+    }
+
+    /// Fires on sign-out and account switches so zone readiness tied to the
+    /// previous account can be forgotten. Sign-ins keep existing readiness:
+    /// the same account's zones are still established.
+    public func setAccountChangedHandler(_ handler: (@Sendable () -> Void)?) {
+        onAccountChanged = handler
     }
 
     public init(
@@ -320,6 +328,7 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
             setStatus(.idle)
         case .signOut, .switchAccounts:
             // Local scoring data is never touched by account events.
+            onAccountChanged?()
             setStatus(
                 .attentionNeeded(
                     "The iCloud account changed. Your matches stay on this device."))
