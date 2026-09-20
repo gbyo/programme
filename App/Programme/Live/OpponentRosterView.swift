@@ -19,6 +19,7 @@ struct OpponentRosterView: View {
     @State private var isPasting = false
     @State private var addFeedbackTrigger = 0
     @FocusState private var numberFieldIsFocused: Bool
+    @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
         List {
@@ -30,6 +31,8 @@ struct OpponentRosterView: View {
                         .focused($numberFieldIsFocused)
                     TextField("Name", text: $newName)
                         .textInputAutocapitalization(.words)
+                        .focused($nameFieldIsFocused)
+                        .submitLabel(.done)
                         .onSubmit(add)
                     Button("Add", action: add)
                         .buttonStyle(.borderedProminent)
@@ -85,6 +88,16 @@ struct OpponentRosterView: View {
                     dismiss()
                 }
                 .fontWeight(.semibold)
+            }
+            // The number pad has no Return key: Next advances to Name for
+            // rapid entry, Done dismisses. The accessory appears only while
+            // the numeric field is focused.
+            if numberFieldIsFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Next") { nameFieldIsFocused = true }
+                    Button("Done") { numberFieldIsFocused = false }
+                }
             }
         }
         .sheet(isPresented: $isPasting) {
