@@ -36,6 +36,16 @@ enum ComposerStep: Equatable {
     /// and skipping costs nothing.
     case shotLocation(shot: EventID, shooterName: String, outcome: ShotOutcome)
 
+    /// Advanced-only optional detail on a shot that is already recorded.
+    case shotBodyPart(shot: EventID, shooterName: String, outcome: ShotOutcome)
+
+    /// Advanced-only phase confirmation/correction on a shot that is already recorded.
+    case shotPhase(
+        shot: EventID, shooterName: String, outcome: ShotOutcome, currentPhase: PlayPhase)
+
+    /// Advanced-only optional reason on a card that is already recorded.
+    case cardReason(card: EventID, playerName: String, type: CardType)
+
     /// Its own focused task rather than an event to complete, but it belongs to
     /// the same workspace and the same presentation rules.
     case substitution
@@ -44,7 +54,7 @@ enum ComposerStep: Equatable {
     /// already-recorded event are safe to walk away from.
     var isSafeToAbandon: Bool {
         switch self {
-        case .assist, .shotLocation, .substitution: true
+        case .assist, .shotLocation, .shotBodyPart, .shotPhase, .cardReason, .substitution: true
         case .choosePlayer, .shotOutcome: false
         }
     }
@@ -66,6 +76,9 @@ enum ComposerStep: Equatable {
         case .shotOutcome: "What happened?"
         case .assist: "Who assisted?"
         case .shotLocation: "Where was it struck?"
+        case .shotBodyPart: "How was it struck?"
+        case .shotPhase: "What phase of play?"
+        case .cardReason: "Why was the card shown?"
         case .substitution: "Substitution"
         }
     }
@@ -86,23 +99,65 @@ struct EventComposer: Equatable {
     mutating func ask(_ step: ComposerStep) { self.step = step }
     mutating func finish() { step = nil }
 
-    /// Offer optional location enrichment for a shot that is already recorded.
-    ///
-    /// This is shared by ordinary shots and by goals after their assist question,
-    /// so the profile policy cannot drift between those two paths.
-    mutating func offerShotLocation(
+    /// Advance through optional shot enrichment without putting any of those
+    /// answers in front of the primary event. Each stage revises the same shot.
+    mutating func offerShotEnrichment(
         shot: EventID,
         shooterName: String,
         outcome: ShotOutcome,
+        currentPhase: PlayPhase,
         side: TeamSide,
-        profile: StatProfile
+        profile: StatProfile,
+        startingAt step: ShotEnrichmentStep = .location
     ) {
-        guard profile.prompts.shotLocation, side == .us else {
+        switch step {
+        case .location:
+            if profile.prompts.shotLocation, side == .us {
+                ask(.shotLocation(shot: shot, shooterName: shooterName, outcome: outcome))
+                return
+            }
+            offerShotEnrichment(
+                shot: shot, shooterName: shooterName, outcome: outcome,
+                currentPhase: currentPhase, side: side, profile: profile,
+                startingAt: .bodyPart)
+
+        case .bodyPart:
+            if profile.prompts.bodyPart {
+                ask(.shotBodyPart(shot: shot, shooterName: shooterName, outcome: outcome))
+                return
+            }
+            offerShotEnrichment(
+                shot: shot, shooterName: shooterName, outcome: outcome,
+                currentPhase: currentPhase, side: side, profile: profile,
+                startingAt: .playPhase)
+
+        case .playPhase:
+            if profile.prompts.playPhase {
+                ask(
+                    .shotPhase(
+                        shot: shot, shooterName: shooterName, outcome: outcome,
+                        currentPhase: currentPhase))
+                return
+            }
+            finish()
+        }
+    }
+
+    mutating func offerCardReason(
+        card: EventID, playerName: String, type: CardType, profile: StatProfile
+    ) {
+        guard profile.prompts.cardReason else {
             finish()
             return
         }
-        ask(.shotLocation(shot: shot, shooterName: shooterName, outcome: outcome))
+        ask(.cardReason(card: card, playerName: playerName, type: type))
     }
+}
+
+enum ShotEnrichmentStep: Equatable {
+    case location
+    case bodyPart
+    case playPhase
 }
 
 /// An action waiting for the player it belongs to.
