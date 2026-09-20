@@ -509,7 +509,7 @@ enum OpponentQuickAction: String, Identifiable, CaseIterable {
     }
 }
 
-enum OpponentMenuAction: String, Identifiable, CaseIterable {
+enum OpponentMenuAction: String, Identifiable, CaseIterable, Hashable {
     case penaltyKick
     case steal
     case foul
