@@ -77,41 +77,67 @@ final class LocationSearchModel {
     }
 }
 
-/// Optional venue picker. A match without a location is complete and
-/// scorable; this row only adds a real place when the scorer wants one.
-struct LocationSearchField: View {
+/// Optional venue value row. A match without a location is complete and
+/// scorable; the row only opens the picker when the scorer wants a place.
+struct LocationPickerLink: View {
     @Binding var selection: MatchLocation?
+
+    var body: some View {
+        NavigationLink {
+            VenuePickerView(selection: $selection)
+        } label: {
+            if let selection {
+                LabeledContent("Location") {
+                    Text(selection.name)
+                        .multilineTextAlignment(.trailing)
+                }
+            } else {
+                LabeledContent("Location") {
+                    Text("Add Location")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("matchLocation.search")
+    }
+}
+
+/// Focused venue lookup. Native `.searchable` presentation with a List of
+/// MapKit completions; only the selected completion resolves, and
+/// selecting returns to New Match. Never requests the user's location.
+struct VenuePickerView: View {
+    @Binding var selection: MatchLocation?
+    @Environment(\.dismiss) private var dismiss
     @State private var model = LocationSearchModel()
 
     var body: some View {
-        if let selection {
-            LabeledContent("Location") {
-                Text(selection.name)
-                    .multilineTextAlignment(.trailing)
+        List {
+            if let selection {
+                Section {
+                    LabeledContent("Selected") {
+                        Text(selection.name)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    if let address = selection.address {
+                        Text(address)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Remove Location", role: .destructive) {
+                        self.selection = nil
+                    }
+                    .accessibilityIdentifier("matchLocation.clear")
+                }
             }
-            if let address = selection.address {
-                Text(address)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Button("Remove Location", role: .destructive) {
-                self.selection = nil
-                model.queryChanged("")
-            }
-            .accessibilityIdentifier("matchLocation.clear")
-        } else {
-            TextField("Search for a venue", text: $model.query)
-                .textInputAutocapitalization(.words)
-                .accessibilityIdentifier("matchLocation.search")
-                .onChange(of: model.query) { _, text in model.queryChanged(text) }
             if model.isSearching {
-                ProgressView().controlSize(.small)
+                ProgressView("Looking up…")
             }
             ForEach(model.completions, id: \.self) { completion in
                 Button {
                     Task {
                         if let resolved = await model.resolve(completion) {
                             selection = resolved
+                            dismiss()
                         }
                     }
                 } label: {
@@ -130,11 +156,18 @@ struct LocationSearchField: View {
                 Text(searchError)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                Text("Optional. Works offline without one — search needs internet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            }
+            if model.query.isEmpty && selection == nil && !model.isSearching {
+                ContentUnavailableView(
+                    "Search for a Venue", systemImage: "mappin.and.ellipse",
+                    description: Text(
+                        "Optional. The match works offline without one — search needs internet."))
             }
         }
+        .searchable(text: $model.query, prompt: "Search for a venue")
+        .textInputAutocapitalization(.words)
+        .onChange(of: model.query) { _, text in model.queryChanged(text) }
+        .navigationTitle("Location")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
