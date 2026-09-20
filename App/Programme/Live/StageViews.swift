@@ -223,16 +223,16 @@ struct AssistPickerStage: View {
     }
 }
 
-/// Optional shot placement, for a shot that is **already recorded**.
-///
-/// Always skippable, and skipping now costs nothing at all: the shot exists with
-/// its outcome and its shooter before this appears. A match is fully scoreable
-/// with no shot map.
 enum ShotLocationPresentation {
     case inline
     case compactSheet
 }
 
+/// Optional shot placement, for a shot that is **already recorded**.
+///
+/// Always skippable, and skipping now costs nothing at all: the shot exists with
+/// its outcome and its shooter before this appears. A match is fully scoreable
+/// with no shot map.
 struct ShotLocationStage: View {
     let shooterName: String
     let outcome: ShotOutcome
