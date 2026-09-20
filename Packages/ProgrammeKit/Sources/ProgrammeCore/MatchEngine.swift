@@ -297,7 +297,8 @@ public enum MatchEngine {
 
         case .attribute(let id, let slot, let ref):
             var event = try find(id, in: context)
-            let label = context.roster.label(for: ref)
+            let side = event.payload.side ?? .us
+            let label = context.roster(for: side).label(for: ref)
             event.payload = try applying(ref, slot: slot, to: event.payload)
             let summary =
                 switch slot {
