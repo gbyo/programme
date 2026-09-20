@@ -29,9 +29,21 @@ struct NearbyDisplayView: View {
                 scoreColumn(name: snapshot.opponentShortName, value: snapshot.scoreOpponent)
             }
 
-            Text(clock.displayText)
+            // System-animated from the snapshot's anchor, matching the
+            // scorer header: advancing time costs no app-owned tick and
+            // no extra nearby traffic.
+            if clock.isRunning {
+                Text(
+                    timerInterval: WidgetClock.timerRange(
+                        anchor: snapshot.clock, rules: snapshot.rules, at: Date()),
+                    countsDown: WidgetClock.countsDown(rules: snapshot.rules),
+                    showsHours: false
+                )
                 .font(.system(size: 92, weight: .light).monospacedDigit())
-                .contentTransition(.numericText())
+            } else {
+                Text(clock.displayText)
+                    .font(.system(size: 92, weight: .light).monospacedDigit())
+            }
 
             if let last = snapshot.lastEventSummary {
                 Text(last)
