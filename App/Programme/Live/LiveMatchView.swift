@@ -185,6 +185,10 @@ struct LiveMatchView: View {
                 }
                 .programmeSensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
+                // Keep a semantic title even though the scorer intentionally
+                // removes the visible title item from its compact toolbar.
+                // iPadOS uses this title to distinguish the window in App Switcher.
+                .navigationTitle("Scoring — \(session.descriptor.title)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar(removing: .title)
                 .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
