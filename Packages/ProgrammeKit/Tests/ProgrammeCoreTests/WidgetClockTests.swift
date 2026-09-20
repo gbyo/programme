@@ -57,6 +57,17 @@ struct WidgetClockTests {
         #expect(second.upperBound.timeIntervalSince(secondNow) == 2_200)
     }
 
+    @Test("An overrun clock keeps a valid range pinned at the period end")
+    func overrunRange() {
+        let now = Date(timeIntervalSinceReferenceDate: 5_000)
+        // 200 seconds past a 40-minute period, still running.
+        let anchor = ClockAnchor(
+            period: 1, elapsedAtAnchor: 2_400, runningSince: now.addingTimeInterval(-200))
+        let range = WidgetClock.timerRange(anchor: anchor, rules: rules, at: now)
+        #expect(range.lowerBound <= range.upperBound)
+        #expect(range.upperBound.timeIntervalSince(range.lowerBound) >= 1)
+    }
+
     @Test("Only period countdown counts down")
     func countDirection() {
         #expect(WidgetClock.countsDown(rules: rules))
