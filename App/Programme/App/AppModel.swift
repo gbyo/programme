@@ -1,7 +1,7 @@
 import CloudKit
 import Foundation
-import Observation
 import OSLog
+import Observation
 import ProgrammeCollaboration
 import ProgrammeCore
 import ProgrammeExport
