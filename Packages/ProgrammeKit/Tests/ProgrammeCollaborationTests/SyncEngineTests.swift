@@ -150,3 +150,46 @@ struct TeamSyncCoordinatorTests {
         #expect(await coordinator.batchForScope(.private) == nil)
     }
 }
+
+@Suite("The inbox consumes transactionally")
+struct SyncInboxTests {
+    private func change(named name: String) -> IncomingChange {
+        IncomingChange(
+            database: .private, zoneName: "team_x", ownerName: "",
+            recordName: name, recordType: TeamRecord.recordType,
+            archivedRecord: nil, deleted: false)
+    }
+
+    @Test("Peeking leaves the durable copy; completing swaps in deferred")
+    func peekThenComplete() async throws {
+        let url = temporaryURL("inbox.json")
+        let inbox = try SyncInbox(url: url)
+        let first = change(named: "team-a")
+        let second = change(named: "team-b")
+        try await inbox.append([first, second])
+
+        // A snapshot for the applier removes nothing durable: reopening
+        // mid-materialization still sees every fetched change.
+        let snapshot = await inbox.peek()
+        #expect(snapshot == [first, second])
+        #expect(await inbox.count == 2)
+        #expect(try await SyncInbox(url: url).count == 2)
+
+        // A change arriving mid-materialization survives completion, and
+        // only the consumed snapshot is replaced by the deferred subset.
+        let late = change(named: "team-c")
+        try await inbox.append([late])
+        try await inbox.complete(consumed: snapshot.count, deferred: [second])
+        #expect(await inbox.peek() == [late, second])
+        #expect(try await SyncInbox(url: url).peek() == [late, second])
+    }
+
+    @Test("Completing with nothing deferred empties the inbox")
+    func completeDropsApplied() async throws {
+        let inbox = try SyncInbox(url: temporaryURL("inbox.json"))
+        try await inbox.append([change(named: "team-a")])
+        let snapshot = await inbox.peek()
+        try await inbox.complete(consumed: snapshot.count, deferred: [])
+        #expect(await inbox.count == 0)
+    }
+}
