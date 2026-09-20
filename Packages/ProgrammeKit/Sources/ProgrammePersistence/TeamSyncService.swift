@@ -157,15 +157,36 @@ public actor TeamSyncService: Sendable {
     public func stage(_ mutation: OutboundMutation) async {
         guard started else { return }
         await ensureZoneIfNeeded(for: mutation)
-        for change in await stagedChanges(for: mutation) {
-            switch change {
-            case .save(let record, let scope):
-                do { try await coordinator.stageSave(record, in: scope) } catch {
+        let changes = await stagedChanges(for: mutation)
+
+        // Preserve the mutation's natural batch. A roster import or multi-event
+        // write should produce one durable outbox replacement per database,
+        // not one full manifest rewrite (and scheduler nudge) per record.
+        for scope in [SyncDatabase.private, .shared] as [SyncDatabase] {
+            let saves = changes.compactMap { change -> CKRecord? in
+                guard case .save(let record, let changeScope) = change, changeScope == scope
+                else { return nil }
+                return record
+            }
+            let deletes = changes.compactMap { change -> (CKRecord.ID, String)? in
+                guard case .delete(let id, let recordType, let changeScope) = change,
+                    changeScope == scope
+                else { return nil }
+                return (id, recordType)
+            }
+
+            if !saves.isEmpty {
+                do {
+                    try await coordinator.stageSaves(saves, in: scope)
+                } catch {
                     onStagingFailed?(
                         "A change could not be staged for sync. Your matches are safe on this device.")
                 }
-            case .delete(let id, let recordType, let scope):
-                do { try await coordinator.stageDelete(recordID: id, recordType: recordType, in: scope) } catch {
+            }
+            if !deletes.isEmpty {
+                do {
+                    try await coordinator.stageDeletes(deletes, in: scope)
+                } catch {
                     onStagingFailed?(
                         "A deletion could not be staged for sync. Your matches are safe on this device.")
                 }

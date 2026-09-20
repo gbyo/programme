@@ -65,6 +65,24 @@ struct SyncOutboxTests {
         #expect(await outbox.stagedDeletes.count == 1)
     }
 
+    @Test("Batch staging survives relaunch with every record")
+    func batchedSavesSurviveRelaunch() async throws {
+        let url = temporaryURL("outbox.json")
+        let first = teamRecord(named: "First")
+        let teamID = TeamID(ProgrammeSample.id("team.other"))
+        let second = TeamRecord(teamID: teamID, name: "Second", shortName: "2nd", createdAt: Date())
+            .makeRecord(in: TeamZone.zoneID(for: teamID))
+
+        let outbox = try SyncOutbox(url: url)
+        try await outbox.stageSaves([first, second])
+
+        let restored = try SyncOutbox(url: url)
+        #expect(await restored.stagedSaves.count == 2)
+        let saves = await restored.stagedSaves
+        let recordNames = Set(saves.map(\.recordName))
+        #expect(recordNames == Set([first.recordID.recordName, second.recordID.recordName]))
+    }
+
     @Test("Confirmed sends leave everything else staged")
     func confirmedSendsClearSelectively() async throws {
         let url = temporaryURL("outbox.json")
@@ -106,11 +124,15 @@ struct TeamSyncCoordinatorTests {
         #expect(await coordinator.batchForScope(.private) == nil)
 
         let record = teamRecord()
-        try await coordinator.stageSave(record, in: .private)
+        let otherTeamID = TeamID(ProgrammeSample.id("team.other"))
+        let second = TeamRecord(
+            teamID: otherTeamID, name: "Second", shortName: "2nd", createdAt: Date()
+        ).makeRecord(in: TeamZone.zoneID(for: otherTeamID))
+        try await coordinator.stageSaves([record, second], in: .private)
         let batch = await coordinator.batchForScope(.private)
         let batchRecords = try #require(batch?.recordsToSave)
-        #expect(batchRecords.count == 1)
-        #expect(batchRecords[0].recordID == record.recordID)
+        #expect(batchRecords.count == 2)
+        #expect(Set(batchRecords.map(\.recordID)) == Set([record.recordID, second.recordID]))
         // The shared database has its own outbox: no cross-contamination.
         #expect(await coordinator.batchForScope(.shared) == nil)
     }

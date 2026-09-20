@@ -82,12 +82,6 @@ final class NearbyScoreboardService {
         listener.start(queue: .main)
         self.listener = listener
         advertising = .waiting
-        heartbeat = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.heartbeatInterval)
-                await self?.sendLatest()
-            }
-        }
     }
 
     /// Broadcasts a snapshot to every connected display. Fire-and-forget:
@@ -144,6 +138,7 @@ final class NearbyScoreboardService {
         connection.start(queue: .main)
         displays.append(connection)
         updateServing()
+        updateHeartbeat()
         sendLatest(to: connection)
     }
 
@@ -152,6 +147,7 @@ final class NearbyScoreboardService {
         case .failed, .cancelled:
             displays.removeAll { $0 === connection }
             updateServing()
+            updateHeartbeat()
         default: break
         }
     }
@@ -164,8 +160,31 @@ final class NearbyScoreboardService {
     private func advertisingStateChanged(_ state: NWListener.State) {
         switch state {
         case .failed, .cancelled:
+            heartbeat?.cancel()
+            heartbeat = nil
             advertising = .off
         default: break
+        }
+    }
+
+    private func updateHeartbeat() {
+        guard listener != nil, !displays.isEmpty else {
+            heartbeat?.cancel()
+            heartbeat = nil
+            return
+        }
+        guard heartbeat == nil else { return }
+
+        heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: Self.heartbeatInterval)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await self?.sendLatest()
+            }
         }
     }
 

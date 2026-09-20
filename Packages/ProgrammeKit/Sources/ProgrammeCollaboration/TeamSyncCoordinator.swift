@@ -149,9 +149,10 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
         return nil
     }
 
-    /// Creates both engines (idempotent) and performs an initial fetch.
-    /// Safe to call while offline: the engines simply report errors through
-    /// events and the outbox keeps everything staged.
+    /// Creates both engines (idempotent). CKSyncEngine's automatic scheduler
+    /// performs the initial fetch and subsequent sends/fetches at system-chosen
+    /// times, taking connectivity, power, load, retries, and rate limits into
+    /// account. Programme only invokes immediate sync for an explicit caller.
     public func start() async {
         let container = makeContainer()
         for scope in [SyncDatabase.private, .shared] as [SyncDatabase] {
@@ -163,15 +164,18 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
                 engines[scope] = CKSyncEngine(configuration)
             }
         }
-        await fetchNow()
     }
 
+    /// Explicit immediate refresh seam for user-driven refresh/tests. Normal
+    /// replication relies on CKSyncEngine's default automatic scheduling.
     public func fetchNow() async {
         for engine in engines.values {
             try? await engine.fetchChanges()
         }
     }
 
+    /// Explicit immediate send seam for user-driven backup/tests. Staging local
+    /// changes does not call this; adding pending changes schedules sync.
     public func sendNow() async {
         for engine in engines.values {
             try? await engine.sendChanges()
@@ -180,25 +184,39 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
 
     /// Stages a record save durably, then tells the engine new work exists.
     public func stageSave(_ record: CKRecord, in scope: SyncDatabase) async throws {
-        guard let outbox = outboxes[scope] else { return }
-        try await outbox.stageSave(record)
-        engines[scope]?.state.add(pendingRecordZoneChanges: [.saveRecord(record.recordID)])
-        await sendNow()
+        try await stageSaves([record], in: scope)
+    }
+
+    public func stageSaves(_ records: [CKRecord], in scope: SyncDatabase) async throws {
+        guard !records.isEmpty, let outbox = outboxes[scope] else { return }
+        try await outbox.stageSaves(records)
+        let pending: [CKSyncEngine.PendingRecordZoneChange] = records.map {
+            .saveRecord($0.recordID)
+        }
+        engines[scope]?.state.add(pendingRecordZoneChanges: pending)
     }
 
     public func stageDelete(
         recordID: CKRecord.ID, recordType: String, in scope: SyncDatabase
     ) async throws {
-        guard let outbox = outboxes[scope] else { return }
-        try await outbox.stageDelete(recordID: recordID, recordType: recordType)
-        engines[scope]?.state.add(pendingRecordZoneChanges: [.deleteRecord(recordID)])
-        await sendNow()
+        try await stageDeletes([(recordID, recordType)], in: scope)
     }
 
-    /// Creates the team's custom zone on first share/sync.
+    public func stageDeletes(
+        _ records: [(CKRecord.ID, String)], in scope: SyncDatabase
+    ) async throws {
+        guard !records.isEmpty, let outbox = outboxes[scope] else { return }
+        try await outbox.stageDeletes(records)
+        let pending: [CKSyncEngine.PendingRecordZoneChange] = records.map {
+            .deleteRecord($0.0)
+        }
+        engines[scope]?.state.add(pendingRecordZoneChanges: pending)
+    }
+
+    /// Creates the team's custom zone on first share/sync. Adding the pending
+    /// database change is enough for automatic sync to schedule its send.
     public func ensureTeamZone(_ zone: CKRecordZone, in scope: SyncDatabase) async {
         engines[scope]?.state.add(pendingDatabaseChanges: [.saveZone(zone)])
-        await sendNow()
     }
 
     /// Drains fetched changes through the applier and re-buffers whatever
