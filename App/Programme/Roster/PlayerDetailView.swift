@@ -133,14 +133,8 @@ struct PlayerDetailView: View {
                         StatCell("Minutes", .count(keeper.minutesPlayed), emphasis: true)
                         StatCell("Saves", .count(keeper.totals.saves), emphasis: true)
                         StatCell("Goals Allowed", .count(keeper.totals.goalsAllowed), emphasis: true)
-                        StatCell(
-                            "Penalties Faced",
-                            stats.value(.penaltyKicks, \.penaltyAttempts).isTracked
-                                ? .count(keeper.totals.penaltiesFaced) : .notTracked)
-                        StatCell(
-                            "Penalty Saves",
-                            stats.value(.penaltyKicks, \.penaltyAttempts).isTracked
-                                ? .count(keeper.totals.penaltySaves) : .notTracked)
+                        StatCell("Penalties Faced", keeperPenaltyValue(keeper.totals.penaltiesFaced))
+                        StatCell("Penalty Saves", keeperPenaltyValue(keeper.totals.penaltySaves))
                         StatCell("Save %", keeper.savePercentage, style: .percent)
                         StatCell("GAA", keeper.goalsAgainstAverage, style: .decimal)
                         StatCell("Shutouts", .count(keeper.totals.shutouts))
@@ -152,6 +146,10 @@ struct PlayerDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private func keeperPenaltyValue(_ value: Int) -> StatValue {
+        ((season?.trackedMatches[.penaltyKicks] ?? 0) > 0) ? .count(value) : .notTracked
     }
 
     private func load() async {
