@@ -86,11 +86,10 @@ struct EventComposer: Equatable {
     mutating func ask(_ step: ComposerStep) { self.step = step }
     mutating func finish() { step = nil }
 
-    /// Continue optional shot enrichment after an assist question.
+    /// Offer optional location enrichment for a shot that is already recorded.
     ///
-    /// A goal is already recorded by this point, so profiles that collect shot
-    /// locations move directly to the map whether the assist was answered or
-    /// deferred. Profiles that do not collect locations are finished.
+    /// This is shared by ordinary shots and by goals after their assist question,
+    /// so the profile policy cannot drift between those two paths.
     mutating func offerShotLocation(
         shot: EventID,
         shooterName: String,
