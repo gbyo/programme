@@ -46,6 +46,22 @@ public struct MatchListItem: Identifiable, Hashable, Sendable {
     }
 }
 
+/// Lightweight team identity for bootstrap, workspace routing, sync zone setup,
+/// and intents enumeration. Reads scalar fields only and never faults the
+/// players or seasons relationships. Surfaces that display counts use
+/// `teams()` instead.
+public struct TeamIdentity: Identifiable, Hashable, Sendable {
+    public var id: TeamID
+    public var name: String
+    public var shortName: String
+
+    public init(id: TeamID, name: String, shortName: String) {
+        self.id = id
+        self.name = name
+        self.shortName = shortName
+    }
+}
+
 public struct TeamListItem: Identifiable, Hashable, Sendable {
     public var id: TeamID
     public var name: String
@@ -59,6 +75,25 @@ public struct TeamListItem: Identifiable, Hashable, Sendable {
         self.shortName = shortName
         self.playerCount = playerCount
         self.seasonCount = seasonCount
+    }
+}
+
+/// Lightweight season identity for pickers, filters, and sync staging. Reads
+/// scalar fields only and never faults the matches relationship. Surfaces
+/// that display match counts use `seasons(teamID:)` instead.
+public struct SeasonIdentity: Identifiable, Hashable, Sendable {
+    public var id: SeasonID
+    public var name: String
+    public var startDate: Date
+    public var endDate: Date?
+    public var isCurrent: Bool
+
+    public init(id: SeasonID, name: String, startDate: Date, endDate: Date?, isCurrent: Bool) {
+        self.id = id
+        self.name = name
+        self.startDate = startDate
+        self.endDate = endDate
+        self.isCurrent = isCurrent
     }
 }
 
@@ -161,6 +196,13 @@ public actor MatchStore {
         return team.teamID
     }
 
+    public func teamIdentities() throws -> [TeamIdentity] {
+        let descriptor = FetchDescriptor<TeamModel>(sortBy: [SortDescriptor(\.name)])
+        return try modelContext.fetch(descriptor).map {
+            TeamIdentity(id: $0.teamID, name: $0.name, shortName: $0.shortName)
+        }
+    }
+
     public func teams() throws -> [TeamListItem] {
         let descriptor = FetchDescriptor<TeamModel>(sortBy: [SortDescriptor(\.name)])
         return try modelContext.fetch(descriptor).map {
@@ -213,6 +255,17 @@ public actor MatchStore {
         return TeamDetails(
             id: model.teamID, name: model.name, shortName: model.shortName, mascot: model.mascot,
             primaryColorHex: model.primaryColorHex, secondaryColorHex: model.secondaryColorHex)
+    }
+
+    public func seasonIdentities(teamID: TeamID) throws -> [SeasonIdentity] {
+        guard let team = try team(teamID) else { throw StoreError.teamNotFound }
+        return team.seasons
+            .sorted { $0.startDate > $1.startDate }
+            .map { season in
+                SeasonIdentity(
+                    id: season.seasonID, name: season.name, startDate: season.startDate,
+                    endDate: season.endDate, isCurrent: season.isCurrent)
+            }
     }
 
     public func seasons(teamID: TeamID) throws -> [SeasonListItem] {

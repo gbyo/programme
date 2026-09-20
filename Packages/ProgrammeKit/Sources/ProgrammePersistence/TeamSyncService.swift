@@ -107,7 +107,7 @@ public actor TeamSyncService: Sendable {
         // state, so doing this before coordinator.start() silently drops the
         // request while still marking the zone as ensured locally.
         await coordinator.start()
-        for team in (try? await store.teams()) ?? [] {
+        for team in (try? await store.teamIdentities()) ?? [] {
             await ensureZone(for: team.id)
         }
     }
@@ -199,7 +199,7 @@ public actor TeamSyncService: Sendable {
             let zone = await zone(for: teamID)
             return [.save(team.makeRecord(in: zone.id), zone.scope)]
         case .season(let teamID, let seasonID):
-            guard let item = try? await store.seasons(teamID: teamID),
+            guard let item = try? await store.seasonIdentities(teamID: teamID),
                 let season = item.first(where: { $0.id == seasonID })
             else { return [] }
             let zone = await zone(for: teamID)

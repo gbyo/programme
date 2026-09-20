@@ -41,7 +41,7 @@ final class UniversalSearchModel {
     struct ScopedSeason: Identifiable {
         let teamID: TeamID
         let teamShortName: String
-        let season: SeasonListItem
+        let season: SeasonIdentity
         var id: SeasonID { season.id }
     }
 
@@ -95,7 +95,7 @@ final class UniversalSearchModel {
                     teamID: teamID, teamShortName: teamNames[teamID] ?? "",
                     player: $0)
             }
-            let teamSeasons = (try? await store.seasons(teamID: teamID)) ?? []
+            let teamSeasons = (try? await store.seasonIdentities(teamID: teamID)) ?? []
             loadedSeasons += teamSeasons.map {
                 ScopedSeason(
                     teamID: teamID, teamShortName: teamNames[teamID] ?? "",

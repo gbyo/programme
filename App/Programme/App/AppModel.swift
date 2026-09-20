@@ -78,7 +78,10 @@ enum TeamMatchDefaults {
 @MainActor
 @Observable
 final class TeamWorkspace {
-    var teams: [TeamListItem] = []
+    /// Identity-only roster of teams. Count summaries for management UI live
+    /// in `AppModel.teamSummaries`, loaded on demand, so routine workspace
+    /// reads never fault player/season relationships.
+    var teams: [TeamIdentity] = []
     var selectedTeamID: TeamID?
     /// Current season belongs to the team; used by Home, New Match, default
     /// Matches filtering, player stats and widgets.
@@ -94,7 +97,7 @@ final class TeamWorkspace {
     /// suggestion can still apply while a real user choice always wins.
     static let explicitSelectionKey = "programme.selectedTeamID.userChosen"
 
-    var selectedTeam: TeamListItem? {
+    var selectedTeam: TeamIdentity? {
         guard let selectedTeamID else { return nil }
         return teams.first { $0.id == selectedTeamID }
     }
@@ -104,7 +107,7 @@ final class TeamWorkspace {
     /// The stored selection, but only when a user explicitly chose it.
     /// Automatic fallbacks and applied MDM suggestions never count, so a
     /// device with no real user selection stays eligible for suggestions.
-    static func restoredExplicitSelection(from teams: [TeamListItem]) -> TeamID? {
+    static func restoredExplicitSelection(from teams: [TeamIdentity]) -> TeamID? {
         guard UserDefaults.standard.bool(forKey: explicitSelectionKey) else { return nil }
         guard
             let raw = UserDefaults.standard.string(forKey: selectedTeamKey),
@@ -600,7 +603,7 @@ final class AppModel {
     /// team was just created), select it.
     func reloadWorkspace(selecting preferred: TeamID? = nil) async {
         guard let store else { return }
-        let teams = (try? await store.teams()) ?? []
+        let teams = (try? await store.teamIdentities()) ?? []
         workspace.teams = teams
         guard !teams.isEmpty else {
             workspace.selectedTeamID = nil
@@ -665,6 +668,16 @@ final class AppModel {
         await refreshWidgetSnapshot()
     }
 
+    /// Count summaries for management UI, loaded on demand. The workspace
+    /// team list itself stays identity-only so routine reads never fault
+    /// player/season relationships.
+    var teamSummaries: [TeamListItem] = []
+
+    func refreshTeamSummaries() async {
+        guard let store else { return }
+        teamSummaries = (try? await store.teams()) ?? []
+    }
+
     /// Select another team workspace. Keeps the section, clears pushed
     /// team-specific state, resolves the new current season and resets the
     /// viewed stats season.
@@ -688,7 +701,7 @@ final class AppModel {
         do {
             try ProgrammeStore.seedSampleData(into: container.mainContext)
             // Select the sample team explicitly rather than relying on ordering.
-            let teams = (try? await store.teams()) ?? []
+            let teams = (try? await store.teamIdentities()) ?? []
             let sample = teams.first { $0.id == ProgrammeSample.teamID } ?? teams.first
             await reloadWorkspace(selecting: sample?.id)
         } catch {
@@ -872,7 +885,7 @@ final class AppModel {
                 // Journal-only recovery: import into the journal's own team,
                 // never into whichever workspace happens to be selected.
                 let ownerID = journaled.descriptor.teamID
-                let ownerTeams = (try? await store.teams()) ?? []
+                let ownerTeams = (try? await store.teamIdentities()) ?? []
                 guard ownerTeams.contains(where: { $0.id == ownerID }) else {
                     throw StoreError.teamNotFound
                 }
@@ -885,7 +898,7 @@ final class AppModel {
             // Resuming a stored match selects its owning team first, so closing
             // the scorer returns to the correct workspace.
             let ownerID = context.descriptor.teamID
-            let ownerTeams = (try? await store.teams()) ?? []
+            let ownerTeams = (try? await store.teamIdentities()) ?? []
             if ownerTeams.contains(where: { $0.id == ownerID }) {
                 await ensureTeamSelected(ownerID)
             }
