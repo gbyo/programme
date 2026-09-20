@@ -70,6 +70,10 @@ struct PlayerDetailView: View {
                     StatCell("Game Winners", stats.value(.goals, \.gameWinningGoals))
                     StatCell("Steals", stats.value(.steals, \.steals))
                     StatCell("Corners", stats.value(.corners, \.corners))
+                    StatCell("Fouls", stats.value(.fouls, \.fouls))
+                    StatCell("Offsides", stats.value(.offsides, \.offsides))
+                    StatCell("PK Goals", stats.value(.penaltyKicks, \.penaltyGoals))
+                    StatCell("PK Attempts", stats.value(.penaltyKicks, \.penaltyAttempts))
                     StatCell("Yellow Cards", stats.value(.cards, \.yellowCards))
                     StatCell("Red Cards", stats.value(.cards, \.redCards))
                 }
@@ -129,6 +133,14 @@ struct PlayerDetailView: View {
                         StatCell("Minutes", .count(keeper.minutesPlayed), emphasis: true)
                         StatCell("Saves", .count(keeper.totals.saves), emphasis: true)
                         StatCell("Goals Allowed", .count(keeper.totals.goalsAllowed), emphasis: true)
+                        StatCell(
+                            "Penalties Faced",
+                            stats.value(.penaltyKicks, \.penaltyAttempts).isTracked
+                                ? .count(keeper.totals.penaltiesFaced) : .notTracked)
+                        StatCell(
+                            "Penalty Saves",
+                            stats.value(.penaltyKicks, \.penaltyAttempts).isTracked
+                                ? .count(keeper.totals.penaltySaves) : .notTracked)
                         StatCell("Save %", keeper.savePercentage, style: .percent)
                         StatCell("GAA", keeper.goalsAgainstAverage, style: .decimal)
                         StatCell("Shutouts", .count(keeper.totals.shutouts))
