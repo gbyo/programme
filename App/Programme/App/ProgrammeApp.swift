@@ -17,9 +17,6 @@ struct ProgrammeApp: App {
     @UIApplicationDelegateAdaptor(ShareAcceptanceDelegate.self) private var shareDelegate
 
     init() {
-        // Background task handlers have to be registered before the app finishes
-        // launching, or submitting a request raises.
-        MaintenanceScheduler.register()
         // On-device diagnostics only: signposts, MetricKit reports kept in the
         // unified log, and coarse workflow states. Never uploaded, never PII.
         ProgrammeMetrics.start()

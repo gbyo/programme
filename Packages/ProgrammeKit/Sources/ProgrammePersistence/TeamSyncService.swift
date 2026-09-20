@@ -39,7 +39,9 @@ public actor TeamSyncService: Sendable {
     private let shareCoordinator: TeamShareCoordinator
     private let applier: TeamSyncApplier
     private let conflicts: TeamConflictStore
-    private let owners: SharedZoneOwners
+    /// Durable accepted-share ownership. Internal (not private) so tests can
+    /// drive cache replacement and removal without CloudKit.
+    let owners: SharedZoneOwners
     private var started = false
     private var ensuredZones: Set<String> = []
 
@@ -102,12 +104,15 @@ public actor TeamSyncService: Sendable {
         await coordinator.setZoneDeletedHandler { [weak self] _, _ in
             Task { await self?.zoneDeleted() }
         }
+        await coordinator.setAccountChangeHandler { [weak self] change in
+            Task { await self?.handleAccountChange(change) }
+        }
         // Engines must exist before we enqueue zone creation.
         // ensureTeamZone writes pending database changes into an engine's
         // state, so doing this before coordinator.start() silently drops the
         // request while still marking the zone as ensured locally.
         await coordinator.start()
-        for team in (try? await store.teams()) ?? [] {
+        for team in (try? await store.teamIdentities()) ?? [] {
             await ensureZone(for: team.id)
         }
     }
@@ -132,6 +137,29 @@ public actor TeamSyncService: Sendable {
     /// another ownership store.
     public func sharedZoneOwners() async -> [TeamID: String] {
         await coordinator.sharedZoneOwners()
+    }
+
+    /// Actor-local owner lookup for UI scope resolution. Never touches
+    /// CloudKit: sharing UI renders from the last known local state, which
+    /// stays correct offline. The cache is refreshed on share acceptance,
+    /// zone deletion, and account sign-in, and cleared on sign-out or
+    /// account switch.
+    public func cachedOwnerName(for teamID: TeamID) async -> String? {
+        await owners.ownerName(for: teamID)
+    }
+
+    /// Bounded cache maintenance for account transitions. Sign-in refreshes
+    /// from the zone list; sign-out or account switch drops every cached
+    /// owner so a new account never inherits the old account's scopes.
+    func handleAccountChange(_ change: CKSyncEngine.Event.AccountChange.ChangeType) async {
+        switch change {
+        case .signIn:
+            await refreshOwners()
+        case .signOut, .switchAccounts:
+            await owners.reset()
+        @unknown default:
+            await owners.reset()
+        }
     }
 
     /// Unresolved same-revision contradictions for a team, oldest first.
@@ -160,15 +188,36 @@ public actor TeamSyncService: Sendable {
         // creation and record staging; neither runs a second lookup.
         let teamID = await self.teamID(for: mutation)
         await ensureZoneIfNeeded(teamID: teamID)
-        for change in await stagedChanges(for: mutation, teamID: teamID) {
-            switch change {
-            case .save(let record, let scope):
-                do { try await coordinator.stageSave(record, in: scope) } catch {
+        let changes = await stagedChanges(for: mutation, teamID: teamID)
+
+        // Preserve the mutation's natural batch. A roster import or multi-event
+        // write should produce one durable outbox replacement per database,
+        // not one full manifest rewrite (and scheduler nudge) per record.
+        for scope in [SyncDatabase.private, .shared] as [SyncDatabase] {
+            let saves = changes.compactMap { change -> CKRecord? in
+                guard case .save(let record, let changeScope) = change, changeScope == scope
+                else { return nil }
+                return record
+            }
+            let deletes = changes.compactMap { change -> (CKRecord.ID, String)? in
+                guard case .delete(let id, let recordType, let changeScope) = change,
+                    changeScope == scope
+                else { return nil }
+                return (id, recordType)
+            }
+
+            if !saves.isEmpty {
+                do {
+                    try await coordinator.stageSaves(saves, in: scope)
+                } catch {
                     onStagingFailed?(
                         "A change could not be staged for sync. Your matches are safe on this device.")
                 }
-            case .delete(let id, let recordType, let scope):
-                do { try await coordinator.stageDelete(recordID: id, recordType: recordType, in: scope) } catch {
+            }
+            if !deletes.isEmpty {
+                do {
+                    try await coordinator.stageDeletes(deletes, in: scope)
+                } catch {
                     onStagingFailed?(
                         "A deletion could not be staged for sync. Your matches are safe on this device.")
                 }
@@ -209,7 +258,7 @@ public actor TeamSyncService: Sendable {
             let zone = await zone(for: teamID)
             return [.save(team.makeRecord(in: zone.id), zone.scope)]
         case .season(let teamID, let seasonID):
-            guard let item = try? await store.seasons(teamID: teamID),
+            guard let item = try? await store.seasonIdentities(teamID: teamID),
                 let season = item.first(where: { $0.id == seasonID })
             else { return [] }
             let zone = await zone(for: teamID)
@@ -369,6 +418,13 @@ public actor SharedZoneOwners: Sendable {
 
     public func forget(teamID: TeamID) {
         owners.removeValue(forKey: teamID.rawValue.uuidString)
+        try? persist()
+    }
+
+    /// Drops every cached owner. Used on sign-out and account switch so a
+    /// new account never inherits the previous account's scopes.
+    public func reset() {
+        owners = [:]
         try? persist()
     }
 
