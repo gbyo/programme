@@ -28,21 +28,50 @@ final class UniversalSearchModel {
     struct ScopedMatch: Identifiable {
         let teamID: TeamID
         let match: MatchListItem
+        /// Normalized once at load so keystrokes filter in-memory values.
+        let searchKey: String
         var id: MatchID { match.id }
+
+        init(teamID: TeamID, match: MatchListItem) {
+            self.teamID = teamID
+            self.match = match
+            self.searchKey =
+                "\(match.opponentName) \(match.competition ?? "")".lowercased()
+        }
     }
 
     struct ScopedPlayer: Identifiable {
         let teamID: TeamID
         let teamShortName: String
         let player: PlayerSnapshot
+        /// Normalized once at load so keystrokes filter in-memory values.
+        let searchKey: String
         var id: PlayerID { player.id }
+
+        init(teamID: TeamID, teamShortName: String, player: PlayerSnapshot) {
+            self.teamID = teamID
+            self.teamShortName = teamShortName
+            self.player = player
+            self.searchKey =
+                "\(player.firstName) \(player.lastName) \(player.jerseyNumber.map { "\($0)" } ?? "")"
+                .lowercased()
+        }
     }
 
     struct ScopedSeason: Identifiable {
         let teamID: TeamID
         let teamShortName: String
         let season: SeasonIdentity
+        /// Normalized once at load so keystrokes filter in-memory values.
+        let searchKey: String
         var id: SeasonID { season.id }
+
+        init(teamID: TeamID, teamShortName: String, season: SeasonIdentity) {
+            self.teamID = teamID
+            self.teamShortName = teamShortName
+            self.season = season
+            self.searchKey = season.name.lowercased()
+        }
     }
 
     var query = ""
@@ -56,8 +85,13 @@ final class UniversalSearchModel {
     var players: [ScopedPlayer] = []
     var teams: [TeamListItem] = []
     var seasons: [ScopedSeason] = []
+    /// Normalized team names, computed once per reload alongside `teams`.
+    private(set) var teamSearchKeys: [TeamID: String] = [:]
 
     private var generation = 0
+    /// Scope/team/revision key of the last player/season detail load. Cleared
+    /// by every reload so a scope, team, or store change refetches details.
+    private var detailsKey: String?
 
     var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespaces)
@@ -71,24 +105,60 @@ final class UniversalSearchModel {
         query = ""
     }
 
-    func reload(store: MatchStore, selectedTeamID: TeamID?) async {
+    /// Loads the empty-query dataset: teams plus the matches actually
+    /// displayed before typing. Player and season snapshots stay unloaded
+    /// until a nonempty query first needs them (see `ensureDetailsLoaded`).
+    func reload(store: MatchStore, selectedTeamID: TeamID?, revision: Int) async {
         generation &+= 1
         let current = generation
         let scope = scope
         let teams = (try? await store.teams()) ?? []
         guard !Task.isCancelled, current == generation else { return }
-        let teamNames = Dictionary(uniqueKeysWithValues: teams.map { ($0.id, $0.shortName) })
         let teamIDs =
             switch scope {
             case .currentTeam: selectedTeamID.map { [$0] } ?? []
             case .allTeams: teams.map(\.id)
             }
         var loadedMatches: [ScopedMatch] = []
-        var loadedPlayers: [ScopedPlayer] = []
-        var loadedSeasons: [ScopedSeason] = []
         for teamID in teamIDs {
             let teamMatches = (try? await store.matches(teamID: teamID)) ?? []
             loadedMatches += teamMatches.map { ScopedMatch(teamID: teamID, match: $0) }
+        }
+        guard !Task.isCancelled, current == generation else { return }
+        self.teams = teams
+        self.teamSearchKeys = Dictionary(
+            uniqueKeysWithValues: teams.map { ($0.id, $0.name.lowercased()) })
+        self.matches = loadedMatches
+        // Any scope, team, or store change invalidates the detail snapshots.
+        self.players = []
+        self.seasons = []
+        detailsKey = nil
+        // A reload landing while a query is active must rehydrate details.
+        await ensureDetailsLoaded(store: store, selectedTeamID: selectedTeamID, revision: revision)
+    }
+
+    /// Lazily loads player/season searchable snapshots the first time a
+    /// nonempty query needs them. Cached per scope/team/revision until the
+    /// next reload; the generation guard still drops stale results.
+    func ensureDetailsLoaded(store: MatchStore, selectedTeamID: TeamID?, revision: Int) async {
+        guard !trimmedQuery.isEmpty else { return }
+        let key = [
+            scope.rawValue, selectedTeamID?.rawValue.uuidString ?? "none",
+            "\(revision)",
+        ].joined(separator: "#")
+        guard detailsKey != key else { return }
+        let current = generation
+        let scope = scope
+        let teams = teams
+        let teamNames = Dictionary(uniqueKeysWithValues: teams.map { ($0.id, $0.shortName) })
+        let teamIDs =
+            switch scope {
+            case .currentTeam: selectedTeamID.map { [$0] } ?? []
+            case .allTeams: teams.map(\.id)
+            }
+        var loadedPlayers: [ScopedPlayer] = []
+        var loadedSeasons: [ScopedSeason] = []
+        for teamID in teamIDs {
             let roster = (try? await store.roster(teamID: teamID)) ?? .empty
             loadedPlayers += roster.sortedByNumber.map {
                 ScopedPlayer(
@@ -103,10 +173,9 @@ final class UniversalSearchModel {
             }
         }
         guard !Task.isCancelled, current == generation else { return }
-        self.teams = teams
-        self.matches = loadedMatches
         self.players = loadedPlayers
         self.seasons = loadedSeasons
+        detailsKey = key
     }
 
     // MARK: - Filtering
@@ -131,33 +200,28 @@ final class UniversalSearchModel {
                 .map(\.self)
         }
         let needle = trimmedQuery.lowercased()
-        return scoped.filter {
-            $0.match.opponentName.lowercased().contains(needle)
-                || ($0.match.competition?.lowercased().contains(needle) ?? false)
-        }
+        return scoped.filter { $0.searchKey.contains(needle) }
     }
 
     func shownPlayers(selectedTeamID: TeamID?) -> [ScopedPlayer] {
         guard !trimmedQuery.isEmpty else { return [] }
         let needle = trimmedQuery.lowercased()
         return inScope(players.map { ($0.teamID, $0) }, selectedTeamID: selectedTeamID).filter {
-            $0.player.firstName.lowercased().contains(needle)
-                || $0.player.lastName.lowercased().contains(needle)
-                || ($0.player.jerseyNumber.map { "\($0)" } ?? "").contains(needle)
+            $0.searchKey.contains(needle)
         }
     }
 
     func shownTeams() -> [TeamListItem] {
         guard !trimmedQuery.isEmpty else { return teams }
         let needle = trimmedQuery.lowercased()
-        return teams.filter { $0.name.lowercased().contains(needle) }
+        return teams.filter { teamSearchKeys[$0.id]?.contains(needle) ?? false }
     }
 
     func shownSeasons(selectedTeamID: TeamID?) -> [ScopedSeason] {
         guard !trimmedQuery.isEmpty else { return [] }
         let needle = trimmedQuery.lowercased()
         return inScope(seasons.map { ($0.teamID, $0) }, selectedTeamID: selectedTeamID).filter {
-            $0.season.name.lowercased().contains(needle)
+            $0.searchKey.contains(needle)
         }
     }
 }
@@ -224,7 +288,15 @@ struct UniversalSearchResults: View {
         .teamWorkspaceTitle(section.rootTitle)
         .task(id: reloadKey) {
             guard let store = appModel.store else { return }
-            await search.reload(store: store, selectedTeamID: selectedTeamID)
+            await search.reload(
+                store: store, selectedTeamID: selectedTeamID,
+                revision: appModel.storeRevision)
+        }
+        .task(id: search.trimmedQuery.isEmpty) {
+            guard let store = appModel.store else { return }
+            await search.ensureDetailsLoaded(
+                store: store, selectedTeamID: selectedTeamID,
+                revision: appModel.storeRevision)
         }
         .accessibilityIdentifier("search.content")
     }
