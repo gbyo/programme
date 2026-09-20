@@ -352,7 +352,7 @@ struct DataTransferView: View {
             }
         }
         await load()
-        await appModel.refreshWidgetSnapshot()
+        await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
         importResult = ImportOutcome(
             title: imported > 0 ? "Imported" : "Nothing imported",
             message: imported > 0

@@ -79,7 +79,8 @@ import ProgrammeCore
             lastEventText: String?,
             now: Date = Date()
         ) -> Self {
-            let duration = rules.period(at: clock.period)?.scheduledDuration
+            let duration =
+                rules.period(at: clock.period)?.scheduledDuration
                 ?? rules.regulationPeriodDuration
             let elapsed = clock.elapsed(at: now)
             let start = now.addingTimeInterval(-elapsed)
@@ -108,6 +109,13 @@ import ProgrammeCore
 /// Widgets run in a separate process, so Programme writes this file into the
 /// shared container whenever a match changes. It is a cache: losing it costs a
 /// widget refresh and nothing else.
+/// WidgetKit kind identifiers, shared so the app targets reloads at the
+/// same strings the widget extension registers.
+public enum WidgetKind {
+    public static let matchStatus = "com.gbyo.programme.matchStatus"
+    public static let seasonRecord = "com.gbyo.programme.seasonRecord"
+}
+
 public struct ProgrammeWidgetSnapshot: Codable, Hashable, Sendable {
     public struct LiveMatch: Codable, Hashable, Sendable {
         public var matchID: String
@@ -120,11 +128,17 @@ public struct ProgrammeWidgetSnapshot: Codable, Hashable, Sendable {
         public var isClockRunning: Bool
         public var needsReviewCount: Int
         public var lastEventText: String?
+        /// Clock anchor plus rules for system-driven timer text. Optional
+        /// so snapshots written before this field existed still decode;
+        /// those fall back to the frozen `clockText`.
+        public var clockAnchor: ClockAnchor?
+        public var clockRules: MatchRules?
 
         public init(
             matchID: String, teamShortName: String, opponentShortName: String, scoreUs: Int,
             scoreOpponent: Int, periodLabel: String, clockText: String, isClockRunning: Bool,
-            needsReviewCount: Int, lastEventText: String?
+            needsReviewCount: Int, lastEventText: String?, clockAnchor: ClockAnchor? = nil,
+            clockRules: MatchRules? = nil
         ) {
             self.matchID = matchID
             self.teamShortName = teamShortName
@@ -136,6 +150,8 @@ public struct ProgrammeWidgetSnapshot: Codable, Hashable, Sendable {
             self.isClockRunning = isClockRunning
             self.needsReviewCount = needsReviewCount
             self.lastEventText = lastEventText
+            self.clockAnchor = clockAnchor
+            self.clockRules = clockRules
         }
     }
 

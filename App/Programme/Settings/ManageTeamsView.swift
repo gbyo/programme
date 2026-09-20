@@ -446,7 +446,7 @@ struct TeamDetailView: View {
             if appModel.workspace.selectedTeamID == teamID {
                 appModel.workspace.currentSeasonID = seasonID
                 appModel.workspace.viewedStatsSeasonID = seasonID
-                await appModel.refreshWidgetSnapshot()
+                await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
             }
             await load()
             Haptics.selectionChanged()
@@ -467,7 +467,7 @@ struct TeamDetailView: View {
             if newSeasonMakeCurrent, appModel.workspace.selectedTeamID == teamID {
                 appModel.workspace.currentSeasonID = id
                 appModel.workspace.viewedStatsSeasonID = id
-                await appModel.refreshWidgetSnapshot()
+                await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
             }
             newSeasonName = ""
             isAddingSeason = false

@@ -376,7 +376,7 @@ final class LiveMatchSession {
         ProgrammeStateReporter.reportWorkflow(.finalizing)
         endActivity()
         try? journal.close(matchID: matchID)
-        Task { await appModel?.refreshWidgetSnapshot() }
+        Task { await appModel?.refreshWidgetSnapshot(reloadingSeasonRecord: true) }
     }
 
     func reopen() {
