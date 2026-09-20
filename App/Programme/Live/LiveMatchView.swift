@@ -118,26 +118,24 @@ struct LiveMatchView: View {
         static let twoColumnMinimum: CGFloat = workspaceUsable + recordMinimum
     }
 
-    /// The phone and any genuinely narrow iPad window use Programme's compact
-    /// scoring layout. Keeping this as one product rule means the composer and
-    /// the bottom toolbar adapt at the same point instead of inventing separate
-    /// width thresholds for each feature.
+    /// Whatever the hardware, a compact environment gets Programme's compact
+    /// scoring layout and anything regular gets the columns. Keeping this as
+    /// one space-driven rule means the composer and the bottom toolbar adapt
+    /// at the same point instead of inventing separate width thresholds for
+    /// each feature — and a regular-width phone uses the richer layout its
+    /// environment can hold.
     private var usesCompactScoringLayout: Bool {
-        #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom == .phone { return true }
-        #endif
-        return horizontalSizeClass == .compact
+        horizontalSizeClass == .compact
     }
 
     /// Whether the composer takes over the screen in a sheet rather than living
     /// in a column.
     ///
-    /// The product rule comes first and the layout rule second. A phone always
-    /// uses the sheet, because the substitution flow there is a pushed
-    /// navigation stack and falling back to the iPad columns because of an
-    /// unexpected size class would be a broken screen rather than a compromise.
-    /// A narrow iPad window — Stage Manager, Split View — reaches the same
-    /// behaviour through the platform's own compact environment.
+    /// A compact environment uses the sheet, where the substitution flow is a
+    /// pushed navigation stack. A regular environment — a wide iPad window, or
+    /// a phone reporting regular width — keeps the columns. The composer step
+    /// itself is presentation-independent, so a size-class transition
+    /// re-routes the same pending question instead of losing it.
     private var composerUsesSheet: Bool {
         usesCompactScoringLayout
     }
