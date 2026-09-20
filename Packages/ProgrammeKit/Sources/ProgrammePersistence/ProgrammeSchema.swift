@@ -57,6 +57,13 @@ public enum ProgrammeStore {
 
     /// The on-disk container. Local-first: no account, no network, no CloudKit
     /// requirement. Scoring a match never touches any of those.
+    ///
+    /// SwiftData CloudKit mirroring stays off in every configuration: sync
+    /// goes through the dedicated CloudKit layer, and the schema could not
+    /// mirror anyway (required relationships, unique identifiers). This must
+    /// be explicit because `ModelConfiguration` defaults to `.automatic`,
+    /// which resolves to active under the app's CloudKit entitlement — and an
+    /// active mirror fails even in-memory stores, crashing launch.
     public static func container(
         inMemory: Bool = false,
         url: URL? = nil,
@@ -64,9 +71,10 @@ public enum ProgrammeStore {
     ) throws -> ModelContainer {
         let configuration: ModelConfiguration
         if inMemory {
-            configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            configuration = ModelConfiguration(
+                schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         } else if let url {
-            configuration = ModelConfiguration(schema: schema, url: url)
+            configuration = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
         } else {
             configuration = ModelConfiguration(
                 schema: schema,
