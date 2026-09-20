@@ -93,6 +93,16 @@ public enum ValidationEngine {
         let rules = context.rules
         let roster = context.roster
         let events = context.activeEvents
+        // Each of these scans `activeEvents`, so derive them once instead of
+        // rescanning history per event or per check below.
+        let startedPeriods = context.startedPeriods
+        let endedPeriods = context.endedPeriods
+        let startedPeriodSet = Set(startedPeriods)
+        let hasStarted = !startedPeriods.isEmpty
+        let appearances: [TeamSide: Set<PlayerID>] = [
+            .us: timeline.appearances(side: .us),
+            .opponent: timeline.appearances(side: .opponent),
+        ]
 
         // MARK: Lineup presence
 
@@ -102,7 +112,7 @@ public enum ValidationEngine {
                 ValidationIssue(
                     id: "no-lineup",
                     kind: .noLineup,
-                    severity: context.hasStarted ? .blocking : .review,
+                    severity: hasStarted ? .blocking : .review,
                     title: "No starting lineup",
                     detail: "Programme needs to know who started to calculate playing time."
                 ))
@@ -110,7 +120,7 @@ public enum ValidationEngine {
 
         // MARK: Active player counts
 
-        if context.hasStarted {
+        if hasStarted {
             let active = timeline.currentlyOnField(side: .us)
             if active.count > rules.playersPerSide {
                 issues.append(
@@ -143,7 +153,7 @@ public enum ValidationEngine {
 
         // MARK: Goalkeeper coverage
 
-        if context.hasStarted, context.profile.tracks(.goalkeeping) {
+        if hasStarted, context.profile.tracks(.goalkeeping) {
             if timeline.currentGoalkeeper(side: .us) == nil, context.phase.isLive {
                 issues.append(
                     ValidationIssue(
@@ -178,7 +188,7 @@ public enum ValidationEngine {
 
             // Goalkeeper accounting must reconcile with the team's goals conceded.
             let keeperGA = snapshot.keepers.values.filter { $0.side == .us }.reduce(0) { $0 + $1.goalsAllowed }
-            if keeperGA != snapshot.score.opponent && context.hasStarted {
+            if keeperGA != snapshot.score.opponent && hasStarted {
                 issues.append(
                     ValidationIssue(
                         id: "keeper-ga-mismatch",
@@ -224,7 +234,7 @@ public enum ValidationEngine {
                     break
                 }
                 let side = event.payload.side ?? .us
-                if timeline.appearances(side: side).contains(id), !timeline.wasOnField(id, at: event.time) {
+                if appearances[side]?.contains(id) ?? false, !timeline.wasOnField(id, at: event.time) {
                     issues.append(
                         ValidationIssue(
                             id: "inactive-\(event.id)-\(id)",
@@ -263,7 +273,7 @@ public enum ValidationEngine {
             // exempt: it has no clock and is never "started" like a period, so
             // its kicks carry the shootout's index and an order rather than a time.
             if !event.payload.isStructural, !isShootoutAttempt(event) {
-                if !context.startedPeriods.contains(event.time.period) {
+                if !startedPeriodSet.contains(event.time.period) {
                     issues.append(
                         ValidationIssue(
                             id: "outside-period-\(event.id)",
@@ -392,7 +402,7 @@ public enum ValidationEngine {
 
         // MARK: Periods left open
 
-        for period in context.startedPeriods where !context.endedPeriods.contains(period) {
+        for period in startedPeriods where !endedPeriods.contains(period) {
             if context.currentPeriodIndex != period || context.phase == .finalized {
                 issues.append(
                     ValidationIssue(
@@ -436,7 +446,7 @@ public enum ValidationEngine {
         return issues.sorted {
             if $0.severity != $1.severity { return $0.severity > $1.severity }
             switch ($0.time, $1.time) {
-            case let (a?, b?): return a < b
+            case (let a?, let b?): return a < b
             case (nil, _?): return false
             case (_?, nil): return true
             case (nil, nil): return $0.id < $1.id
