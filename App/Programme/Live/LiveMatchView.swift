@@ -551,6 +551,7 @@ struct LiveMatchView: View {
                 shooterName: shooterName,
                 outcome: outcome,
                 markers: session.shotMarkers,
+                presentation: composerUsesSheet ? .compactSheet : .inline,
                 onCommit: { location in
                     session.resolveShotLocation(location, on: shotID)
                     composer.finish()
@@ -909,9 +910,11 @@ struct ComposerSheet<Content: View>: View {
                         .navigationTitle(step?.title ?? "")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Done") { onDismiss() }
-                                    .accessibilityIdentifier("composer.done")
+                            if step?.ownsSheetActions != true {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { onDismiss() }
+                                        .accessibilityIdentifier("composer.done")
+                                }
                             }
                         }
                 }
