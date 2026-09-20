@@ -177,7 +177,7 @@ In **Our Team** mode, opponent actions should capture only what Programme needs 
 
 The pinned opponent Shot stays the existing one-tap off-target team attempt in this mode. An on-target opponent attempt stopped by our goalkeeper is entered with the primary Save action, which keeps that common goalkeeper observation to one tap.
 
-In **Both Teams** mode, the same event engine accepts an opponent roster and full attribution. Because opponent Shot already proceeds through that roster picker, it also uses the shared outcome stage so the attributed opponent attempt can be recorded accurately.
+In **Both Teams** mode, the same event engine accepts an opponent roster and full attribution. Because opponent Shot already proceeds through that roster picker, it also uses the shared outcome stage so the attributed opponent attempt can be recorded accurately. Shot-location enrichment is symmetric in this mode: an attributed opponent shot is offered the same optional location step as our shots, because Both Teams means tracking both teams' shots, not just attributing them.
 
 Do not build separate stat logic for the two modes.
 
