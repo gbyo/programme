@@ -143,7 +143,7 @@ The whole workspace has **exactly one `.sheet`**. The composer is a route throug
 
 The composer sheet uses `.presentationSizing(.page)` rather than a detent, which on a phone is the system's full-width, full-height page presentation instead of a panel floating in the middle of the screen. A step that is a multi-screen flow rather than a single question — substitution — brings its own `NavigationStack` and chrome, and the sheet does not wrap it in a second one.
 
-Whether the composer is a sheet is a **product** rule before it is a layout rule: a phone always gets the sheet, and a narrow iPad window reaches the same behaviour through the platform's compact environment. An iPhone must never fall back to the iPad columns because of an unexpected size class.
+Whether the composer is a sheet follows the space the scene has, not the hardware label: a compact environment gets the sheet, and a regular one keeps the columns — including a phone reporting regular width. No `userInterfaceIdiom` check overrides the environment.
 
 In compact, tapping a player in Lineup switches back to Record automatically: having said *who*, the scorer's next tap is always *what*.
 
