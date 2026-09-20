@@ -533,11 +533,15 @@ final class AppModel {
         // Pre-provenance selections were always user choices; mark them
         // before any reload can treat them as automatic fallbacks.
         TeamWorkspace.migrateSelectionProvenance()
-        // Resolve the initial MDM configuration before the first automatic
-        // team selection, so an MDM suggestion wins over the plain
-        // first-team fallback. Apple documents the initial value as
-        // yielding immediately, so this does not stall launch.
-        await managed.startAndAwaitInitialConfiguration()
+        // Observation starts fire-and-forget: awaiting the first managed
+        // value here stalled launch outright wherever the system
+        // configuration sequence never yields (seen on the iOS 27
+        // simulator despite the documented immediate first value). The
+        // first automatic selection uses the plain fallback, and a managed
+        // suggestion still applies on arrival through
+        // managedConfigurationChanged, which only ever replaces
+        // non-explicit selections — never a user choice.
+        managed.start()
         // Apply later MDM suggestions only while the device still has no
         // explicit user selection. Never resets navigation or seasons, and
         // never overrides a user choice.
