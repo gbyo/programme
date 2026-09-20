@@ -578,7 +578,10 @@ final class AppModel {
             .datastoreLocation(.applicationDefault),
         ])
 
-        await reloadWorkspace(selecting: nil)
+        // Bootstrap owns the single companion refresh at the end; skipping the
+        // one inside reloadWorkspace avoids rebuilding the selected-team
+        // snapshot twice during one launch.
+        await reloadWorkspace(selecting: nil, refreshCompanions: false)
         await startSyncIfAvailable()
         if launchOptions.opensLiveMatch {
             let items = (try? await store.matches(limit: 60)) ?? []
@@ -598,7 +601,10 @@ final class AppModel {
 
     /// Reload teams and resolve selection. When `selecting` is non-nil (a new
     /// team was just created), select it.
-    func reloadWorkspace(selecting preferred: TeamID? = nil) async {
+    /// - Parameter refreshCompanions: when false, skips the trailing companion
+    ///   snapshot rebuild. Bootstrap passes false because it performs its own
+    ///   single final refresh after recovery candidates resolve.
+    func reloadWorkspace(selecting preferred: TeamID? = nil, refreshCompanions: Bool = true) async {
         guard let store else { return }
         let teams = (try? await store.teams()) ?? []
         workspace.teams = teams
@@ -641,7 +647,9 @@ final class AppModel {
         }
         navigation.section = .home
         navigation.clearTeamScopedPaths()
-        await refreshWidgetSnapshot()
+        if refreshCompanions {
+            await refreshWidgetSnapshot()
+        }
     }
 
     /// Applies a newly arrived MDM team suggestion, but only while the
