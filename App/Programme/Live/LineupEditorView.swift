@@ -49,8 +49,8 @@ struct LineupEditorView: View {
         .navigationSubtitle("\(starters.count) of \(session.rules.playersPerSide) selected")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .sensoryFeedback(.selection, trigger: starters)
-        .sensoryFeedback(.selection, trigger: goalkeeper)
+        .programmeSensoryFeedback(.selection, trigger: starters)
+        .programmeSensoryFeedback(.selection, trigger: goalkeeper)
         .onChange(of: starters, updateGoalkeeperAfterSelection)
         .onAppear(perform: load)
     }
