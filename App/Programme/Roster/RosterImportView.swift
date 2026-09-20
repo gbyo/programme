@@ -20,6 +20,7 @@ struct RosterImportView: View {
 
     @State private var rawText = ""
     @State private var preview: RosterImportPreview?
+    @State private var isReviewing = false
     @State private var isShowingFileImporter = false
     @State private var isShowingScanner = false
     @State private var scannedText = ""
@@ -29,49 +30,42 @@ struct RosterImportView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        Group {
-            if let preview {
-                mappingStep(preview)
-            } else {
-                inputStep
+        inputStep
+            .navigationTitle("Import Roster")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
-        }
-        .navigationTitle("Import Roster")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            if preview != nil {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Import \(preview?.players.count ?? 0)") { Task { await commit() } }
-                        .disabled((preview?.players.isEmpty ?? true))
-                        .fontWeight(.semibold)
+            .navigationDestination(isPresented: $isReviewing) {
+                if let review = Binding($preview) {
+                    ImportReviewView(teamID: teamID, preview: review)
                 }
             }
-        }
-        .fileImporter(
-            isPresented: $isShowingFileImporter,
-            allowedContentTypes: [.commaSeparatedText, .tabSeparatedText, .plainText, .text]
-        ) { result in
-            switch result {
-            case .success(let url):
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                if let text = try? String(contentsOf: url, encoding: .utf8) {
-                    rawText = text
-                    analyze()
-                } else {
-                    errorMessage = "Programme couldn't read that file. Try copying the rows and pasting them instead."
+            .fileImporter(
+                isPresented: $isShowingFileImporter,
+                allowedContentTypes: [.commaSeparatedText, .tabSeparatedText, .plainText, .text]
+            ) { result in
+                switch result {
+                case .success(let url):
+                    let accessed = url.startAccessingSecurityScopedResource()
+                    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                    if let text = try? String(contentsOf: url, encoding: .utf8) {
+                        rawText = text
+                        analyze()
+                    } else {
+                        errorMessage =
+                            "Programme couldn't read that file. Try copying the rows and pasting them instead."
+                    }
+                case .failure:
+                    errorMessage = "Programme couldn't open that file."
                 }
-            case .failure:
-                errorMessage = "Programme couldn't open that file."
             }
-        }
-        .sheet(isPresented: $isShowingScanner) {
-            // Explicit scan-and-confirm: the scanner stays up while items
-            // accumulate, and only Use Scanned Text commits into the
-            // deterministic review pipeline. Cancel leaves rawText — and
-            // any prior paste or file input — untouched.
-            NavigationStack {
+            .sheet(isPresented: $isShowingScanner) {
+                // Explicit scan-and-confirm: the scanner stays up while items
+                // accumulate, and only Use Scanned Text commits into the
+                // deterministic review pipeline. Cancel leaves rawText — and
+                // any prior paste or file input — untouched.
+                NavigationStack {
                 RosterScannerView { scannedText = $0 }
                     .navigationTitle("Scan Roster")
                     .navigationBarTitleDisplayMode(.inline)
@@ -94,14 +88,14 @@ struct RosterImportView: View {
                             .fontWeight(.semibold)
                         }
                     }
+                }
             }
-        }
-        .onAppear {
-            if let initialText {
-                rawText = initialText
-                analyze()
+            .onAppear {
+                if let initialText {
+                    rawText = initialText
+                    analyze()
+                }
             }
-        }
     }
 
     private var inputStep: some View {
@@ -240,87 +234,127 @@ struct RosterImportView: View {
         }
     }
 
-    /// Review step. Forced edit mode is Apple's native multi-selection
-    /// pattern: a `List(selection:)` with a set binding only offers
-    /// multi-select while edit mode is active. The semantic question is
-    /// answered by the checkmark selection itself ("import this row"), so
-    /// no custom checkbox UI is used; interactive controls opt out via
-    /// `.selectionDisabled()`.
-    private func mappingStep(_ preview: RosterImportPreview) -> some View {
-        List(selection: selectedRows) {
-            Section {
-                ForEach(Array(preview.headers.enumerated()), id: \.offset) { index, header in
-                    Picker(
-                        header,
-                        selection: Binding(
-                            get: { preview.mapping[index] ?? .ignore },
-                            set: { newValue in
-                                var updated = preview
-                                updated.mapping[index] = newValue
-                                self.preview = updated
-                            })
-                    ) {
-                        ForEach(RosterColumn.allCases) { column in
-                            Text(column.label).tag(column)
-                        }
-                    }
-                    .selectionDisabled()
-                }
-            } header: {
-                Text("Columns")
-            } footer: {
-                Text(
-                    preview.mappingIsUnambiguous
-                        ? "Programme recognised every column. Check the preview below and import."
-                        : "Programme guessed these. Check them before importing.")
-            }
+    /// Review step, pushed by Continue instead of swapping the root — Back is
+    /// the system back button, which no fast series of taps inside the review
+    /// can skip past. The view owns confirmation, so a failed save surfaces
+    /// inline here on the review instead of on the input behind it.
+    private struct ImportReviewView: View {
+        let teamID: TeamID
+        @Binding var preview: RosterImportPreview
+        @Environment(AppModel.self) private var appModel
+        @Environment(\.dismiss) private var dismiss
+        @State private var errorMessage: String?
 
-            Section("Preview") {
-                ForEach(preview.rows) { row in
-                    HStack(spacing: 12) {
-                        if let player = preview.player(from: row) {
-                            Text(player.jerseyNumber.map { "#\($0)" } ?? "—")
-                                .font(.subheadline.weight(.medium))
-                                .monospacedDigit()
-                                .frame(width: 40, alignment: .trailing)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(player.fullName).font(.body)
-                                Text(
-                                    [player.position?.label, player.classYear].compactMap(\.self)
-                                        .joined(separator: " · ")
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+        var body: some View {
+            content
+                .navigationTitle("Review Import")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Import \(preview.players.count)") { Task { await commit() } }
+                            .disabled(preview.players.isEmpty)
+                            .fontWeight(.semibold)
+                    }
+                }
+        }
+
+        /// Forced edit mode is Apple's native multi-selection pattern: a
+        /// `List(selection:)` with a set binding only offers multi-select
+        /// while edit mode is active. The semantic question is answered by
+        /// the checkmark selection itself ("import this row"), so no custom
+        /// checkbox UI is used; interactive controls opt out via
+        /// `.selectionDisabled()`.
+        private var content: some View {
+            List(selection: selectedRows) {
+                Section {
+                    ForEach(Array(preview.headers.enumerated()), id: \.offset) { index, header in
+                        Picker(
+                            header,
+                            selection: Binding(
+                                get: { preview.mapping[index] ?? .ignore },
+                                set: { newValue in
+                                    var updated = preview
+                                    updated.mapping[index] = newValue
+                                    self.preview = updated
+                                })
+                        ) {
+                            ForEach(RosterColumn.allCases) { column in
+                                Text(column.label).tag(column)
                             }
-                        } else {
-                            Text(row.problem ?? "Can't read this row")
-                                .font(.subheadline)
-                                .foregroundStyle(Programme.Palette.caution)
                         }
-                        Spacer()
+                        .selectionDisabled()
                     }
-                    .tag(row.id)
+                } header: {
+                    Text("Columns")
+                } footer: {
+                    Text(
+                        preview.mappingIsUnambiguous
+                            ? "Programme recognised every column. Check the preview below and import."
+                            : "Programme guessed these. Check them before importing.")
+                }
+
+                Section("Preview") {
+                    ForEach(preview.rows) { row in
+                        HStack(spacing: 12) {
+                            if let player = preview.player(from: row) {
+                                Text(player.jerseyNumber.map { "#\($0)" } ?? "—")
+                                    .font(.subheadline.weight(.medium))
+                                    .monospacedDigit()
+                                    .frame(width: 40, alignment: .trailing)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(player.fullName).font(.body)
+                                    Text(
+                                        [player.position?.label, player.classYear].compactMap(\.self)
+                                            .joined(separator: " · ")
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                            } else {
+                                Text(row.problem ?? "Can't read this row")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Programme.Palette.caution)
+                            }
+                            Spacer()
+                        }
+                        .tag(row.id)
+                    }
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(Programme.Palette.caution)
+                            .selectionDisabled()
+                    }
                 }
             }
+            .environment(\.editMode, .constant(.active))
+        }
 
-            Section {
-                Button("Start Over", role: .destructive) { self.preview = nil }
-                    .selectionDisabled()
+        private var selectedRows: Binding<Set<UUID>> {
+            Binding(
+                get: { Set(preview.rows.filter(\.isSelected).map(\.id)) },
+                set: { selection in
+                    var updated = preview
+                    for index in updated.rows.indices {
+                        updated.rows[index].isSelected = selection.contains(updated.rows[index].id)
+                    }
+                    preview = updated
+                })
+        }
+
+        private func commit() async {
+            guard let store = appModel.store else { return }
+            do {
+                try await store.addPlayers(teamID: teamID, preview.players)
+                Haptics.success()
+                dismiss()
+            } catch {
+                errorMessage = "Programme couldn't save those players. Nothing was changed. Try again."
+                Haptics.error()
             }
         }
-        .environment(\.editMode, .constant(.active))
-    }
-
-    private var selectedRows: Binding<Set<UUID>> {
-        Binding(
-            get: { Set(preview?.rows.filter(\.isSelected).map(\.id) ?? []) },
-            set: { selection in
-                guard var preview else { return }
-                for index in preview.rows.indices {
-                    preview.rows[index].isSelected = selection.contains(preview.rows[index].id)
-                }
-                self.preview = preview
-            })
     }
 
     private var scanLineCount: Int {
@@ -340,7 +374,10 @@ struct RosterImportView: View {
             return
         }
         errorMessage = nil
+        // Replacing the preview wholesale also resets row selection and
+        // mapping, so re-analysis never leaks the previous review state.
         preview = result
+        isReviewing = true
     }
 
     /// Optional on-device interpretation. Its output lands in the same
@@ -373,6 +410,7 @@ struct RosterImportView: View {
             }
             errorMessage = nil
             preview = result
+            isReviewing = true
         } catch {
             // A late failure after an edit is also stale, not an error.
             guard source == rawText else { return }
@@ -381,17 +419,6 @@ struct RosterImportView: View {
         }
     }
 
-    private func commit() async {
-        guard let store = appModel.store, let preview else { return }
-        do {
-            try await store.addPlayers(teamID: teamID, preview.players)
-            Haptics.success()
-            dismiss()
-        } catch {
-            errorMessage = "Programme couldn't save those players. Nothing was changed. Try again."
-            Haptics.error()
-        }
-    }
 }
 
 /// Optional camera import. Programme reads the text and hands it to the same

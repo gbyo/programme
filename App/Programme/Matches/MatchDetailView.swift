@@ -69,7 +69,7 @@ struct MatchDetailView: View {
                             contexts: [context]),
                         exporters: ProgrammeExporters.forMatch())
                 }
-                .presentationDetents([.medium, .large])
+                .presentationSizing(.form)
                 .presentationDragIndicator(.visible)
             }
         }
@@ -391,6 +391,13 @@ struct TeamComparisonTable: View {
             row("Corners", .corners, snapshot.team.us.corners, snapshot.team.opponent.corners)
             row("Steals", .steals, snapshot.team.us.steals, snapshot.team.opponent.steals)
             row("Fouls", .fouls, snapshot.team.us.fouls, snapshot.team.opponent.fouls)
+            row("Offsides", .offsides, snapshot.team.us.offsides, snapshot.team.opponent.offsides)
+            row(
+                "Penalty Goals", .penaltyKicks,
+                snapshot.team.us.penaltyGoals, snapshot.team.opponent.penaltyGoals)
+            row(
+                "Penalty Attempts", .penaltyKicks,
+                snapshot.team.us.penaltyAttempts, snapshot.team.opponent.penaltyAttempts)
             row("Yellow Cards", .cards, snapshot.team.us.yellowCards, snapshot.team.opponent.yellowCards)
             row("Red Cards", .cards, snapshot.team.us.redCards, snapshot.team.opponent.redCards)
         }
@@ -574,7 +581,7 @@ struct KeeperTable: View {
         Grid(horizontalSpacing: 12, verticalSpacing: 0) {
             headerRow
             ForEach(keepers, id: \.playerID) { keeper in
-                Divider().gridCellColumns(7)
+                Divider().gridCellColumns(9)
                 keeperRow(keeper)
             }
         }
@@ -587,6 +594,8 @@ struct KeeperTable: View {
             Text("SOGA").gridColumnAlignment(.trailing)
             Text("SV").gridColumnAlignment(.trailing)
             Text("GA").gridColumnAlignment(.trailing)
+            Text("PKF").gridColumnAlignment(.trailing)
+            Text("PKSV").gridColumnAlignment(.trailing)
             Text("SV%").gridColumnAlignment(.trailing)
             Text("GAA").gridColumnAlignment(.trailing)
         }
@@ -604,6 +613,8 @@ struct KeeperTable: View {
             Text("\(keeper.shotsOnGoalFaced)")
             Text("\(keeper.saves)")
             Text("\(keeper.goalsAllowed)")
+            StatValueText(context.profile.value(.penaltyKicks, keeper.penaltiesFaced))
+            StatValueText(context.profile.value(.penaltyKicks, keeper.penaltySaves))
             StatValueText(
                 keeper.savePercentage.map { StatValue.rate($0) } ?? .notApplicable,
                 style: .percent
@@ -651,6 +662,12 @@ struct KeeperTable: View {
                 }
                 compactStat("GA") {
                     Text("\(keeper.goalsAllowed)").monospacedDigit()
+                }
+                compactStat("PKF") {
+                    StatValueText(context.profile.value(.penaltyKicks, keeper.penaltiesFaced))
+                }
+                compactStat("PKSV") {
+                    StatValueText(context.profile.value(.penaltyKicks, keeper.penaltySaves))
                 }
                 compactStat("SV%") {
                     StatValueText(

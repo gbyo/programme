@@ -52,12 +52,25 @@ struct ScoreboardWindow: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+        .navigationTitle(windowTitle)
         // Apple's DevicePicker documentation presents the picker as a
         // full-screen modal, not a sheet.
         .fullScreenCover(isPresented: $isConnectingNearby) {
             NearbyConnectSheet()
                 .environment(appModel.nearby)
         }
+    }
+
+    /// A semantic scene title lets iPadOS distinguish this display from the
+    /// scoring window in App Switcher without adding visible chrome here.
+    private var windowTitle: String {
+        if let session = appModel.liveSession {
+            return "Scoreboard — \(session.descriptor.title)"
+        }
+        if let received = appModel.nearby.received {
+            return "Scoreboard — \(received.teamShortName) vs \(received.opponentShortName)"
+        }
+        return "Scoreboard"
     }
 
     private func content(session: LiveMatchSession) -> some View {
@@ -76,9 +89,20 @@ struct ScoreboardWindow: View {
                     name: session.descriptor.opponentShortName, value: session.snapshot.score.opponent)
             }
 
-            Text(session.clock.displayText)
+            // System-animated from the anchor, like the scorer header:
+            // the clock advances with no app-owned tick.
+            if session.clock.isRunning {
+                Text(
+                    timerInterval: WidgetClock.timerRange(
+                        anchor: session.context.clock, rules: session.context.rules, at: Date()),
+                    countsDown: WidgetClock.countsDown(rules: session.context.rules),
+                    showsHours: false
+                )
                 .font(.system(size: 92, weight: .light).monospacedDigit())
-                .contentTransition(.numericText())
+            } else {
+                Text(session.clock.displayText)
+                    .font(.system(size: 92, weight: .light).monospacedDigit())
+            }
         }
         .padding(48)
         .accessibilityElement(children: .combine)

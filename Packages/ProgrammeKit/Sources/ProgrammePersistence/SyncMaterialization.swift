@@ -52,15 +52,22 @@ extension MatchStore: SyncJournal {
     }
 
     public func locateEvent(_ eventID: EventID, inTeam teamID: TeamID) throws -> MatchID? {
-        // Deletions arrive without a match reference, so the match is found
-        // by scan. Deletions are rare (a descope, not a steady-state write)
-        // and scoped to one team, so a linear pass is proportionate.
-        for item in try matches(teamID: teamID) {
-            if try context(for: item.id).events.contains(where: { $0.id == eventID }) {
-                return item.id
-            }
-        }
-        return nil
+        // Deletions arrive without a match reference: resolve the parent
+        // through the indexed event row instead of rebuilding every match
+        // context in the team. The parent match must belong to the
+        // requesting team, so another team's event never resolves here.
+        let rawEvent = eventID.rawValue
+        var eventDescriptor = FetchDescriptor<MatchEventModel>(
+            predicate: #Predicate { $0.identifier == rawEvent })
+        eventDescriptor.fetchLimit = 1
+        guard let event = try modelContext.fetch(eventDescriptor).first else { return nil }
+        let rawMatch = event.matchIdentifier
+        let rawTeam = teamID.rawValue
+        var matchDescriptor = FetchDescriptor<MatchModel>(
+            predicate: #Predicate { $0.identifier == rawMatch && $0.teamIdentifier == rawTeam })
+        matchDescriptor.fetchLimit = 1
+        guard let match = try modelContext.fetch(matchDescriptor).first else { return nil }
+        return match.matchID
     }
 
     public func writeEffects(_ effects: [MatchEffect], to matchID: MatchID) throws {
@@ -69,20 +76,39 @@ extension MatchStore: SyncJournal {
     }
 
     public func teamExists(_ teamID: TeamID) throws -> Bool {
-        try teams().contains { $0.id == teamID }
+        let raw = teamID.rawValue
+        let descriptor = FetchDescriptor<TeamModel>(predicate: #Predicate { $0.identifier == raw })
+        return try modelContext.fetchCount(descriptor) > 0
     }
 
     public func seasonExists(_ seasonID: SeasonID, inTeam teamID: TeamID) throws -> Bool {
-        (try? seasons(teamID: teamID))?.contains { $0.id == seasonID } ?? false
+        let rawSeason = seasonID.rawValue
+        let rawTeam = teamID.rawValue
+        let descriptor = FetchDescriptor<SeasonModel>(
+            predicate: #Predicate {
+                $0.identifier == rawSeason && $0.team?.identifier == rawTeam
+            })
+        return try modelContext.fetchCount(descriptor) > 0
     }
 
     public func playerExists(_ playerID: PlayerID, inTeam teamID: TeamID) throws -> Bool {
-        guard let roster = try? roster(teamID: teamID, includeFormer: true) else { return false }
-        return roster[playerID] != nil
+        let rawPlayer = playerID.rawValue
+        let rawTeam = teamID.rawValue
+        let descriptor = FetchDescriptor<PlayerModel>(
+            predicate: #Predicate {
+                $0.identifier == rawPlayer && $0.team?.identifier == rawTeam
+            })
+        return try modelContext.fetchCount(descriptor) > 0
     }
 
     public func matchExists(_ matchID: MatchID, inTeam teamID: TeamID) throws -> Bool {
-        (try? matches(teamID: teamID))?.contains { $0.id == matchID } ?? false
+        let rawMatch = matchID.rawValue
+        let rawTeam = teamID.rawValue
+        let descriptor = FetchDescriptor<MatchModel>(
+            predicate: #Predicate {
+                $0.identifier == rawMatch && $0.teamIdentifier == rawTeam
+            })
+        return try modelContext.fetchCount(descriptor) > 0
     }
 
     public func ensureTeam(_ team: TeamRecord) throws {

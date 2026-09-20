@@ -26,7 +26,7 @@ struct ManageTeamsView: View {
     var body: some View {
         List {
             Section {
-                ForEach(appModel.workspace.teams) { team in
+                ForEach(appModel.teamSummaries) { team in
                     NavigationLink {
                         TeamDetailView(teamID: team.id)
                     } label: {
@@ -74,6 +74,7 @@ struct ManageTeamsView: View {
 
     private func refresh() async {
         await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
+        await appModel.refreshTeamSummaries()
     }
 }
 
@@ -97,9 +98,6 @@ struct TeamDetailView: View {
     @State private var conflicts: [(conflict: TeamConflict, matchName: String)] = []
     @State private var syncState: TeamSyncState = .synced
     @State private var isConfirmingStopSharing = false
-    @State private var isAddingSeason = false
-    @State private var newSeasonName = ""
-    @State private var newSeasonMakeCurrent = true
 
     var body: some View {
         Form {
@@ -149,7 +147,13 @@ struct TeamDetailView: View {
                         }
                     }
                 }
-                Button("Add Season…", systemImage: "plus") { isAddingSeason = true }
+                NavigationLink {
+                    AddSeasonView(teamID: teamID) {
+                        Task { await load() }
+                    }
+                } label: {
+                    Label("Add Season…", systemImage: "plus")
+                }
             } header: {
                 Text("Seasons")
             } footer: {
@@ -315,29 +319,6 @@ struct TeamDetailView: View {
                     .accessibilityIdentifier("teamDetail.save")
             }
         }
-        .sheet(isPresented: $isAddingSeason) {
-            NavigationStack {
-                Form {
-                    Section("Season") {
-                        TextField("Season name", text: $newSeasonName)
-                        Toggle("Make current", isOn: $newSeasonMakeCurrent)
-                    }
-                }
-                .formStyle(.grouped)
-                .navigationTitle("Add Season")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { isAddingSeason = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") { Task { await addSeason() } }
-                            .disabled(newSeasonName.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .fontWeight(.semibold)
-                    }
-                }
-            }
-        }
         // Reloads when the collaboration policy flips, so disabling or
         // re-enabling sharing applies immediately without reopening the view.
         // Team fields load only when the team changes: reloading them on
@@ -429,6 +410,7 @@ struct TeamDetailView: View {
                 primaryColorHex: Programme.hex(from: color),
                 secondaryColorHex: details?.secondaryColorHex)
             await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
+            await appModel.refreshTeamSummaries()
             await load()
             errorMessage = nil
             Haptics.success()
@@ -446,7 +428,7 @@ struct TeamDetailView: View {
             if appModel.workspace.selectedTeamID == teamID {
                 appModel.workspace.currentSeasonID = seasonID
                 appModel.workspace.viewedStatsSeasonID = seasonID
-                await appModel.refreshWidgetSnapshot()
+                await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
             }
             await load()
             Haptics.selectionChanged()
@@ -456,22 +438,62 @@ struct TeamDetailView: View {
         }
     }
 
+}
+
+/// Add Season is a drill-in child of Team Detail, not a modal task: it
+/// pushes on the existing NavigationStack, so no Programme-owned sheets
+/// ever stack for this workflow.
+struct AddSeasonView: View {
+    let teamID: TeamID
+    var onAdded: () -> Void
+
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var makeCurrent = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section("Season") {
+                TextField("Season name", text: $name)
+                Toggle("Make current", isOn: $makeCurrent)
+            }
+            if let errorMessage {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Programme.Palette.critical)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Add Season")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Add") { Task { await addSeason() } }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+
     private func addSeason() async {
         guard let store = appModel.store else { return }
         do {
             let id = try await store.createSeason(
                 teamID: teamID,
-                name: newSeasonName.trimmingCharacters(in: .whitespaces),
+                name: name.trimmingCharacters(in: .whitespaces),
                 startDate: Date(), endDate: nil,
-                makeCurrent: newSeasonMakeCurrent)
-            if newSeasonMakeCurrent, appModel.workspace.selectedTeamID == teamID {
+                makeCurrent: makeCurrent)
+            if makeCurrent, appModel.workspace.selectedTeamID == teamID {
                 appModel.workspace.currentSeasonID = id
                 appModel.workspace.viewedStatsSeasonID = id
-                await appModel.refreshWidgetSnapshot()
+                await appModel.refreshWidgetSnapshot(reloadingSeasonRecord: true)
             }
-            newSeasonName = ""
-            isAddingSeason = false
-            await load()
+            await appModel.refreshTeamSummaries()
+            onAdded()
+            dismiss()
             Haptics.success()
         } catch {
             errorMessage = "Programme couldn't add that season. Nothing was changed."
