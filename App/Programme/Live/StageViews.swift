@@ -285,6 +285,154 @@ struct ShotLocationStage: View {
     }
 }
 
+/// Advanced-only body-part enrichment for an already-recorded shot.
+struct ShotBodyPartStage: View {
+    let shooterName: String
+    let outcome: ShotOutcome
+    var onCommit: (BodyPart?) -> Void
+
+    @ScaledMetric(relativeTo: .title3) private var choiceHeight: CGFloat = 62
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("How was it struck?")
+                        .font(.title3.weight(.semibold))
+                    Label("\(outcome.label) recorded · \(shooterName)", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Programme.Palette.confirmed)
+                }
+                Spacer()
+                Button("Skip") { onCommit(nil) }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("bodyPart.skip")
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150), spacing: 10)],
+                spacing: 10
+            ) {
+                ForEach(BodyPart.allCases, id: \.self) { part in
+                    Button {
+                        onCommit(part)
+                    } label: {
+                        Text(part.label)
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: choiceHeight)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonSizing(.flexible)
+                    .buttonBorderShape(.roundedRectangle(radius: Programme.Metrics.cornerRadius))
+                    .accessibilityIdentifier("bodyPart.\(part.rawValue)")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+    }
+}
+
+/// Advanced-only phase enrichment for an already-recorded shot.
+struct ShotPhaseStage: View {
+    let shooterName: String
+    let outcome: ShotOutcome
+    @State private var phase: PlayPhase
+    var onCommit: (PlayPhase?) -> Void
+
+    init(
+        shooterName: String,
+        outcome: ShotOutcome,
+        currentPhase: PlayPhase,
+        onCommit: @escaping (PlayPhase?) -> Void
+    ) {
+        self.shooterName = shooterName
+        self.outcome = outcome
+        _phase = State(initialValue: currentPhase)
+        self.onCommit = onCommit
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What phase of play?")
+                        .font(.title3.weight(.semibold))
+                    Label("\(outcome.label) recorded · \(shooterName)", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Programme.Palette.confirmed)
+                }
+                Spacer()
+                Button("Skip") { onCommit(nil) }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("shotPhase.skip")
+                Button("Record") { onCommit(phase) }
+                    .programmePrimaryAction()
+                    .keyboardShortcut(.return, modifiers: [])
+                    .accessibilityIdentifier("shotPhase.record")
+            }
+
+            Picker("Phase of play", selection: $phase) {
+                ForEach(PlayPhase.allCases, id: \.self) { phase in
+                    Text(phase.label).tag(phase)
+                }
+            }
+            .pickerStyle(.inline)
+            .accessibilityIdentifier("shotPhase.picker")
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .programmeSensoryFeedback(.selection, trigger: phase)
+    }
+}
+
+/// Advanced-only reason enrichment for a card that is already recorded.
+struct CardReasonStage: View {
+    let playerName: String
+    let type: CardType
+    @State private var reason = ""
+    var onCommit: (String?) -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Why was the card shown?")
+                        .font(.title3.weight(.semibold))
+                    Label("\(type.label) recorded · \(playerName)", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Programme.Palette.confirmed)
+                }
+                Spacer()
+                Button("Skip") { onCommit(nil) }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityIdentifier("cardReason.skip")
+                Button("Record") {
+                    let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onCommit(trimmed.isEmpty ? nil : trimmed)
+                }
+                .programmePrimaryAction()
+                .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .keyboardShortcut(.return, modifiers: [])
+                .accessibilityIdentifier("cardReason.record")
+            }
+
+            TextField("Reason", text: $reason, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...5)
+                .submitLabel(.done)
+                .accessibilityIdentifier("cardReason.field")
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+    }
+}
+
 /// *What happened?* — the outcome of a shot whose shooter is known and whose
 /// result is not.
 ///
