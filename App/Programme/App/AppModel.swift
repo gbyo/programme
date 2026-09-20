@@ -227,8 +227,10 @@ final class AppModel {
     /// database.
     func shareScope(teamID: TeamID) async -> TeamShareScope {
         guard let service = try? syncing() else { return .owned }
-        let owners = await service.sharedZoneOwners()
-        guard let owner = owners[teamID] else { return .owned }
+        // Actor-local cache read: answering which scope a team is in must
+        // not perform a CloudKit zone-list fetch, and stays correct offline
+        // from the last known local state.
+        guard let owner = await service.cachedOwnerName(for: teamID) else { return .owned }
         return .shared(ownerName: owner)
     }
 
