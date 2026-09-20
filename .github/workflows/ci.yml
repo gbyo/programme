@@ -146,3 +146,39 @@ jobs:
           path: ${{ runner.temp }}/ProgrammeUITests.xcresult
           if-no-files-found: ignore
           retention-days: 7
+
+  compact-ui-tests:
+    name: iPhone team-switcher tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.ui == 'true'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore Mint packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.mint
+          key: mint-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Mintfile', 'Brewfile') }}
+          restore-keys: |
+            mint-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install pinned developer tools
+        run: |
+          brew bundle --file Brewfile
+          mint bootstrap --mintfile Mintfile
+      - name: Run compact team-switcher tests
+        env:
+          PROGRAMME_XCRESULT_PATH: ${{ runner.temp }}/ProgrammeCompactTeamUITests.xcresult
+          # Focused scope: only CompactTeamSwitcherUITests runs, on an
+          # iPhone simulator, so phone title-menu behavior is exercised
+          # without running either heavy suite a second time.
+          PROGRAMME_CI: 1
+          PROGRAMME_UI_TEST_SCOPE: compact-team
+        run: bash scripts/test-ui.sh
+      - name: Upload test result on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ProgrammeCompactTeamUITests-xcresult
+          path: ${{ runner.temp }}/ProgrammeCompactTeamUITests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

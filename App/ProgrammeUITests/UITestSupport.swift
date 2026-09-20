@@ -225,6 +225,56 @@ class ProgrammeUITestCase: XCTestCase {
             "The text field did not end up holding the replacement text")
     }
 
+    /// Creates a team through Settings → Manage Teams, leaving it selected
+    /// with its native empty Home. Shared by the team-switcher tests, which
+    /// each need a second workspace to switch between.
+    ///
+    /// Creating the team only dismisses the New Team sheet, so the helper
+    /// walks the modal hierarchy back out — Manage Teams back to Settings,
+    /// Settings Done to Home — instead of tapping a root control that may
+    /// still be covered.
+    func createTeam(
+        _ app: XCUIApplication, name: String, shortName: String
+    ) {
+        tapToolbarButton(app, "home.settings", label: "Settings")
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.staticTexts["Manage Teams…"].tap()
+        XCTAssertTrue(app.navigationBars["Manage Teams"].waitForExistence(timeout: 5))
+        app.buttons["Add Team…"].tap()
+        XCTAssertTrue(app.navigationBars["New Team"].waitForExistence(timeout: 5))
+        replaceText(app, app.textFields["Team name"], with: name)
+        replaceText(app, app.textFields["Short name for the scoreboard"], with: shortName)
+        app.buttons["Create"].tap()
+        XCTAssertTrue(
+            app.navigationBars["Manage Teams"].waitForExistence(timeout: 10),
+            "The New Team sheet did not dismiss back to Manage Teams")
+        // Manage Teams is pushed with no toolbar actions of its own, so the
+        // only bar button is Back to Settings.
+        app.navigationBars["Manage Teams"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.navigationBars["Settings"].buttons["Done"].tap()
+        XCTAssertTrue(
+            element(app, "home.content").waitForExistence(timeout: 10),
+            "Settings did not dismiss back to Home")
+        XCTAssertTrue(
+            app.staticTexts["No Matches Yet"].waitForExistence(timeout: 10),
+            "Creating a team did not select it")
+    }
+
+    /// Taps a team-switcher menu entry, which can surface as either a menu
+    /// item or a button depending on how the popover renders.
+    func tapTeamMenuEntry(_ app: XCUIApplication, _ label: String) {
+        if app.menuItems[label].waitForExistence(timeout: 5) {
+            app.menuItems[label].tap()
+            return
+        }
+        let button = app.buttons[label].firstMatch
+        XCTAssertTrue(
+            button.waitForExistence(timeout: 5),
+            "No team menu entry for \(label)")
+        button.tap()
+    }
+
     func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name

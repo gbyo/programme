@@ -145,8 +145,8 @@ struct SeasonStatsView: View {
     }
 
     private func header(_ season: SeasonStats) -> some View {
-        // Team identity lives in the workspace switcher (sidebar bottom bar,
-        // toolbar otherwise); this section carries only season information.
+        // Team identity lives in the workspace switcher (sidebar, top bar, or
+        // navigation title); this section carries only season information.
         VStack(alignment: .leading, spacing: 12) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 16)], spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {

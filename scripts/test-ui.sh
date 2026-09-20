@@ -19,11 +19,14 @@ set -euo pipefail
 #     finite CPU/memory; do not raise it without measuring on the real
 #     xcode-27 runner. 0 disables parallel testing. Local default: unset, so
 #     the scheme's parallelizable flag governs with Xcode's default workers.
-#   PROGRAMME_UI_TEST_SCOPE=all|ipad|compact
+#   PROGRAMME_UI_TEST_SCOPE=all|ipad|compact|compact-team
 #     CI default: ipad, which excludes the phone-only CompactScorerUITests
 #     class via -skip-testing so the iPad run neither executes nor discovers
 #     it. `compact` selects only that class (pair with
-#     PROGRAMME_DEVICE_FAMILY=iphone). Local default: all.
+#     PROGRAMME_DEVICE_FAMILY=iphone). `compact-team` selects only the
+#     small CompactTeamSwitcherUITests class, so phone team-switcher
+#     behavior is exercised without running the whole scorer suite.
+#     Local default: all.
 #   PROGRAMME_DEVICE_FAMILY=ipad|iphone (default: ipad)
 #     Selects which simulator family to run on.
 #
@@ -66,8 +69,8 @@ fi
 
 family="${PROGRAMME_DEVICE_FAMILY:-}"
 if [[ -z "$family" ]]; then
-    # The compact suite only runs on a phone; every other scope targets iPad.
-    if [[ "$scope" == "compact" ]]; then
+    # The compact suites only run on a phone; every other scope targets iPad.
+    if [[ "$scope" == "compact" || "$scope" == "compact-team" ]]; then
         family="iphone"
     else
         family="ipad"
@@ -136,11 +139,14 @@ case "$scope" in
     compact)
         test_args=(-only-testing:ProgrammeUITests/CompactScorerUITests)
         ;;
+    compact-team)
+        test_args=(-only-testing:ProgrammeUITests/CompactTeamSwitcherUITests)
+        ;;
     all)
         test_args=(-only-testing:ProgrammeUITests)
         ;;
     *)
-        echo "error: unknown PROGRAMME_UI_TEST_SCOPE '$scope' (expected all|ipad|compact)." >&2
+        echo "error: unknown PROGRAMME_UI_TEST_SCOPE '$scope' (expected all|ipad|compact|compact-team)." >&2
         exit 2
         ;;
 esac
