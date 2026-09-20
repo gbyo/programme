@@ -100,25 +100,20 @@ struct MatchesView: View {
         }
         .confirmationDialog(
             "Delete this match?",
-            isPresented: Binding(get: { matchToDelete != nil }, set: { if !$0 { matchToDelete = nil } }),
+            item: $matchToDelete,
             titleVisibility: .visible
-        ) {
+        ) { match in
             Button("Delete Match", role: .destructive) {
-                if let match = matchToDelete {
-                    Task {
-                        try? await appModel.store?.deleteMatch(match.id)
-                        await reload()
-                    }
+                Task {
+                    try? await appModel.store?.deleteMatch(match.id)
+                    await reload()
                 }
-                matchToDelete = nil
             }
-            Button("Cancel", role: .cancel) { matchToDelete = nil }
-        } message: {
-            if let match = matchToDelete {
-                Text(
-                    "\(match.venue.label) versus \(match.opponentName) and its \(match.eventCount) events will be permanently removed. Export a Programme archive first if you want to keep a copy."
-                )
-            }
+            Button("Cancel", role: .cancel) {}
+        } message: { match in
+            Text(
+                "\(match.venue.label) versus \(match.opponentName) and its \(match.eventCount) events will be permanently removed. Export a Programme archive first if you want to keep a copy."
+            )
         }
         .task(id: [teamID.rawValue.uuidString, "\(seasonFilter)", "\(appModel.storeRevision)"]) {
             await reload()
