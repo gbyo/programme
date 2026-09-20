@@ -33,7 +33,6 @@ enum CloudKitAccountState: Hashable, Sendable {
     var isUsable: Bool { self == .available }
 }
 
-
 /// Observes `CKContainer.accountStatus()` and re-checks whenever the
 /// system posts account-change notifications while Programme runs.
 @MainActor
@@ -85,7 +84,9 @@ final class CloudKitAccountMonitor {
     /// Pure transition seam: only entering `.available` fires, so sign-in
     /// starts replication once while unavailable states stay silent.
     /// Covered directly; the container call itself needs a real account.
-    static func becameAvailable(
+    /// Nonisolated because the decision is pure state math with no actor
+    /// state involved, which also keeps it callable from tests.
+    nonisolated static func becameAvailable(
         previous: CloudKitAccountState, current: CloudKitAccountState
     ) -> Bool {
         current == .available && previous != .available

@@ -120,15 +120,23 @@ enum TeamSyncState: Hashable, Sendable {
 
 /// Human-readable sharing failures for the Share surface.
 enum TeamShareError: LocalizedError {
-    case iCloudUnavailable
+    /// Carries the account state so the copy can tell "no connection" apart
+    /// from "no account": an offline scorer must never be told to sign in.
+    case iCloudUnavailable(CloudKitAccountState)
     case noLibrary
     case shareLookupFailed
     case collaborationDisabled
 
     var errorDescription: String? {
         switch self {
-        case .iCloudUnavailable:
+        case .iCloudUnavailable(.noAccount):
             return "Sign in to iCloud in Settings to share this team."
+        case .iCloudUnavailable(.restricted):
+            return "This device doesn't allow iCloud sharing, so this team can't be shared from here."
+        case .iCloudUnavailable(.unknown):
+            return "Programme is still checking iCloud status. Nothing was changed. Try again in a moment."
+        case .iCloudUnavailable(.temporarilyUnavailable), .iCloudUnavailable(.available):
+            return "Programme couldn't reach iCloud right now. Nothing was changed. Try again when you're back online."
         case .noLibrary:
             return "The library is not ready yet. Try again in a moment."
         case .shareLookupFailed:

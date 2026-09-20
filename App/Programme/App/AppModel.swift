@@ -248,7 +248,9 @@ final class AppModel {
         // UI when collaboration is disabled. Creating a new share is gated
         // separately in the prepare handler below. Private same-user
         // CloudKit sync is unaffected — see docs/MANAGED_CONFIGURATION.md.
-        guard cloudAccount.state.isUsable else { throw TeamShareError.iCloudUnavailable }
+        guard cloudAccount.state.isUsable else {
+            throw TeamShareError.iCloudUnavailable(cloudAccount.state)
+        }
         guard let store else { throw TeamShareError.noLibrary }
         let details = try await store.teamDetails(teamID: teamID)
         let coordinator = try sharing()

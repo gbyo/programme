@@ -40,4 +40,44 @@ final class CloudKitAccountTests: XCTestCase {
         buffer.stage("third")
         XCTAssertEqual(buffer.drain(), ["third"])
     }
+
+    func testBecomingAvailableFiresFromEveryNonUsableState() {
+        for previous: CloudKitAccountState in [
+            .unknown, .noAccount, .restricted, .temporarilyUnavailable,
+        ] {
+            XCTAssertTrue(
+                CloudKitAccountMonitor.becameAvailable(previous: previous, current: .available),
+                "Entering available from \(previous) should start replication")
+        }
+    }
+
+    func testStayingAvailableOrLeavingNeverRefires() {
+        XCTAssertFalse(
+            CloudKitAccountMonitor.becameAvailable(previous: .available, current: .available))
+        for current: CloudKitAccountState in [
+            .unknown, .noAccount, .restricted, .temporarilyUnavailable,
+        ] {
+            XCTAssertFalse(
+                CloudKitAccountMonitor.becameAvailable(previous: .available, current: current),
+                "Leaving available for \(current) must not restart replication")
+            XCTAssertFalse(
+                CloudKitAccountMonitor.becameAvailable(
+                    previous: .temporarilyUnavailable, current: current))
+        }
+    }
+
+    func testShareErrorCopyDistinguishesOfflineFromSignedOut() {
+        XCTAssertEqual(
+            TeamShareError.iCloudUnavailable(.noAccount).errorDescription,
+            "Sign in to iCloud in Settings to share this team.")
+        XCTAssertEqual(
+            TeamShareError.iCloudUnavailable(.restricted).errorDescription,
+            "This device doesn't allow iCloud sharing, so this team can't be shared from here.")
+        for state: CloudKitAccountState in [.unknown, .temporarilyUnavailable, .available] {
+            let copy = TeamShareError.iCloudUnavailable(state).errorDescription ?? ""
+            XCTAssertFalse(
+                copy.localizedCaseInsensitiveContains("sign in"),
+                "An offline scorer must never be told to sign in (\(state))")
+        }
+    }
 }
