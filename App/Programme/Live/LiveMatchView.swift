@@ -153,22 +153,21 @@ struct LiveMatchView: View {
                     Group {
                         if let notice = session.notice {
                             NoticeBanner(notice: notice) { session.dismissNotice() }
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(
+                                    LiveMotion.temporaryStatusTransition(
+                                        reduceMotion: reduceMotion))
                         } else if usesCompactScoringLayout,
                             compactLastEventID == session.lastEventDescription?.id
                         {
                             CompactLastEventConfirmation(session: session)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(
+                                    LiveMotion.temporaryStatusTransition(
+                                        reduceMotion: reduceMotion))
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
                 }
-                .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: session.notice)
-                .animation(
-                    reduceMotion ? nil : .snappy(duration: 0.22),
-                    value: compactLastEventID
-                )
                 .programmeSensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
                 .navigationBarTitleDisplayMode(.inline)
@@ -430,9 +429,9 @@ struct LiveMatchView: View {
     /// place only when it has something to ask, and gives it straight back.
     private var twoColumnLayout: some View {
         HStack(spacing: 0) {
-            Group {
+            ZStack {
                 if composer.isComposing {
-                    workspace
+                    composerContent
                 } else {
                     LineupColumn(session: session, onSelect: select(player:))
                 }
@@ -491,13 +490,23 @@ struct LiveMatchView: View {
                 IdleWorkspace(session: session)
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: composer)
+        .clipped()
     }
 
     /// The composer itself, shared by the column and the sheet. One definition of
     /// each question, presented two ways.
     @ViewBuilder
     private var composerContent: some View {
+        if let step = composer.step {
+            ComposerStepContainer(step: step) {
+                composerStepContent
+            }
+            .transition(LiveMotion.composerPresenceTransition(reduceMotion: reduceMotion))
+        }
+    }
+
+    @ViewBuilder
+    private var composerStepContent: some View {
         switch composer.step {
         case .choosePlayer(let prompt):
             PlayerPickerStage(
@@ -893,8 +902,6 @@ struct ComposerSheet<Content: View>: View {
     @ViewBuilder var content: Content
     var onDismiss: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         Group {
             if step?.providesOwnNavigation == true {
@@ -923,7 +930,40 @@ struct ComposerSheet<Content: View>: View {
         .presentationSizing(.page)
         .presentationDragIndicator(.visible)
         .accessibilityIdentifier("composer.sheet")
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: step)
+    }
+}
+
+/// Shared Composer-step host for the regular workspace and the compact sheet.
+///
+/// The first question uses the restrained Composer presence transition owned by
+/// its parent. Once the host is present, changing its semantic step moves the
+/// new question in from the trailing edge and the previous question out toward
+/// the leading edge. The host's state keeps that distinction without delaying
+/// any Composer state change.
+private struct ComposerStepContainer<Content: View>: View {
+    let step: ComposerStep
+    let content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hasAppeared = false
+
+    init(step: ComposerStep, @ViewBuilder content: () -> Content) {
+        self.step = step
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            content
+                .id(step.transitionID)
+                .transition(
+                    hasAppeared
+                        ? LiveMotion.composerStepTransition(reduceMotion: reduceMotion)
+                        : .identity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .onAppear { hasAppeared = true }
     }
 }
 
@@ -983,7 +1023,10 @@ struct IdleWorkspace: View {
                     Label("\(player.shortLabel) selected", systemImage: "hand.tap.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
-                        .transition(.opacity)
+                        .id(player.id)
+                        .transition(
+                            LiveMotion.acknowledgementTransition(
+                                reduceMotion: reduceMotion))
                 }
             }
             .padding(.horizontal, 16)
@@ -999,7 +1042,6 @@ struct IdleWorkspace: View {
             Spacer(minLength: 0)
         }
         .accessibilityIdentifier("live.workspace")
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: session.armedPlayer)
     }
 
     private var idlePrompt: some View {

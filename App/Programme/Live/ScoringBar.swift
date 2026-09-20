@@ -162,9 +162,6 @@ struct LastEventSummary: View {
 
     var body: some View {
         content
-            .animation(
-                reduceMotion ? nil : .snappy(duration: 0.22),
-                value: session.lastEventDescription?.id)
     }
 
     @ViewBuilder
@@ -175,14 +172,19 @@ struct LastEventSummary: View {
                 row(description, detail: .medium)
                 row(description, detail: .minimal)
             }
+            .id(description.id)
             .lineLimit(1)
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("scoring.lastEvent")
             .accessibilityLabel("Last event: \(description.accessibilityLabel)")
+            .transition(
+                LiveMotion.statusReplacementTransition(reduceMotion: reduceMotion))
         } else {
             Text("No events recorded yet.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .transition(
+                    LiveMotion.statusReplacementTransition(reduceMotion: reduceMotion))
         }
     }
 
@@ -251,6 +253,7 @@ struct ReviewIndicator: View {
     let action: () -> Void
 
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var blockingCount: Int { issues.blocking.count }
     private var totalCount: Int { max(count, issues.needingReview.count) }
@@ -260,8 +263,20 @@ struct ReviewIndicator: View {
             Label {
                 Text(totalCount > 0 ? "\(totalCount)" : "OK")
                     .monospacedDigit()
+                    .contentTransition(
+                        reduceMotion ? .identity : .numericText()
+                    )
+                    .animation(
+                        reduceMotion ? nil : LiveMotion.acknowledgement,
+                        value: totalCount)
             } icon: {
                 Image(systemName: totalCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                    .contentTransition(
+                        reduceMotion ? .identity : .symbolEffect(.replace)
+                    )
+                    .animation(
+                        reduceMotion ? nil : LiveMotion.acknowledgement,
+                        value: totalCount > 0)
             }
         }
         .labelStyle(.titleAndIcon)

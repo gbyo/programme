@@ -69,6 +69,27 @@ enum ComposerStep: Equatable {
         case .substitution: "Substitution"
         }
     }
+
+    /// Stable identity for the visible question.
+    ///
+    /// This is deliberately semantic rather than the `UUID` carried by
+    /// `PlayerPrompt`. It lets the view replace one question with another while
+    /// preserving state within the active question, without using an
+    /// identity-resetting `UUID()` hack.
+    var transitionID: String {
+        switch self {
+        case .choosePlayer(let prompt):
+            "choose-player-\(prompt.side.rawValue)-\(prompt.action.transitionID)"
+        case .shotOutcome(_, let side, let context):
+            "shot-outcome-\(side.rawValue)-\(context.label)"
+        case .assist(let goalID, _, _):
+            "assist-\(goalID)"
+        case .shotLocation(let shotID, _, _):
+            "shot-location-\(shotID)"
+        case .substitution:
+            "substitution"
+        }
+    }
 }
 
 /// The composer's whole state: one optional step.
@@ -148,6 +169,22 @@ enum PendingAction: Equatable {
         case .card(let type): "Who received the \(type.label.lowercased())?"
         case .goalkeeper: "Who is going in goal?"
         case .ownGoal: "Who put it in their own net?"
+        }
+    }
+
+    /// Stable semantic identity used only by Composer presentation.
+    var transitionID: String {
+        switch self {
+        case .goal(let phase): "goal-\(phase.rawValue)"
+        case .shotAttempt(let phase): "shot-attempt-\(phase.rawValue)"
+        case .shot(let outcome): "shot-\(outcome.rawValue)"
+        case .corner: "corner"
+        case .steal: "steal"
+        case .foul: "foul"
+        case .offside: "offside"
+        case .card(let type): "card-\(type.rawValue)"
+        case .goalkeeper: "goalkeeper"
+        case .ownGoal: "own-goal"
         }
     }
 
