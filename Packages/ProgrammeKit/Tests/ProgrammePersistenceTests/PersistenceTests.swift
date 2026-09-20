@@ -722,3 +722,81 @@ struct MatchReminderPreferenceTests {
         #expect(try await store.reminderMinutesBefore(for: item.id) == nil)
     }
 }
+
+@Suite("Match fetching filters in the store, before any limit")
+struct MatchFetchPredicateTests {
+
+    private func makeStore() throws -> MatchStore {
+        let container = try ProgrammeStore.container(inMemory: true)
+        return MatchStore(modelContainer: container)
+    }
+
+    private func makeMatch(
+        _ store: MatchStore, teamID: TeamID, seasonID: SeasonID?, opponent: String,
+        daysFromNow: Int
+    ) async throws -> MatchID {
+        try await store.createMatch(
+            teamID: teamID, seasonID: seasonID, opponentName: opponent,
+            opponentShortName: opponent, kickoff: ProgrammeSample.kickoff(daysFromNow: daysFromNow),
+            venue: .home, rules: .highSchool, statProfile: .maxPreps, tracking: .ourTeam,
+            competition: nil, roster: ProgrammeSample.roster)
+    }
+
+    @Test("A team limit applies to that team's matches, not to unfiltered rows")
+    func teamLimitAppliesAfterTeamFilter() async throws {
+        let store = try makeStore()
+        let teamA = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        let teamB = try await store.createTeam(name: "Dixie", shortName: nil)
+        // Team B's matches are newer. A limit applied before the team
+        // filter would spend itself on B's rows and hide A's.
+        for days in [-10, -9, -8] {
+            _ = try await makeMatch(store, teamID: teamA, seasonID: nil, opponent: "Foe", daysFromNow: days)
+        }
+        for days in [-2, -1] {
+            _ = try await makeMatch(store, teamID: teamB, seasonID: nil, opponent: "Foe", daysFromNow: days)
+        }
+
+        let limited = try await store.matches(teamID: teamA, limit: 2)
+        #expect(limited.count == 2)
+        #expect(limited.allSatisfy { $0.opponentName == "Foe" })
+        // Newest first: the two most recent of team A.
+        #expect(limited.map(\.kickoff) == limited.map(\.kickoff).sorted(by: >))
+
+        let all = try await store.matches(teamID: teamA)
+        #expect(all.count == 3)
+    }
+
+    @Test("Season and team filters combine without leaking across seasons or teams")
+    func seasonAndTeamFiltersCombine() async throws {
+        let store = try makeStore()
+        let teamA = try await store.createTeam(name: "Ninety Six", shortName: nil)
+        let teamB = try await store.createTeam(name: "Dixie", shortName: nil)
+        let fallID = try await store.createSeason(
+            teamID: teamA, name: "Fall", startDate: Date(timeIntervalSince1970: 1_700_000_000),
+            endDate: nil)
+        let springID = try await store.createSeason(
+            teamID: teamA, name: "Spring", startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: nil, makeCurrent: false)
+        let fallA = try await makeMatch(
+            store, teamID: teamA, seasonID: fallID, opponent: "Fall Foe", daysFromNow: -5)
+        _ = try await makeMatch(
+            store, teamID: teamA, seasonID: springID, opponent: "Spring Foe", daysFromNow: -4)
+        _ = try await makeMatch(
+            store, teamID: teamB, seasonID: nil, opponent: "Other Foe", daysFromNow: -3)
+        try await store.apply([.setPhase(.finalized)], to: fallA)
+
+        let fall = try await store.matches(teamID: teamA, seasonID: fallID)
+        #expect(fall.map(\.opponentName) == ["Fall Foe"])
+
+        // Finalized summaries stay scoped to the requested team.
+        let summaries = try await store.seasonSummaries(teamID: teamA, seasonID: nil)
+        #expect(summaries.count == 1)
+
+        // Interrupted matches are still found.
+        let liveID = try await makeMatch(
+            store, teamID: teamA, seasonID: fallID, opponent: "Live Foe", daysFromNow: 0)
+        try await store.apply([.setPhase(.inPeriod)], to: liveID)
+        let interrupted = try await store.interruptedMatches()
+        #expect(interrupted.map(\.id).contains(liveID))
+    }
+}

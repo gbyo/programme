@@ -521,6 +521,19 @@ public actor MatchStore {
         -> [MatchListItem]
     {
         var descriptor = FetchDescriptor<MatchModel>(sortBy: [SortDescriptor(\.kickoff, order: .reverse)])
+        // Filter in SQLite, not in Swift: fetching every team's rows just to
+        // discard them wastes work, and a fetchLimit applied before the
+        // filter can hide the requested team's rows behind other teams'.
+        if let teamID, let seasonID {
+            let teamIDValue = teamID.rawValue
+            let seasonIDValue = seasonID.rawValue
+            descriptor.predicate = #Predicate {
+                $0.teamIdentifier == teamIDValue && $0.season?.identifier == seasonIDValue
+            }
+        } else if let teamID {
+            let teamIDValue = teamID.rawValue
+            descriptor.predicate = #Predicate { $0.teamIdentifier == teamIDValue }
+        }
         if let limit { descriptor.fetchLimit = limit }
         let models = try modelContext.fetch(descriptor)
         return
@@ -541,7 +554,19 @@ public actor MatchStore {
     /// never derives a season's worth of statistics.
     public func seasonSummaries(teamID: TeamID, seasonID: SeasonID?) throws -> [MatchStatSummary] {
         guard let team = try team(teamID) else { throw StoreError.teamNotFound }
-        let models = try modelContext.fetch(FetchDescriptor<MatchModel>())
+        // Scope the fetch to this team's rows; per-season and finalized
+        // filtering below then runs over usable rows only.
+        let teamIDValue = teamID.rawValue
+        var descriptor = FetchDescriptor<MatchModel>()
+        if let seasonID {
+            let seasonIDValue = seasonID.rawValue
+            descriptor.predicate = #Predicate {
+                $0.teamIdentifier == teamIDValue && $0.season?.identifier == seasonIDValue
+            }
+        } else {
+            descriptor.predicate = #Predicate { $0.teamIdentifier == teamIDValue }
+        }
+        let models = try modelContext.fetch(descriptor)
         var summaries: [MatchStatSummary] = []
         for model in models where model.teamIdentifier == teamID.rawValue {
             if let seasonID, model.season?.identifier != seasonID.rawValue { continue }
