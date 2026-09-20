@@ -22,6 +22,7 @@ struct RosterImportView: View {
     @State private var preview: RosterImportPreview?
     @State private var isShowingFileImporter = false
     @State private var isShowingScanner = false
+    @State private var scannedText = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecognizingPhoto = false
     @State private var isInterpreting = false
@@ -66,10 +67,33 @@ struct RosterImportView: View {
             }
         }
         .sheet(isPresented: $isShowingScanner) {
-            RosterScannerView { text in
-                rawText = text
-                isShowingScanner = false
-                analyze()
+            // Explicit scan-and-confirm: the scanner stays up while items
+            // accumulate, and only Use Scanned Text commits into the
+            // deterministic review pipeline. Cancel leaves rawText — and
+            // any prior paste or file input — untouched.
+            NavigationStack {
+                RosterScannerView { scannedText = $0 }
+                    .navigationTitle("Scan Roster")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { isShowingScanner = false }
+                        }
+                        ToolbarItem(placement: .status) {
+                            Text(scanStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Use Scanned Text") {
+                                rawText = scannedText
+                                isShowingScanner = false
+                                analyze()
+                            }
+                            .disabled(scanLineCount == 0)
+                            .fontWeight(.semibold)
+                        }
+                    }
             }
         }
         .onAppear {
@@ -115,6 +139,7 @@ struct RosterImportView: View {
                 if appModel.managed.configuration.isAutomatedRosterExtractionAllowed {
                     if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                         Button("Scan a Printed Roster…", systemImage: "camera.viewfinder") {
+                            scannedText = ""
                             isShowingScanner = true
                         }
                     }
@@ -298,6 +323,16 @@ struct RosterImportView: View {
             })
     }
 
+    private var scanLineCount: Int {
+        scannedText.split(whereSeparator: \.isNewline).count
+    }
+
+    private var scanStatus: String {
+        scanLineCount == 0
+            ? "Point at the printed roster"
+            : "\(scanLineCount) line\(scanLineCount == 1 ? "" : "s") captured"
+    }
+
     private func analyze() {
         let result = RosterImporter.preview(csv: rawText)
         guard !result.rows.isEmpty else {
@@ -376,13 +411,18 @@ struct RosterScannerView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: DataScannerViewController, context: Context) {
+        // The scanner now stays visible across callbacks, so start exactly
+        // once instead of on every state update.
+        guard !context.coordinator.didStartScanning else { return }
+        context.coordinator.didStartScanning = true
         try? controller.startScanning()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onText: onText) }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        private var lines: [String] = []
+        fileprivate var didStartScanning = false
+        private var accumulator = ScannedRosterAccumulator()
         let onText: (String) -> Void
 
         init(onText: @escaping (String) -> Void) { self.onText = onText }
@@ -391,11 +431,36 @@ struct RosterScannerView: UIViewControllerRepresentable {
             _ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem],
             allItems: [RecognizedItem]
         ) {
-            for item in addedItems {
-                if case .text(let text) = item { lines.append(text.transcript) }
-            }
-            guard !lines.isEmpty else { return }
-            onText(lines.joined(separator: "\n"))
+            refresh(from: allItems)
+        }
+
+        func dataScanner(
+            _ dataScanner: DataScannerViewController, didUpdate updatedItems: [RecognizedItem],
+            allItems: [RecognizedItem]
+        ) {
+            refresh(from: allItems)
+        }
+
+        func dataScanner(
+            _ dataScanner: DataScannerViewController, didRemove removedItems: [RecognizedItem],
+            allItems: [RecognizedItem]
+        ) {
+            refresh(from: allItems)
+        }
+
+        /// Folds the full current item set, so the reported text always
+        /// matches what is on screen: updates replace stale transcripts and
+        /// removals disappear instead of lingering in an append log. Reports
+        /// on the main thread; the parent stores the text without
+        /// dismissing — only Use Scanned Text commits it.
+        private func refresh(from allItems: [RecognizedItem]) {
+            accumulator.setItems(
+                allItems.compactMap { item in
+                    guard case .text(let text) = item else { return nil }
+                    return (item.id, text.transcript)
+                })
+            let text = accumulator.text
+            DispatchQueue.main.async { self.onText(text) }
         }
     }
 }
