@@ -36,6 +36,7 @@ struct LiveMatchView: View {
     @State private var compactLastEventID: EventID?
     @State private var isAddingNote = false
     @State private var note = ""
+    @AppStorage(ScreenAwakePolicy.preferenceKey) private var keepScreenAwake = true
 
     enum LiveSheet: Identifiable, Equatable {
         /// The Event Composer itself. Its *content* lives in `composer`; this
@@ -273,6 +274,23 @@ struct LiveMatchView: View {
         }
         .onAppear {
             if !session.hasStartingLineup { activeSheet = .lineup }
+            // The scorer is visibly active: keep the display awake only while
+            // the preference is enabled. The controller re-evaluates the
+            // policy, so this never leaves the global setting behind.
+            appModel.screenAwake.isScorerVisible = true
+            appModel.screenAwake.preferenceEnabled = keepScreenAwake
+            appModel.screenAwake.refresh()
+        }
+        .onDisappear {
+            // Leaving the scorer — closing, finalizing, or navigating away —
+            // restores normal idle behavior immediately.
+            appModel.screenAwake.isScorerVisible = false
+            appModel.screenAwake.refresh()
+        }
+        .onChange(of: keepScreenAwake) { _, enabled in
+            // Disabling the setting mid-match restores normal sleep at once.
+            appModel.screenAwake.preferenceEnabled = enabled
+            appModel.screenAwake.refresh()
         }
     }
 

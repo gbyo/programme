@@ -165,6 +165,11 @@ final class AppModel {
     /// The match currently being scored. There is at most one.
     var liveSession: LiveMatchSession?
 
+    /// Central owner of the app-wide idle-timer setting. `LiveMatchView`
+    /// reports its visibility and the preference here; this controller applies
+    /// `ScreenAwakePolicy` so no view writes the global setting directly.
+    let screenAwake = ScreenAwakeController()
+
     /// Matches that were being scored when Programme last stopped. Never
     /// discarded silently.
     private(set) var recoveryCandidates: [RecoverableMatch] = []
@@ -907,6 +912,10 @@ final class AppModel {
     func closeLiveSession() async {
         await liveSession?.flush()
         liveSession = nil
+        // The scorer is gone regardless of view-disappearance ordering, so
+        // restore normal sleep here rather than trusting appearance callbacks.
+        screenAwake.isScorerVisible = false
+        screenAwake.refresh()
         nearby.stopAdvertising()
         ProgrammeStateReporter.reportWorkflow(.browsing)
         navigation.isShowingLiveMatch = false
@@ -916,6 +925,11 @@ final class AppModel {
     // MARK: - Scene phase
 
     func scenePhaseChanged(to phase: ScenePhase) {
+        // The display must never stay awake while backgrounded or inactive,
+        // even mid-match: the policy restores normal sleep on any
+        // deactivation and re-applies it when the scene is active again.
+        screenAwake.isSceneActive = (phase == .active)
+        screenAwake.refresh()
         guard phase == .background || phase == .inactive else { return }
         // Make sure everything recorded has reached the database before the app
         // can be suspended or killed.
