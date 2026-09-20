@@ -14,7 +14,6 @@ struct MatchesView: View {
     @State private var matches: [MatchListItem] = []
     @State private var seasons: [SeasonListItem] = []
     @State private var seasonFilter: SeasonFilter = .current
-    @State private var searchText = ""
     @State private var matchToDelete: MatchListItem?
 
     enum SeasonFilter: Hashable {
@@ -58,7 +57,9 @@ struct MatchesView: View {
         }
         .listStyle(.insetGrouped)
         .teamWorkspaceTitle("Matches")
-        .searchable(text: $searchText, prompt: "Opponents and competitions")
+        // Finding across matches, players, teams, and seasons is the shared
+        // universal search owned by the navigation shell, not a second local
+        // search field here.
         .toolbar {
             ToolbarItem(placement: .secondaryAction) {
                 Menu("Season", systemImage: "calendar") {
@@ -94,8 +95,6 @@ struct MatchesView: View {
                     Button("Create a Match") { appModel.navigation.isPresentingNewMatch = true }
                         .programmePrimaryAction()
                 }
-            } else if filtered.isEmpty {
-                ContentUnavailableView.search(text: searchText)
             }
         }
         .confirmationDialog(
@@ -143,22 +142,13 @@ struct MatchesView: View {
         }
     }
 
-    private var filtered: [MatchListItem] {
-        guard !searchText.isEmpty else { return matches }
-        let query = searchText.lowercased()
-        return matches.filter {
-            $0.opponentName.lowercased().contains(query)
-                || ($0.competition?.lowercased().contains(query) ?? false)
-        }
-    }
-
     private struct Group {
         var title: String
         var matches: [MatchListItem]
     }
 
     private var groups: [Group] {
-        let source = filtered.sorted { $0.kickoff > $1.kickoff }
+        let source = matches.sorted { $0.kickoff > $1.kickoff }
         var result: [Group] = []
         let live = source.filter(\.isInterrupted)
         if !live.isEmpty { result.append(Group(title: "In Progress", matches: live)) }

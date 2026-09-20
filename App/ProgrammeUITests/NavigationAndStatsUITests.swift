@@ -179,22 +179,18 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         attachScreenshot(named: "Sidebar team menu")
     }
 
-    /// Global Search finds a match by opponent and opens its detail, in the
-    /// current-team scope and across all teams.
-    func testGlobalSearchFindsMatchAndOpensDetail() throws {
+    /// Universal search is a pull-down field on Matches — not a tab — and
+    /// finds a match by opponent in both scopes before opening its detail.
+    func testUniversalSearchFindsMatchAndOpensDetail() throws {
         let app = launch()
         waitForHome(app)
-        openSection(app, "Search")
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
 
-        let field = app.searchFields.firstMatch
-        XCTAssertTrue(
-            field.waitForExistence(timeout: 10),
-            "The Search tab has no search field")
-        field.tap()
-        field.typeText("Emerald")
+        searchFor(app, "Emerald")
         XCTAssertTrue(
             element(app, "match.Emerald").waitForExistence(timeout: 10),
-            "Search did not find the seeded match by opponent")
+            "Universal search did not find the seeded match by opponent")
         app.buttons["All Teams"].tap()
         XCTAssertTrue(
             element(app, "match.Emerald").waitForExistence(timeout: 10),
@@ -203,7 +199,210 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         XCTAssertTrue(
             app.staticTexts["Box Score"].waitForExistence(timeout: 10),
             "Tapping a search result did not open match detail")
-        attachScreenshot(named: "Global search")
+        attachScreenshot(named: "Universal search")
+    }
+
+    /// Every one of the four sections exposes the same universal search
+    /// field with restrained pre-typing suggestions, and cancelling restores
+    /// the section that was being browsed.
+    func testUniversalSearchAvailableFromEverySection() throws {
+        let app = launch()
+        waitForHome(app)
+
+        for section in ["Home", "Matches", "Roster", "Stats"] {
+            openSection(app, section)
+            let field = revealSearch(app)
+            XCTAssertTrue(
+                field.isHittable,
+                "\(section) does not expose the universal search field")
+            field.tap()
+            XCTAssertTrue(
+                app.staticTexts["Recent Matches"].waitForExistence(timeout: 10),
+                "\(section) search shows no recent matches before typing")
+            cancelSearch(app)
+        }
+
+        openSection(app, "Home")
+        waitForHome(app)
+    }
+
+    /// One query surface finds matches, players, teams, and seasons alike,
+    /// wherever it was opened — here from Roster. Tapping the team result
+    /// selects the workspace and dismisses search.
+    func testUniversalSearchFindsEveryEntityType() throws {
+        let app = launch()
+        waitForHome(app)
+        openSection(app, "Roster")
+        XCTAssertTrue(app.navigationBars["Roster"].waitForExistence(timeout: 10))
+
+        searchFor(app, "Emerald")
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10),
+            "Universal search found no match result from Roster")
+        cancelSearch(app)
+
+        searchFor(app, "Carter")
+        XCTAssertTrue(
+            element(app, "search.player.Carter").waitForExistence(timeout: 10),
+            "Universal search found no player result from Roster")
+        cancelSearch(app)
+
+        searchFor(app, "Ninety")
+        XCTAssertTrue(
+            element(app, "search.team.Ninety Six Boys Soccer").waitForExistence(
+                timeout: 10),
+            "Universal search found no team result from Roster")
+        cancelSearch(app)
+
+        searchFor(app, "2027")
+        XCTAssertTrue(
+            element(app, "search.season.2027").waitForExistence(timeout: 10),
+            "Universal search found no season result from Roster")
+        cancelSearch(app)
+
+        searchFor(app, "Ninety")
+        element(app, "search.team.Ninety Six Boys Soccer").tap()
+        XCTAssertTrue(
+            app.navigationBars["Roster"].waitForExistence(timeout: 10),
+            "Selecting a team result did not return to browsing")
+        XCTAssertFalse(
+            element(app, "search.content").exists,
+            "Selecting a team result left a stale search surface")
+    }
+
+    /// Search is a launcher, not a navigation universe: a match found from
+    /// Roster opens in the Matches stack, leaving the Roster stack at its
+    /// root.
+    func testUniversalSearchMatchRoutesToMatchesStack() throws {
+        let app = launch()
+        waitForHome(app)
+
+        openSection(app, "Roster")
+        searchFor(app, "Emerald")
+        element(app, "match.Emerald").tap()
+        XCTAssertTrue(
+            app.staticTexts["Box Score"].waitForExistence(timeout: 10),
+            "The match result did not open match detail")
+
+        openSection(app, "Roster")
+        XCTAssertTrue(app.navigationBars["Roster"].waitForExistence(timeout: 10))
+        XCTAssertFalse(
+            app.staticTexts["Box Score"].exists,
+            "The match detail landed in the Roster stack instead of Matches")
+        openSection(app, "Matches")
+        XCTAssertTrue(
+            app.staticTexts["Box Score"].waitForExistence(timeout: 10),
+            "The match detail is not in the Matches stack")
+    }
+
+    /// The mirror direction: a player found from Matches opens in the Roster
+    /// stack, leaving the Matches stack at its root.
+    func testUniversalSearchPlayerRoutesToRosterStack() throws {
+        let app = launch()
+        waitForHome(app)
+
+        openSection(app, "Matches")
+        searchFor(app, "Carter")
+        element(app, "search.player.Carter").tap()
+        XCTAssertTrue(
+            app.navigationBars["Carter"].waitForExistence(timeout: 10),
+            "The player result did not open player detail")
+
+        openSection(app, "Matches")
+        XCTAssertTrue(app.navigationBars["Matches"].waitForExistence(timeout: 10))
+        XCTAssertFalse(
+            app.navigationBars["Carter"].exists,
+            "The player detail landed in the Matches stack instead of Roster")
+        openSection(app, "Roster")
+        XCTAssertTrue(
+            app.navigationBars["Carter"].waitForExistence(timeout: 10),
+            "The player detail is not in the Roster stack")
+    }
+
+    /// Current Team never leaks another team's matches or players, while All
+    /// Teams finds them and routes across the workspace switch.
+    func testUniversalSearchScopes() throws {
+        let app = launch()
+        waitForHome(app)
+        createTeam(app, name: "JV Test Team", shortName: "JV Test")
+
+        openSection(app, "Roster")
+        app.buttons["Add a Player"].tap()
+        XCTAssertTrue(app.navigationBars["Add Player"].waitForExistence(timeout: 10))
+        replaceText(app, app.textFields["First name"], with: "Zelda")
+        replaceText(app, app.textFields["Last name"], with: "Smith")
+        replaceText(app, app.textFields["Jersey number"], with: "99")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS 'Zelda'")
+            ).firstMatch
+                .waitForExistence(timeout: 10),
+            "The new team's player was not saved")
+
+        searchFor(app, "Carter")
+        XCTAssertTrue(
+            element(app, "search.content").waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            element(app, "search.team.JV Test Team").waitForExistence(timeout: 10),
+            "Search results never loaded")
+        XCTAssertFalse(
+            element(app, "search.player.Carter").exists,
+            "Current Team leaked another team's player")
+        cancelSearch(app)
+
+        searchFor(app, "Emerald")
+        XCTAssertTrue(
+            element(app, "search.team.Ninety Six Boys Soccer").waitForExistence(
+                timeout: 10),
+            "Search results never loaded")
+        XCTAssertFalse(
+            element(app, "match.Emerald").exists,
+            "Current Team leaked another team's match")
+        app.buttons["All Teams"].tap()
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10),
+            "All Teams lost the cross-team match")
+        element(app, "match.Emerald").tap()
+        XCTAssertTrue(
+            app.staticTexts["Box Score"].waitForExistence(timeout: 10),
+            "The cross-team result did not open match detail")
+        // The cross-team routing switched the workspace: Home now shows the
+        // seeded team's content instead of the new team's empty state.
+        openSection(app, "Home")
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10),
+            "The cross-team result did not switch teams")
+    }
+
+    /// Switching teams while searching reloads Current-Team content instead
+    /// of keeping the previous team's snapshots on screen.
+    func testUniversalSearchReloadsAfterTeamChange() throws {
+        try XCTSkipUnless(
+            UIDevice.current.userInterfaceIdiom == .pad,
+            "Switching teams mid-search needs the sidebar team switcher.")
+        let app = launch()
+        waitForHome(app)
+        createTeam(app, name: "JV Test Team", shortName: "JV Test")
+
+        element(app, "sidebar.teamSwitcher").tap()
+        tapTeamMenuEntry(app, "Ninety Six Boys Soccer")
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10))
+
+        openSection(app, "Matches")
+        searchFor(app, "Emerald")
+        XCTAssertTrue(
+            element(app, "match.Emerald").waitForExistence(timeout: 10))
+
+        element(app, "sidebar.teamSwitcher").tap()
+        tapTeamMenuEntry(app, "JV Test Team")
+        XCTAssertTrue(
+            element(app, "search.team.JV Test Team").waitForExistence(timeout: 10),
+            "Search results never reloaded for the new team")
+        XCTAssertFalse(
+            element(app, "match.Emerald").exists,
+            "Search kept the previous team's matches after switching teams")
     }
 
     /// A long team name stays on one truncated line: the four destinations
@@ -243,6 +442,11 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
         XCTAssertTrue(app.navigationBars["Season Stats"].waitForExistence(timeout: 10))
         openSection(app, "Home")
         XCTAssertTrue(element(app, "home.content").waitForExistence(timeout: 10))
+
+        // Search is an action on content, not a fifth destination: no tab,
+        // no sidebar row.
+        XCTAssertFalse(app.tabBars.buttons["Search"].exists)
+        XCTAssertFalse(app.buttons["Search"].exists)
 
         // Exports is a utility under Settings, not a top-level destination.
         XCTAssertFalse(app.tabBars.buttons["Exports"].exists)
