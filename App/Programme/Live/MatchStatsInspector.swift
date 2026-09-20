@@ -30,10 +30,29 @@ struct MatchStatsInspector: View {
                 if session.profile.tracks(.steals) {
                     comparison("Steals", session.snapshot.team.us.steals, session.snapshot.team.opponent.steals)
                 }
+                if session.profile.tracks(.fouls) {
+                    comparison("Fouls", session.snapshot.team.us.fouls, session.snapshot.team.opponent.fouls)
+                }
+                if session.profile.tracks(.offsides) {
+                    comparison(
+                        "Offsides", session.snapshot.team.us.offsides,
+                        session.snapshot.team.opponent.offsides)
+                }
+                if session.profile.tracks(.penaltyKicks) {
+                    comparison(
+                        "Penalty Goals", session.snapshot.team.us.penaltyGoals,
+                        session.snapshot.team.opponent.penaltyGoals)
+                    comparison(
+                        "Penalty Attempts", session.snapshot.team.us.penaltyAttempts,
+                        session.snapshot.team.opponent.penaltyAttempts)
+                }
                 if session.profile.tracks(.cards) {
                     comparison(
                         "Yellow Cards", session.snapshot.team.us.yellowCards,
                         session.snapshot.team.opponent.yellowCards)
+                    comparison(
+                        "Red Cards", session.snapshot.team.us.redCards,
+                        session.snapshot.team.opponent.redCards)
                 }
             }
 
@@ -136,6 +155,11 @@ struct MatchStatsInspector: View {
         }
         if session.profile.tracks(.steals) && line.steals > 0 { parts.append("\(line.steals) ST") }
         if session.profile.tracks(.corners) && line.corners > 0 { parts.append("\(line.corners) CK") }
+        if session.profile.tracks(.fouls) && line.fouls > 0 { parts.append("\(line.fouls) F") }
+        if session.profile.tracks(.offsides) && line.offsides > 0 { parts.append("\(line.offsides) OFF") }
+        if session.profile.tracks(.penaltyKicks) && line.penaltyAttempts > 0 {
+            parts.append("\(line.penaltyGoals)/\(line.penaltyAttempts) PK")
+        }
         if line.yellowCards > 0 { parts.append("\(line.yellowCards) YC") }
         if line.redCards > 0 { parts.append("\(line.redCards) RC") }
         return parts.isEmpty ? "No statistics yet" : parts.joined(separator: " · ")
@@ -155,6 +179,9 @@ struct MatchStatsInspector: View {
             HStack(spacing: 10) {
                 Text("\(keeper.saves) SV")
                 Text("\(keeper.goalsAllowed) GA")
+                if session.profile.tracks(.penaltyKicks) {
+                    Text("\(keeper.penaltySaves)/\(keeper.penaltiesFaced) PK")
+                }
                 if let percentage = keeper.savePercentage {
                     Text("\(percentage.formatted(.percent.precision(.fractionLength(0)))) SV")
                 }
