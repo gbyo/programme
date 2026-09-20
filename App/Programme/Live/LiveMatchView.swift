@@ -25,16 +25,18 @@ struct LiveMatchView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var composer = EventComposer.idle
-    @State private var isShowingInspector = false
-    /// One sheet at a time. Programme never stacks them, and routing every
-    /// presentation through a single item makes a transition between two of them
-    /// a content swap rather than a dismiss-and-present race.
+    /// The sole presentation state. Programme never stacks presentations, and
+    /// routing every one through a single value makes a transition between
+    /// two of them a content swap rather than a dismiss-and-present race.
+    /// Two cases render outside `.sheet` — the note alert and the stats
+    /// inspector column — because those are the platform-idiomatic shapes
+    /// for a quick text entry and a stats column, but the router still owns
+    /// them: no other presentation Bool exists.
     @State private var activeSheet: LiveSheet?
     @State private var compactPane: CompactPane = .palette
     /// Compact layouts show the newly recorded event briefly above the toolbar
     /// instead of making passive status compete with the toolbar's controls.
     @State private var compactLastEventID: EventID?
-    @State private var isAddingNote = false
     @State private var note = ""
 
     enum LiveSheet: Identifiable, Equatable {
@@ -52,6 +54,8 @@ struct LiveMatchView: View {
         case shootout
         case editEvent(EventID)
         case nearbyDisplay
+        case addNote
+        case statsInspector
 
         var id: String {
             switch self {
@@ -69,6 +73,18 @@ struct LiveMatchView: View {
             case .shootout: "shootout"
             case .editEvent(let id): "edit-\(id)"
             case .nearbyDisplay: "nearby-display"
+            case .addNote: "add-note"
+            case .statsInspector: "stats-inspector"
+            }
+        }
+
+        /// Whether this case renders inside the `.sheet` modifier. The note
+        /// alert and the inspector column are owned by the same state but
+        /// rendered by their own platform modifiers below.
+        var isSheet: Bool {
+            switch self {
+            case .addNote, .statsInspector: false
+            default: true
             }
         }
     }
@@ -177,7 +193,7 @@ struct LiveMatchView: View {
                     MatchControlsToolbar(
                         session: session,
                         onClose: closeScorer,
-                        onShowStats: { isShowingInspector = true },
+                        onShowStats: { activeSheet = .statsInspector },
                         onEditLineup: { activeSheet = .lineup },
                         onEditOpponentRoster: { activeSheet = .opponentRoster },
                         onAdjustClock: { activeSheet = .adjustClock },
@@ -201,17 +217,20 @@ struct LiveMatchView: View {
                         onEdit: { editLastEvent() },
                         onLog: { activeSheet = .eventLog },
                         onReview: { activeSheet = .review },
-                        onStats: { isShowingInspector.toggle() }
+                        onStats: {
+                            activeSheet =
+                                (activeSheet == .statsInspector) ? nil : .statsInspector
+                        }
                     )
                 }
         }
         // Statistics are the inspector's job, here and nowhere else. In a compact
         // environment SwiftUI presents an inspector as a sheet by itself, which
         // is the right shape there and needs no second implementation.
-        .inspector(isPresented: $isShowingInspector) {
+        .inspector(isPresented: inspectorPresented) {
             NavigationStack {
                 MatchStatsInspector(session: session) {
-                    isShowingInspector = false
+                    if activeSheet == .statsInspector { activeSheet = nil }
                 }
             }
             .inspectorColumnWidth(min: 280, ideal: 340, max: 420)
@@ -224,12 +243,16 @@ struct LiveMatchView: View {
         .sheet(item: presentedSheet) { sheet in
             sheetContent(sheet)
         }
-        .alert("Add a note", isPresented: $isAddingNote) {
+        .alert("Add a note", isPresented: notePresented) {
             TextField("What happened?", text: $note)
-            Button("Cancel", role: .cancel) { note = "" }
+            Button("Cancel", role: .cancel) {
+                note = ""
+                if activeSheet == .addNote { activeSheet = nil }
+            }
             Button("Add") {
                 if !note.isEmpty { session.run(.addNote(note), feedback: .silent) }
                 note = ""
+                if activeSheet == .addNote { activeSheet = nil }
             }
         } message: {
             Text("Notes appear in the event log and in exported stat sheets.")
@@ -245,7 +268,9 @@ struct LiveMatchView: View {
             case .periodBreak, .awaitingFinalization:
                 // The composer owns the sheet while it has a question, so a
                 // period ending has to put it away before asking for one.
+                // A half-written note is put away the same way.
                 abandonComposer()
+                if activeSheet == .addNote { note = "" }
                 activeSheet = .periodBreak
             case .inPeriod:
                 if activeSheet == .periodBreak { activeSheet = nil }
@@ -286,7 +311,8 @@ struct LiveMatchView: View {
         Binding(
             get: {
                 if composerUsesSheet && composer.isComposing { return .composer }
-                return activeSheet
+                guard let sheet = activeSheet, sheet.isSheet else { return nil }
+                return sheet
             },
             set: { sheet in
                 guard sheet == nil else {
@@ -298,6 +324,34 @@ struct LiveMatchView: View {
                 } else {
                     activeSheet = nil
                 }
+            })
+    }
+
+    /// Derived bindings, not stored state: the alert and the inspector
+    /// column answer to the same router as the sheet.
+    private var notePresented: Binding<Bool> {
+        Binding(
+            get: { activeSheet == .addNote },
+            set: { showing in
+                if !showing {
+                    note = ""
+                    if activeSheet == .addNote { activeSheet = nil }
+                }
+            })
+    }
+
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: {
+                guard activeSheet == .statsInspector else { return false }
+                // The composer wins while it has a question: in a compact
+                // window the system would present the inspector as a second
+                // sheet over the composer's. Its toolbar is behind that
+                // sheet, so this is unreachable from the UI either way.
+                return !(composerUsesSheet && composer.isComposing)
+            },
+            set: { showing in
+                if !showing, activeSheet == .statsInspector { activeSheet = nil }
             })
     }
 
@@ -360,6 +414,12 @@ struct LiveMatchView: View {
         case .nearbyDisplay:
             NearbyAdvertiseSheet()
                 .environment(appModel.nearby)
+
+        case .addNote, .statsInspector:
+            // Never rendered here: the alert and inspector modifiers above
+            // own these cases. The switch stays exhaustive so a new case
+            // cannot slip past the router silently.
+            EmptyView()
         }
     }
 
@@ -646,7 +706,7 @@ struct LiveMatchView: View {
         case .opponentCard:
             session.run(.recordCard(CardEvent(side: .opponent, player: .untracked, card: .yellow)))
         case .addNote:
-            isAddingNote = true
+            activeSheet = .addNote
         }
     }
 
