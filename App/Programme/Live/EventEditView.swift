@@ -172,7 +172,7 @@ struct EventEditView: View {
                 playerPicker(
                     "Shooter", current: shot.shooter, slot: .primary, includeUnknown: true)
                 if shot.outcome.isGoal {
-                    assistPicker(current: shot.assist)
+                    assistPicker(current: shot.assist, excluding: shot.shooter.playerID)
                 }
             }
         case .corner(let action), .steal(let action), .foul(let action), .offside(let action):
@@ -203,7 +203,9 @@ struct EventEditView: View {
             if includeUnknown {
                 Text("Player unknown").tag(PlayerRef.unidentified)
             }
-            if current.payload.side == .opponent {
+            if eventSide == .opponent,
+                session.descriptor.tracking == .ourTeam || currentRef == .untracked
+            {
                 Text(session.descriptor.opponentShortName).tag(PlayerRef.untracked)
             }
             ForEach(candidates(fromFullRoster: fromFullRoster)) { player in
@@ -212,7 +214,7 @@ struct EventEditView: View {
         }
     }
 
-    private func assistPicker(current assist: PlayerRef?) -> some View {
+    private func assistPicker(current assist: PlayerRef?, excluding scorerID: PlayerID?) -> some View {
         Picker(
             "Assist",
             selection: Binding<String>(
@@ -240,7 +242,12 @@ struct EventEditView: View {
         ) {
             Text("Unassisted").tag("none")
             Text("Assist unknown").tag("unknown")
-            ForEach(candidates(fromFullRoster: false)) { player in
+            if eventSide == .opponent,
+                session.descriptor.tracking == .ourTeam || assist == .untracked
+            {
+                Text(session.descriptor.opponentShortName).tag("untracked")
+            }
+            ForEach(candidates(fromFullRoster: false).filter { $0.id != scorerID }) { player in
                 Text(player.shortLabel).tag(player.id.rawValue.uuidString)
             }
         }
@@ -254,10 +261,23 @@ struct EventEditView: View {
             message: "Recorded as unassisted")
     }
 
+    private var eventSide: TeamSide {
+        current.payload.side ?? .us
+    }
+
     private func candidates(fromFullRoster: Bool) -> [PlayerSnapshot] {
-        fromFullRoster
-            ? session.roster.activeRoster
-            : session.roster.sortedByNumber.filter {
+        let roster = session.context.roster(for: eventSide)
+
+        // Programme does not maintain an opponent lineup timeline. In Both Teams
+        // mode every opponent correction therefore comes from the opponent roster,
+        // never from our roster or our active-lineup state.
+        if eventSide == .opponent {
+            return roster.activeRoster
+        }
+
+        return fromFullRoster
+            ? roster.activeRoster
+            : roster.sortedByNumber.filter {
                 session.snapshot.player($0.id).appeared || session.snapshot.activeLineup.contains($0.id)
             }
     }
