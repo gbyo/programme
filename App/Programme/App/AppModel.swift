@@ -426,11 +426,13 @@ final class AppModel {
         var isUITest = false
         var seedsSampleData = false
         var opensLiveMatch = false
+        var skipsFinalizeConfirm = false
 
         init(arguments: [String] = ProcessInfo.processInfo.arguments) {
             isUITest = arguments.contains("-programme-uitest")
             seedsSampleData = isUITest || arguments.contains("-programme-sample")
             opensLiveMatch = arguments.contains("-programme-open-live")
+            skipsFinalizeConfirm = arguments.contains("-programme-no-finalize-confirm")
         }
     }
 
@@ -452,6 +454,13 @@ final class AppModel {
                     directory: FileManager.default.temporaryDirectory
                         .appending(path: "ProgrammeTestRecovery/\(UUID().uuidString)"))
                 : try? RecoveryJournal.makeDefault()
+            // UI tests control the finalize-confirmation preference through a
+            // launch flag, resetting it to the default otherwise so runs are
+            // hermetic on a reused simulator.
+            if launchOptions.isUITest {
+                UserDefaults.standard.set(
+                    !launchOptions.skipsFinalizeConfirm, forKey: "confirmBeforeFinalizing")
+            }
             if launchOptions.seedsSampleData {
                 do {
                     try ProgrammeStore.seedSampleData(
