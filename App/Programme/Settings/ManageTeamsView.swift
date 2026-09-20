@@ -21,7 +21,6 @@ struct ManageTeamsView: View {
 
     @Environment(AppModel.self) private var appModel
     @Environment(\.dismiss) private var dismiss
-    @State private var isAddingTeam = false
 
     var body: some View {
         List {
@@ -54,7 +53,12 @@ struct ManageTeamsView: View {
             }
 
             Section {
-                Button("Add Team…", systemImage: "plus") { isAddingTeam = true }
+                // A push, not a nested sheet: this list already lives in a
+                // NavigationStack in both presentations, and the app-level
+                // router owns sheets. The system back button returns here.
+                NavigationLink(destination: { TeamSetupView() }) {
+                    Label("Add Team…", systemImage: "plus")
+                }
             }
         }
         .navigationTitle("Manage Teams")
@@ -65,9 +69,6 @@ struct ManageTeamsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-        }
-        .sheet(isPresented: $isAddingTeam) {
-            NavigationStack { TeamSetupView() }
         }
         .task { await refresh() }
     }

@@ -22,7 +22,7 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("New Match", systemImage: "plus") {
-                        appModel.navigation.isPresentingNewMatch = true
+                        appModel.navigation.presentedSheet = .newMatch
                     }
                 }
             }
@@ -38,7 +38,7 @@ struct HomeView: View {
                 Text("Schedule your first match to prepare the lineup and start scoring.")
             } actions: {
                 Button("New Match") {
-                    appModel.navigation.isPresentingNewMatch = true
+                    appModel.navigation.presentedSheet = .newMatch
                 }
             }
             .accessibilityIdentifier("home.content")
@@ -57,7 +57,7 @@ struct HomeView: View {
                         NextMatchRow(match: next)
                     } else {
                         Button {
-                            appModel.navigation.isPresentingNewMatch = true
+                            appModel.navigation.presentedSheet = .newMatch
                         } label: {
                             Label("Schedule Next Match", systemImage: "plus")
                         }
@@ -342,7 +342,6 @@ struct EmptyHint: View {
 /// First run lives above the team-scoped tab shell: with no team there are no
 /// meaningful Home/Matches/Roster/Stats destinations to show.
 struct FirstRunView: View {
-    @Binding var isCreatingTeam: Bool
     @Environment(AppModel.self) private var appModel
     @State private var isLoadingSample = false
 
@@ -379,7 +378,7 @@ struct FirstRunView: View {
 
                 VStack(spacing: 14) {
                     Button {
-                        isCreatingTeam = true
+                        appModel.navigation.presentedSheet = .newTeam
                     } label: {
                         Text("Create Your First Team")
                             .font(.headline)

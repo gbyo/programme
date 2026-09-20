@@ -72,10 +72,23 @@ final class NavigationModel {
     var isShowingLiveMatch = false
     var pendingMatchToOpen: MatchID?
     var errorToShow: ProgrammeError?
-    var isPresentingNewMatch = false
-    var isPresentingSettings = false
-    var isPresentingManageTeams = false
-    var isPresentingNewTeam = false
+    /// The single app-level sheet router. Every sheet RootView can present
+    /// goes through this one value, so asking for a second sheet while one
+    /// is up is a deterministic content swap rather than a stacking race.
+    /// View-local sheets bound to loaded content (match export, calendar,
+    /// season setup) and the scoreboard scene's own presentations stay with
+    /// their owners — see the audit note on `RootView.sheetContent`.
+    var presentedSheet: AppSheet?
+
+    /// App-level sheet destinations. One case per sheet RootView presents;
+    /// adding a sheet means adding a case here, never another Bool.
+    enum AppSheet: String, Identifiable, Sendable {
+        case newMatch
+        case settings
+        case manageTeams
+        case newTeam
+        var id: String { rawValue }
+    }
 
     func presentLiveMatch() {
         isShowingLiveMatch = true
@@ -147,7 +160,7 @@ final class NavigationModel {
             section = .stats
             return true
         case .some("newmatch"):
-            isPresentingNewMatch = true
+            presentedSheet = .newMatch
             return true
         case .some("live"):
             if let identifier, let uuid = UUID(uuidString: identifier) {

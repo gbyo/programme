@@ -123,13 +123,11 @@ struct RosterView: View {
         }
         .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await reload() }
         .onChange(of: teamID) {
-            // Add/import sheets capture their team at presentation; leaving
+            // The roster sheet captures its team at presentation; leaving
             // one open across a team switch would file Team A's half-written
             // player under Team B. The shell no longer resets our identity
-            // on team switches, so these dismiss here where they live.
-            isAddingPlayer = false
-            isImporting = false
-            importText = nil
+            // on team switches, so it dismisses here where it lives.
+            sheet = nil
         }
     }
 
