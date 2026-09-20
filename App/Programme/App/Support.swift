@@ -1,7 +1,7 @@
-import BackgroundTasks
 import Foundation
 import ProgrammeCore
 import ProgrammePersistence
+import ProgrammeUI
 import SwiftUI
 import WidgetKit
 
@@ -182,43 +182,49 @@ enum WidgetRefresher {
             WidgetCenter.shared.reloadAllTimelines()
         #endif
     }
+
+    /// Reloads only the match-status timeline: live scores, clock state,
+    /// and upcoming fixtures. Called on every snapshot refresh.
+    static func reloadMatchStatus() {
+        #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.matchStatus)
+        #endif
+    }
+
+    /// Reloads only the season-record timeline: record text and recent
+    /// results. Called only when season data may have changed (launch,
+    /// team switch, finalize/close) — never for ordinary live events.
+    static func reloadSeasonRecord() {
+        #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.seasonRecord)
+        #endif
+    }
 }
 
-/// Background work is only ever maintenance. Nothing about a match's
-/// correctness depends on a future background launch.
-enum MaintenanceScheduler {
-    static let identifier = "com.gbyo.programme.maintenance"
+/// Closed-journal housekeeping runs opportunistically in the foreground —
+/// at launch, when the scorer closes, and when the app moves to the
+/// background — instead of waking the app with a recurring background
+/// processing task for a directory listing. Nothing about a match's
+/// correctness depends on upkeep running: recovery replays whatever journals
+/// exist, and pruning only removes journals already marked closed.
+/// Pruning never reloads widget timelines; recovery journals are not widget
+/// inputs.
+enum JournalUpkeep {
+    private static let lastRunKey = "programme.journalUpkeep.lastRun"
 
-    static func register() {
-        #if os(iOS)
-            BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
-                guard let task = task as? BGProcessingTask else { return }
-                runMaintenance(task: task)
-            }
-        #endif
+    static let policy = JournalUpkeepPolicy()
+
+    /// Prune closed journals when the policy says a scan is due. Returns the
+    /// number of journals removed. Never touches widgets.
+    @discardableResult
+    static func runIfDue(journal: RecoveryJournal?, now: Date = Date()) -> Int {
+        guard let journal else { return 0 }
+        let lastRun = UserDefaults.standard.object(forKey: lastRunKey) as? Date
+        guard policy.isDue(now: now, lastRunAt: lastRun) else { return 0 }
+        let removed = policy.perform(on: journal)
+        UserDefaults.standard.set(now, forKey: lastRunKey)
+        return removed
     }
-
-    static func scheduleIfNeeded() {
-        #if os(iOS)
-            let request = BGProcessingTaskRequest(identifier: identifier)
-            request.requiresNetworkConnectivity = false
-            request.requiresExternalPower = false
-            request.earliestBeginDate = Date().addingTimeInterval(60 * 60 * 12)
-            try? BGTaskScheduler.shared.submit(request)
-        #endif
-    }
-
-    #if os(iOS)
-        private static func runMaintenance(task: BGProcessingTask) {
-            task.expirationHandler = { task.setTaskCompleted(success: false) }
-            // Clear recovery journals for matches that finished a month ago.
-            let journal = try? RecoveryJournal.makeDefault()
-            _ = journal?.pruneClosedJournals()
-            WidgetRefresher.reload()
-            task.setTaskCompleted(success: true)
-            scheduleIfNeeded()
-        }
-    #endif
 }
 
 extension Date {

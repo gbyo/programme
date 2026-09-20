@@ -15,6 +15,8 @@ private actor FakeJournal: SyncJournal {
     var seasons: [SeasonID: SeasonRecord] = [:]
     var players: [PlayerID: PlayerRecord] = [:]
     var matches: [MatchID: MatchRecord] = [:]
+    var readCount = 0
+    var writeCount = 0
 
     func seed(_ events: [MatchEvent], for matchID: MatchID) {
         eventsByMatch[matchID] = events
@@ -25,7 +27,8 @@ private actor FakeJournal: SyncJournal {
     }
 
     func readEvents(for matchID: MatchID) throws -> [MatchEvent] {
-        eventsByMatch[matchID] ?? []
+        readCount += 1
+        return eventsByMatch[matchID] ?? []
     }
 
     func locateEvent(_ eventID: EventID, inTeam teamID: TeamID) throws -> MatchID? {
@@ -56,6 +59,7 @@ private actor FakeJournal: SyncJournal {
     func ensureMatch(_ match: MatchRecord) throws { matches[match.descriptor.id] = match }
 
     func writeEffects(_ effects: [MatchEffect], to matchID: MatchID) throws {
+        writeCount += 1
         var events = eventsByMatch[matchID] ?? []
         for effect in effects {
             switch effect {
@@ -328,5 +332,85 @@ struct SyncApplierTests {
         #expect(await reopened.unresolved(teamID: teamID) == [conflict])
         try await reopened.resolve(EventID(ProgrammeSample.id("event.1")), inTeam: teamID)
         #expect(await reopened.unresolved(teamID: teamID).isEmpty)
+    }
+
+    @Test("A large same-match batch reads once, writes once, notifies once")
+    func largeBatchBatchesIO() async throws {
+        let journal = FakeJournal()
+        await journal.seedMatch(stubMatch())
+        let applier = TeamSyncApplier(journal: journal, conflicts: FakeConflicts())
+        var changes: [IncomingChange] = []
+        for index in 1...25 {
+            changes.append(
+                try save(
+                    MatchEvent(
+                        id: EventID(ProgrammeSample.id("batch.\(index)")), matchID: matchID,
+                        time: .kickoff, sequence: index, payload: .note("Remote \(index)"))))
+        }
+        let result = await applier.drain(changes)
+        #expect(result.applied.count == 25)
+        #expect(result.deferred.isEmpty && result.failed.isEmpty)
+        #expect(await journal.eventsByMatch[matchID]?.count == 25)
+        #expect(await journal.readCount == 1)
+        #expect(await journal.writeCount == 1)
+        #expect(await journal.notified == [matchID])
+    }
+
+    @Test("Mixed revisions in one batch converge on the newest revision")
+    func batchRevisionsConverge() async throws {
+        for first in [1, 3] {
+            let journal = FakeJournal()
+            await journal.seedMatch(stubMatch())
+            await journal.seed([event(id: "event.1", revision: 2, note: "Local")], for: matchID)
+            let applier = TeamSyncApplier(journal: journal, conflicts: FakeConflicts())
+            let stale = try save(event(id: "event.1", revision: 1, note: "Stale"))
+            let newer = try save(event(id: "event.1", revision: 3, note: "Newer"))
+            let ordered = first == 1 ? [stale, newer] : [newer, stale]
+            let result = await applier.drain(ordered)
+            #expect(result.failed.isEmpty)
+            let stored = try #require(await journal.eventsByMatch[matchID]?.first)
+            #expect(stored.revision == 3 && stored.note == "Newer")
+        }
+    }
+
+    @Test("Events defer without the match, then apply once it arrives")
+    func batchDefersThenApplies() async throws {
+        let journal = FakeJournal()
+        let applier = TeamSyncApplier(journal: journal, conflicts: FakeConflicts())
+        let changes = [
+            try save(event(id: "event.1", revision: 1, note: nil)),
+            try save(event(id: "event.2", revision: 1, note: nil)),
+        ]
+        let deferred = await applier.drain(changes)
+        #expect(deferred.applied == [.deferred, .deferred])
+        #expect(deferred.deferred.count == 2)
+        #expect(await journal.writeCount == 0)
+
+        await journal.seedMatch(stubMatch())
+        let applied = await applier.drain(deferred.deferred)
+        #expect(applied.deferred.isEmpty && applied.failed.isEmpty)
+        #expect(await journal.eventsByMatch[matchID]?.count == 2)
+        #expect(await journal.writeCount == 1)
+    }
+
+    @Test("Replaying a materialized batch writes nothing more")
+    func batchReplayIsIdempotent() async throws {
+        let journal = FakeJournal()
+        await journal.seedMatch(stubMatch())
+        let applier = TeamSyncApplier(journal: journal, conflicts: FakeConflicts())
+        let changes = [
+            try save(event(id: "event.1", revision: 1, note: nil)),
+            try save(event(id: "event.2", revision: 1, note: nil)),
+        ]
+        let first = await applier.drain(changes)
+        #expect(first.failed.isEmpty)
+        #expect(await journal.writeCount == 1)
+        let replay = await applier.drain(changes)
+        #expect(
+            replay.applied.allSatisfy {
+                if case .keptLocal = $0 { return true } else { return false }
+            })
+        #expect(await journal.writeCount == 1)
+        #expect(await journal.eventsByMatch[matchID]?.count == 2)
     }
 }

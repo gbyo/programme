@@ -16,6 +16,7 @@ public enum MatchCommandError: Error, Hashable, Sendable {
     case shootoutNotAvailable
     case eventNotFound(EventID)
     case cannotEditStructuralEvent
+    case invalidShotCombination
     case nothingToUndo
 
     public var message: String {
@@ -50,6 +51,8 @@ public enum MatchCommandError: Error, Hashable, Sendable {
             "That event is no longer in the match."
         case .cannotEditStructuralEvent:
             "Period and lineup events are changed from the match controls."
+        case .invalidShotCombination:
+            "That combination of shot outcome and phase isn't valid."
         case .nothingToUndo:
             "There's nothing to undo."
         }
@@ -178,6 +181,7 @@ public enum MatchEngine {
 
         case .recordShot(let shot):
             try requireStarted(context)
+            try validateShot(shot)
             var shot = shot
             if shot.goalkeeper == nil {
                 shot.goalkeeper = defendingGoalkeeperRef(for: shot, context: context, at: date)
@@ -297,7 +301,8 @@ public enum MatchEngine {
 
         case .attribute(let id, let slot, let ref):
             var event = try find(id, in: context)
-            let label = context.roster.label(for: ref)
+            let side = event.payload.side ?? .us
+            let label = context.roster(for: side).label(for: ref)
             event.payload = try applying(ref, slot: slot, to: event.payload)
             let summary =
                 switch slot {
@@ -309,7 +314,12 @@ public enum MatchEngine {
 
         case .replacePayload(let id, let payload, let summary):
             var event = try find(id, in: context)
-            event.payload = payload
+            if case .shot(let proposed) = payload, case .shot(let previous) = event.payload {
+                event.payload = .shot(
+                    try normalizedShotEdit(proposed, replacing: previous, context: context))
+            } else {
+                event.payload = payload
+            }
             return [.replaceEvent(event.appendingRevision(kind: .edited, summary: summary, at: date))]
 
         case .setNote(let id, let text):
@@ -438,6 +448,63 @@ public enum MatchEngine {
 
     static func requireStarted(_ context: MatchContext) throws {
         guard context.hasStarted else { throw MatchCommandError.matchNotStarted }
+    }
+
+    static func validateShot(_ shot: ShotEvent) throws {
+        guard shot.outcome.isValid(for: shot.phase),
+            !shot.isOwnGoal || shot.outcome.isGoal
+        else {
+            throw MatchCommandError.invalidShotCombination
+        }
+    }
+
+    /// Normalize fields whose meaning changes when an existing shot is corrected.
+    ///
+    /// The editor can change one property at a time, but a `ShotEvent` is one
+    /// fact: own-goal state, assist applicability, outcome and phase have to stay
+    /// coherent after every revision.
+    static func normalizedShotEdit(
+        _ proposed: ShotEvent,
+        replacing previous: ShotEvent,
+        context: MatchContext
+    ) throws -> ShotEvent {
+        var shot = proposed
+
+        // Goal-only metadata cannot survive a correction to a non-goal.
+        if !shot.outcome.isGoal {
+            shot.assist = nil
+            shot.isOwnGoal = false
+        }
+
+        try validateShot(shot)
+
+        let previouslyAcceptedAssist = acceptsAssist(previous, context: context)
+        let nowAcceptsAssist = acceptsAssist(shot, context: context)
+
+        if !nowAcceptsAssist {
+            shot.assist = nil
+        } else if !previouslyAcceptedAssist, shot.assist == nil {
+            // A correction that creates a normal open-play goal must not silently
+            // claim it was unassisted. Leave the assist unresolved for Review.
+            shot.assist = .unidentified
+        }
+
+        return shot
+    }
+
+    static func acceptsAssist(_ shot: ShotEvent, context: MatchContext) -> Bool {
+        guard shot.outcome.isGoal,
+            !shot.isOwnGoal,
+            shot.phase != .penaltyKick,
+            context.profile.prompts.assistOnGoal
+        else {
+            return false
+        }
+
+        if shot.side == .us { return true }
+
+        return context.descriptor.tracking == .bothTeams
+            && !context.opponentRoster.players.isEmpty
     }
 
     static func nextPeriodIndex(_ context: MatchContext) -> Int {

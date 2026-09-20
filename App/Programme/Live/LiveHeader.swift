@@ -57,13 +57,24 @@ struct LiveHeader: View {
     }
 
     private func progressRule(horizontalPadding: CGFloat) -> some View {
-        ProgressView(value: session.clock.periodProgress)
-            .progressViewStyle(.linear)
-            .tint(.accentColor)
-            .padding(.horizontal, horizontalPadding)
-            .padding(.bottom, 6)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        Group {
+            if session.clock.isRunning {
+                // System-animated progress over the same anchor-derived
+                // range as the clock text: no per-second model ticks.
+                ProgressView(
+                    timerInterval: WidgetClock.timerRange(
+                        anchor: session.context.clock, rules: session.context.rules, at: Date()),
+                    countsDown: WidgetClock.countsDown(rules: session.context.rules))
+            } else {
+                ProgressView(value: session.clock.periodProgress)
+            }
+        }
+        .progressViewStyle(.linear)
+        .tint(.accentColor)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.bottom, 6)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func scoreBlock(isCompact: Bool) -> some View {
@@ -118,13 +129,22 @@ struct LiveHeader: View {
 
     private func clockBlock(isCompact: Bool) -> some View {
         VStack(alignment: .trailing, spacing: 0) {
-            Text(session.clock.displayText)
-                .font(.programmeClock(isCompact ? 24 : 32))
-                .contentTransition(.numericText(countsDown: session.clock.countsDown))
-                .animation(
-                    reduceMotion ? nil : .snappy(duration: 0.20),
-                    value: session.clock.displayText
+            // The running clock animates on-device from the anchor: no
+            // per-second tick, no numeric transition, no animation work
+            // for ordinary time passing. Acknowledgement motion stays on
+            // the score blocks above, which change on scorer actions.
+            if session.clock.isRunning {
+                Text(
+                    timerInterval: WidgetClock.timerRange(
+                        anchor: session.context.clock, rules: session.context.rules, at: Date()),
+                    countsDown: WidgetClock.countsDown(rules: session.context.rules),
+                    showsHours: false
                 )
+                .font(.programmeClock(isCompact ? 24 : 32))
+            } else {
+                Text(session.clock.displayText)
+                    .font(.programmeClock(isCompact ? 24 : 32))
+            }
             Text(periodText)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)

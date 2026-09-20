@@ -133,6 +133,12 @@ final class MatchCreationUITests: ProgrammeUITestCase {
         XCTAssertTrue(
             element(app, "matchLocation.search").waitForExistence(timeout: 5),
             "The optional location search row is missing from New Match")
+        // The row opens a focused native picker instead of expanding
+        // results inline in the form.
+        element(app, "matchLocation.search").tap()
+        XCTAssertTrue(
+            app.navigationBars["Location"].waitForExistence(timeout: 5),
+            "The location row did not open the venue picker")
     }
 
     func testNewMatchRemembersTheScoringConfiguration() {

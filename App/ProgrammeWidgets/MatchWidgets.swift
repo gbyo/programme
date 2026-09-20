@@ -9,7 +9,12 @@ struct ProgrammeEntry: TimelineEntry {
     var snapshot: ProgrammeWidgetSnapshot?
 }
 
-struct ProgrammeTimelineProvider: TimelineProvider {
+/// Match-status timelines: the live clock animates on-device from the
+/// snapshot's anchor, so a live match needs no scheduled refresh — score,
+/// period, and clock-state changes arrive as targeted reloads. Without a
+/// live match, entries cover now plus the next kickoff (when the view
+/// flips), then the timeline ends.
+struct MatchStatusProvider: TimelineProvider {
     func placeholder(in context: Context) -> ProgrammeEntry {
         ProgrammeEntry(date: Date(), snapshot: .preview)
     }
@@ -23,11 +28,43 @@ struct ProgrammeTimelineProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ProgrammeEntry>) -> Void) {
         let snapshot = ProgrammeSharedContainer.read()
-        let entry = ProgrammeEntry(date: Date(), snapshot: snapshot)
-        // A live match refreshes often; otherwise the next kickoff is the only
-        // thing that changes, so there is no reason to burn a budget on it.
-        let refresh = snapshot?.live != nil ? 60.0 : 60 * 30
-        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(refresh))))
+        let now = Date()
+        var entries = [ProgrammeEntry(date: now, snapshot: snapshot)]
+        var policy: TimelineReloadPolicy = .never
+        if snapshot?.live == nil,
+            let kickoff = snapshot?.upcoming?.kickoff, kickoff > now
+        {
+            entries.append(ProgrammeEntry(date: kickoff, snapshot: snapshot))
+            policy = .atEnd
+        }
+        completion(Timeline(entries: entries, policy: policy))
+    }
+
+    func relevance() async -> WidgetRelevance<Void> {
+        WidgetRelevance(ProgrammeWidgetRelevance.attributes(for: ProgrammeSharedContainer.read()))
+    }
+}
+
+/// Season-record timelines never schedule: the record and recent results
+/// change only on finalize, import, or team/season switches, each of which
+/// issues a targeted reload. No minute-by-minute polling during live play.
+struct SeasonRecordProvider: TimelineProvider {
+    func placeholder(in context: Context) -> ProgrammeEntry {
+        ProgrammeEntry(date: Date(), snapshot: .preview)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (ProgrammeEntry) -> Void) {
+        completion(
+            ProgrammeEntry(
+                date: Date(),
+                snapshot: context.isPreview ? .preview : ProgrammeSharedContainer.read()))
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<ProgrammeEntry>) -> Void) {
+        completion(
+            Timeline(
+                entries: [ProgrammeEntry(date: Date(), snapshot: ProgrammeSharedContainer.read())],
+                policy: .never))
     }
 
     func relevance() async -> WidgetRelevance<Void> {
@@ -56,7 +93,7 @@ enum ProgrammeWidgetRelevance {
 /// What is happening right now: a live match, or the next one.
 struct MatchStatusWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "com.gbyo.programme.matchStatus", provider: ProgrammeTimelineProvider()) { entry in
+        StaticConfiguration(kind: WidgetKind.matchStatus, provider: MatchStatusProvider()) { entry in
             MatchStatusWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
@@ -100,7 +137,23 @@ struct MatchStatusWidgetView: View {
                 .font(.footnote.weight(.medium))
                 .lineLimit(1)
             HStack(spacing: 5) {
-                Text(live.clockText).monospacedDigit()
+                // The clock animates on-device from the snapshot's anchor:
+                // no timeline reloads just to advance it. Stopped clocks
+                // and snapshots written before the anchor travelled show
+                // the frozen string instead.
+                if live.isClockRunning,
+                    let anchor = live.clockAnchor,
+                    let rules = live.clockRules
+                {
+                    Text(
+                        timerInterval: WidgetClock.timerRange(
+                            anchor: anchor, rules: rules, at: entry.date),
+                        countsDown: WidgetClock.countsDown(rules: rules),
+                        showsHours: false
+                    ).monospacedDigit()
+                } else {
+                    Text(live.clockText).monospacedDigit()
+                }
                 Text(live.periodLabel)
             }
             .font(.caption2)
@@ -154,7 +207,7 @@ struct MatchStatusWidgetView: View {
 /// The season at a glance.
 struct SeasonRecordWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "com.gbyo.programme.seasonRecord", provider: ProgrammeTimelineProvider()) { entry in
+        StaticConfiguration(kind: WidgetKind.seasonRecord, provider: SeasonRecordProvider()) { entry in
             SeasonRecordWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
