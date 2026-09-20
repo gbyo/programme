@@ -14,7 +14,11 @@ private func temporaryURL(_ name: String) -> URL {
 
 private func teamRecord(named name: String = "Ninety Six") -> CKRecord {
     let teamID = TeamID(ProgrammeSample.id("team.ninety-six"))
-    return TeamRecord(
+    return teamRecord(named: name, teamID: teamID)
+}
+
+private func teamRecord(named name: String, teamID: TeamID) -> CKRecord {
+    TeamRecord(
         teamID: teamID, name: name, shortName: "NX", createdAt: Date()
     ).makeRecord(in: TeamZone.zoneID(for: teamID))
 }
@@ -135,6 +139,92 @@ struct TeamSyncCoordinatorTests {
         #expect(Set(batchRecords.map(\.recordID)) == Set([record.recordID, second.recordID]))
         // The shared database has its own outbox: no cross-contamination.
         #expect(await coordinator.batchForScope(.shared) == nil)
+    }
+
+    @Test("Batches serve only the zones the send context requested")
+    func batchesHonorSendScope() async throws {
+        let coordinator = try makeCoordinator()
+        let teamA = TeamID(ProgrammeSample.id("team.scope-a"))
+        let teamB = TeamID(ProgrammeSample.id("team.scope-b"))
+        let zoneA = TeamZone.zoneID(for: teamA)
+        let zoneB = TeamZone.zoneID(for: teamB)
+        let recordA = teamRecord(named: "A", teamID: teamA)
+        let recordB = SeasonRecord(
+            seasonID: SeasonID(ProgrammeSample.id("season.scope-b")), teamID: teamB,
+            name: "2026–27", startDate: Date(timeIntervalSinceReferenceDate: 200)
+        ).makeRecord(in: zoneB)
+        try await coordinator.stageSave(recordA, in: .private)
+        try await coordinator.stageSave(recordB, in: .private)
+        // A delete intent for a different record in Team B's zone: one team
+        // zone carries many records, so saves and deletes coexist here.
+        let doomedID = CKRecord.ID(
+            recordName: TeamZone.recordName(
+                prefix: "player", id: ProgrammeSample.id("player.doomed")),
+            zoneID: zoneB)
+        try await coordinator.stageDelete(
+            recordID: doomedID, recordType: PlayerRecord.recordType, in: .private)
+
+        // Team A context: Team A saves only, and none of Team B's work —
+        // neither its save nor its delete — leaks into the batch.
+        let batchA = await coordinator.batchForScope(.private, sendScope: .zoneIDs([zoneA]))
+        #expect(batchA?.recordsToSave.map(\.recordID) == [recordA.recordID])
+        #expect(batchA?.recordIDsToDelete.isEmpty == true)
+
+        // Team B stays staged for a later eligible batch, saves and deletes.
+        let batchB = await coordinator.batchForScope(.private, sendScope: .zoneIDs([zoneB]))
+        #expect(batchB?.recordsToSave.map(\.recordID) == [recordB.recordID])
+        #expect(batchB?.recordIDsToDelete == [doomedID])
+
+        // A zone with nothing staged yields no batch.
+        let zoneC = TeamZone.zoneID(for: TeamID(ProgrammeSample.id("team.scope-c")))
+        #expect(await coordinator.batchForScope(.private, sendScope: .zoneIDs([zoneC])) == nil)
+
+        // Confirmed sends remove only the confirmed records; Team B is
+        // untouched by Team A's confirmation.
+        await coordinator.applySent(saved: [recordA], deleted: [], scope: .private)
+        #expect(await coordinator.batchForScope(.private, sendScope: .zoneIDs([zoneA])) == nil)
+        let stillB = try #require(
+            await coordinator.batchForScope(.private, sendScope: .zoneIDs([zoneB])))
+        #expect(stillB.recordsToSave.map(\.recordID) == [recordB.recordID])
+        #expect(stillB.recordIDsToDelete == [doomedID])
+    }
+
+    @Test("Exclusion and record-ID send scopes filter staged work")
+    func batchesHonorExclusionAndRecordScopes() async throws {
+        let coordinator = try makeCoordinator()
+        let teamA = TeamID(ProgrammeSample.id("team.scope-a"))
+        let teamB = TeamID(ProgrammeSample.id("team.scope-b"))
+        let recordA = teamRecord(named: "A", teamID: teamA)
+        let recordB = teamRecord(named: "B", teamID: teamB)
+        try await coordinator.stageSave(recordA, in: .private)
+        try await coordinator.stageSave(recordB, in: .private)
+
+        let excludingA = await coordinator.batchForScope(
+            .private, sendScope: .allExcluding([TeamZone.zoneID(for: teamA)]))
+        #expect(excludingA?.recordsToSave.map(\.recordID) == [recordB.recordID])
+
+        let onlyA = await coordinator.batchForScope(
+            .private, sendScope: .recordIDs([recordA.recordID]))
+        #expect(onlyA?.recordsToSave.map(\.recordID) == [recordA.recordID])
+        #expect(onlyA?.recordIDsToDelete.isEmpty == true)
+    }
+
+    @Test("Scoped batches never cross databases")
+    func scopedBatchesStayInDatabase() async throws {
+        let coordinator = try makeCoordinator()
+        let teamA = TeamID(ProgrammeSample.id("team.scope-a"))
+        let teamB = TeamID(ProgrammeSample.id("team.scope-b"))
+        try await coordinator.stageSave(teamRecord(named: "A", teamID: teamA), in: .private)
+        try await coordinator.stageSave(teamRecord(named: "B", teamID: teamB), in: .shared)
+
+        // Requesting Team A's zone from the shared database finds nothing,
+        // even though Team A work is staged in the private database.
+        #expect(
+            await coordinator.batchForScope(
+                .shared, sendScope: .zoneIDs([TeamZone.zoneID(for: teamA)])) == nil)
+        let sharedAll = try #require(await coordinator.batchForScope(.shared))
+        #expect(sharedAll.recordsToSave.count == 1)
+        #expect(sharedAll.recordsToSave[0].recordID.zoneID == TeamZone.zoneID(for: teamB))
     }
 
     @Test("Confirmed sends clear the outbox; failures stay staged")

@@ -259,19 +259,38 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
         _ context: CKSyncEngine.SendChangesContext, syncEngine engine: CKSyncEngine
     ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard let scope = scope(of: engine) else { return nil }
-        return await batchForScope(scope)
+        return await batchForScope(scope, sendScope: context.options.scope)
     }
 
     /// Batch content without the engine: directly testable, and the single
     /// place where staged intents become wire records.
-    func batchForScope(_ scope: SyncDatabase) async -> CKSyncEngine.RecordZoneChangeBatch? {
+    ///
+    /// `sendScope` is the requesting `SendChangesContext`'s scope: only
+    /// staged saves/deletes it contains may go out. Returning anything else
+    /// violates the engine contract and fails the whole send as
+    /// `outOfScopeRecordSaves`. Out-of-scope work stays staged for a later
+    /// eligible batch — never dropped, never sent early.
+    func batchForScope(
+        _ scope: SyncDatabase,
+        sendScope: CKSyncEngine.SendChangesOptions.Scope = .all
+    ) async -> CKSyncEngine.RecordZoneChangeBatch? {
         guard let outbox = outboxes[scope] else { return nil }
         do {
             let saves = try await outbox.stagedSaves.asyncMap { try await outbox.unarchive($0) }
-            let deletes = await outbox.stagedDeletes.map {
-                CKRecord.ID(
-                    recordName: $0.recordName,
-                    zoneID: CKRecordZone.ID(zoneName: $0.zoneName, ownerName: $0.ownerName))
+                .filter { sendScope.contains($0.recordID) }
+                .sorted {
+                    ($0.recordID.zoneID.zoneName, $0.recordID.recordName)
+                        < ($1.recordID.zoneID.zoneName, $1.recordID.recordName)
+                }
+            let deletes = await outbox.stagedDeletes.compactMap {
+                (staged: SyncOutbox.StagedDelete) -> CKRecord.ID? in
+                let id = CKRecord.ID(
+                    recordName: staged.recordName,
+                    zoneID: CKRecordZone.ID(zoneName: staged.zoneName, ownerName: staged.ownerName))
+                return sendScope.contains(id) ? id : nil
+            }
+            .sorted {
+                ($0.zoneID.zoneName, $0.recordName) < ($1.zoneID.zoneName, $1.recordName)
             }
             guard !saves.isEmpty || !deletes.isEmpty else { return nil }
             return CKSyncEngine.RecordZoneChangeBatch(recordsToSave: saves, recordIDsToDelete: deletes)
@@ -304,6 +323,13 @@ public actor TeamSyncCoordinator: CKSyncEngineDelegate {
                 deleted: fetched.deletions.map { ($0.recordID, $0.recordType) },
                 scope: scope)
         case .sentRecordZoneChanges(let sent):
+            // Only confirmed records leave the outbox. Failed saves/deletes
+            // (including `serverRecordChanged`) stay staged: the engine
+            // retries them on its own schedule, the next fetch delivers the
+            // server version, and the applier reconciles it through
+            // EventMerge — with same-revision contradictions surfacing as
+            // Needs Review and local corrections superseding via a newer
+            // revision. No custom retry loop, no send-path merge.
             await applySent(
                 saved: sent.savedRecords, deleted: sent.deletedRecordIDs, scope: scope)
         case .sentDatabaseChanges(let sent):
