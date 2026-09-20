@@ -1,3 +1,4 @@
+import Foundation
 import ProgrammeCore
 import ProgrammeUI
 import SwiftUI
@@ -417,7 +418,6 @@ struct CardReasonStage: View {
                 }
                 .programmePrimaryAction()
                 .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .keyboardShortcut(.return, modifiers: [])
                 .accessibilityIdentifier("cardReason.record")
             }
 
