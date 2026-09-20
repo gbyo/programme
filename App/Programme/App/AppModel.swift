@@ -630,15 +630,16 @@ final class AppModel {
         storeObserver.start(container: container) { [weak self] in
             guard let self else { return }
 
-            // Live scoring owns its own lightweight companion refresh path.
-            // SwiftData history is a persistence signal, not a reason to
-            // recompute season stats, recovery journals, Spotlight, or widgets
-            // after every event.
-            guard self.liveSession == nil else { return }
-
-            self.noteStoreChanged()
-            await self.refreshWidgetSnapshot()
-            await self.refreshRecoveryCandidates()
+            // While scoring, store changes are overwhelmingly live events:
+            // keep companions in memory and leave the App Group file alone.
+            // Season and recovery projections rebuild when the scorer closes.
+            if self.liveSession != nil {
+                self.refreshLiveCompanion()
+            } else {
+                self.noteStoreChanged()
+                await self.refreshWidgetSnapshot()
+                await self.refreshRecoveryCandidates()
+            }
         }
     }
 
@@ -957,6 +958,9 @@ final class AppModel {
             await refreshLiveCompanionSnapshot()
             ProgrammeStateReporter.reportWorkflow(.liveScoring)
             dismissRecovery(for: matchID)
+            // Prime the companion cache once, so per-event updates stay on
+            // the lightweight in-memory path for the whole session.
+            await refreshWidgetSnapshot()
             navigation.presentLiveMatch()
         } catch {
             navigation.errorToShow = ProgrammeError(
@@ -1016,6 +1020,66 @@ final class AppModel {
     }
 
     // MARK: - Widgets (selected-team scoped)
+
+    /// Non-live companion context cached by the last full refresh. Live
+    /// events rebuild only the `live` section from this cache plus the
+    /// session, with no database reads, file IO, or conflict-store queries.
+    private struct CachedCompanion {
+        var teamID: TeamID
+        var teamName: String
+        var teamShort: String
+        var recordText: String
+        var matches: [MatchListItem]
+        var conflictCount: Int
+    }
+
+    private var cachedCompanion: CachedCompanion?
+
+    /// Per-event companion update while scoring. Watch stays current
+    /// through latest-value application context; the App Group file is
+    /// left untouched until close, background, or the next full refresh.
+    func refreshLiveCompanion() {
+        guard let session = liveSession,
+            let cached = cachedCompanion,
+            session.descriptor.teamID == cached.teamID
+        else {
+            Task { await refreshWidgetSnapshot() }
+            return
+        }
+        // The file keeps the last full refresh's upcoming/recent sections;
+        // only the Watch push (latest-value) rebuilds from the cache.
+        pushWatchSnapshot(
+            teamID: cached.teamID, teamName: cached.teamName, teamShort: cached.teamShort,
+            recordText: cached.recordText, matches: cached.matches,
+            reviewCount: session.snapshot.needsReviewCount + cached.conflictCount)
+    }
+
+    private func companionSections(from matches: [MatchListItem]) -> (
+        upcoming: ProgrammeWidgetSnapshot.UpcomingMatch?,
+        recent: [ProgrammeWidgetSnapshot.RecentResult]
+    ) {
+        let upcoming =
+            matches
+            .filter { $0.phase == .scheduled && $0.kickoff > Date().addingTimeInterval(-7_200) }
+            .sorted { $0.kickoff < $1.kickoff }
+            .first
+            .map {
+                ProgrammeWidgetSnapshot.UpcomingMatch(
+                    matchID: $0.id.rawValue.uuidString, opponentShortName: $0.opponentName,
+                    venueLabel: $0.venue.shortLabel, kickoff: $0.kickoff)
+            }
+        let recent =
+            matches
+            .filter { $0.phase == .finalized }
+            .prefix(4)
+            .map {
+                ProgrammeWidgetSnapshot.RecentResult(
+                    matchID: $0.id.rawValue.uuidString, opponentShortName: $0.opponentName,
+                    resultLetter: $0.result?.letter ?? "", scoreUs: $0.score.us,
+                    scoreOpponent: $0.score.opponent, kickoff: $0.kickoff)
+            }
+        return (upcoming, Array(recent))
+    }
 
     /// Refresh only live companion presentation. The expensive season/recovery
     /// projections stay unchanged until the scorer leaves the match.
@@ -1147,34 +1211,18 @@ final class AppModel {
                 clockRules: session.context.rules)
         }
 
-        let upcoming =
-            matches
-            .filter { $0.phase == .scheduled && $0.kickoff > Date().addingTimeInterval(-7_200) }
-            .sorted { $0.kickoff < $1.kickoff }
-            .first
-            .map {
-                ProgrammeWidgetSnapshot.UpcomingMatch(
-                    matchID: $0.id.rawValue.uuidString, opponentShortName: $0.opponentName,
-                    venueLabel: $0.venue.shortLabel, kickoff: $0.kickoff)
-            }
-
-        let recent =
-            matches
-            .filter { $0.phase == .finalized }
-            .prefix(4)
-            .map {
-                ProgrammeWidgetSnapshot.RecentResult(
-                    matchID: $0.id.rawValue.uuidString, opponentShortName: $0.opponentName,
-                    resultLetter: $0.result?.letter ?? "", scoreUs: $0.score.us,
-                    scoreOpponent: $0.score.opponent, kickoff: $0.kickoff)
-            }
+        let (upcoming, recent) = companionSections(from: matches)
 
         // Team-wide review count: live-match attribution items plus every
-        // unresolved sync contradiction on the team. Cheap here — conflicts
-        // are local records and the live count is already derived.
-        let reviewCount =
-            (liveSession?.snapshot.needsReviewCount ?? 0)
-            + (await syncConflicts(teamID: selectedTeamID).count)
+        // unresolved sync contradiction on the team. Conflicts are local
+        // records and the live count is already derived; the total is
+        // cached so per-event updates never query the conflict store.
+        let conflictCount = await syncConflicts(teamID: selectedTeamID).count
+        let reviewCount = (liveSession?.snapshot.needsReviewCount ?? 0) + conflictCount
+        cachedCompanion = CachedCompanion(
+            teamID: selectedTeamID, teamName: teamName, teamShort: teamShort,
+            recordText: recordText, matches: matches,
+            conflictCount: conflictCount)
         pushWatchSnapshot(
             teamID: selectedTeamID, teamName: teamName, teamShort: teamShort,
             recordText: recordText, matches: matches,

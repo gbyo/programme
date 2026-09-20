@@ -473,11 +473,11 @@ final class LiveMatchSession {
         startOrUpdateActivity()
 
         // Companion presentation follows authoritative in-memory match state,
-        // not the later SwiftData history notification. This keeps Watch/shared
-        // state current on iOS 26 too, while avoiding heavyweight derived work.
-        Task { [weak self] in
-            await self?.appModel?.refreshLiveCompanionSnapshot()
-        }
+        // not the later SwiftData history notification. This keeps Watch
+        // current on iOS 26 too: per-event updates rebuild only the Watch
+        // push from the cached companion context, with no database reads,
+        // file IO, or conflict-store queries.
+        appModel?.refreshLiveCompanion()
     }
 
     private func enqueueStoreWrite(_ effects: [MatchEffect]) {
