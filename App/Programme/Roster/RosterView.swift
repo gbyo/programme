@@ -103,12 +103,12 @@ struct RosterView: View {
         }
         .sheet(isPresented: $isImporting) {
             NavigationStack { RosterImportView(teamID: teamID, initialText: nil) }
-                .presentationDetents([.medium, .large])
+                .presentationSizing(.page)
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: Binding(get: { importText.map(IdentifiableText.init) }, set: { importText = $0?.text })) { item in
             NavigationStack { RosterImportView(teamID: teamID, initialText: item.text) }
-                .presentationDetents([.medium, .large])
+                .presentationSizing(.page)
                 .presentationDragIndicator(.visible)
         }
         .task(id: [teamID.rawValue.uuidString, "\(appModel.storeRevision)"]) { await reload() }
