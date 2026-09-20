@@ -281,7 +281,7 @@ struct ShotLocationStage: View {
             )
         }
         .padding(16)
-        .sensoryFeedback(.selection, trigger: location)
+        .programmeSensoryFeedback(.selection, trigger: location)
     }
 }
 
