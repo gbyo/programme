@@ -245,6 +245,12 @@ final class NavigationAndStatsUITests: ProgrammeUITestCase {
             XCTAssertTrue(
                 app.staticTexts["Recent Matches"].waitForExistence(timeout: 10),
                 "\(section) search shows no recent matches before typing")
+            // Search acts on the section: the navigation title stays the
+            // section's, never becoming a Search destination.
+            let expectedTitle = section == "Stats" ? "Season Stats" : section
+            XCTAssertTrue(
+                app.navigationBars[expectedTitle].waitForExistence(timeout: 10),
+                "\(section) search renamed the destination instead of keeping \(expectedTitle)")
             cancelSearch(app)
         }
 

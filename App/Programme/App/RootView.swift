@@ -159,7 +159,7 @@ struct SectionSearchContainer: View {
     var body: some View {
         Group {
             if isSearching {
-                UniversalSearchResults(search: search)
+                UniversalSearchResults(search: search, section: section)
             } else {
                 SectionRootContent(section: section)
             }
