@@ -6,8 +6,8 @@ import SwiftUI
 /// Home answers one question: what does the scorer need to know or do now?
 /// Scoped to one team workspace at fetch time via the store.
 ///
-/// Team identity lives in the navigation bar (title, subtitle, title menu);
-/// the list below holds only actionable sections. Immediate actions
+/// Team identity lives in the workspace switcher (sidebar bottom bar, toolbar
+/// otherwise); the list below holds only actionable sections. Immediate actions
 /// (Resume/Prepare) are whole-row Buttons into the live-session flow, while
 /// drill-down rows are NavigationLinks that the List discloses natively.
 struct HomeView: View {
