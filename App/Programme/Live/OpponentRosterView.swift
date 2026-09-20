@@ -94,7 +94,7 @@ struct OpponentRosterView: View {
             players = session.context.opponentRoster.sortedByNumber
             numberFieldIsFocused = players.isEmpty
         }
-        .sensoryFeedback(.selection, trigger: addFeedbackTrigger)
+        .programmeSensoryFeedback(.selection, trigger: addFeedbackTrigger)
     }
 
     private var pasteSheet: some View {
