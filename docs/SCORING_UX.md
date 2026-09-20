@@ -316,7 +316,7 @@ Every live shortcut is declared **once**, in `ProgrammeCommands`, so the system'
 
 Do not add a competing `keyboardShortcut` to a view for an action the menu already owns.
 
-Feedback is split by role: view-state changes (arming a player, selecting a substitution candidate, placing a shot) use SwiftUI `sensoryFeedback`; domain events (recorded, goal, undone, rejected) stay imperative in `LiveMatchSession`, where the meaning lives.
+Feedback is split by role: view-state changes (arming a player, selecting a substitution candidate, placing a shot) use SwiftUI `sensoryFeedback` through Programme's shared `programmeSensoryFeedback` modifier; domain events (recorded, goal, undone, rejected) stay imperative in `LiveMatchSession`, where the meaning lives. Both paths obey the same app-wide Haptic Feedback preference. Native system controls keep their own platform-provided feedback.
 
 ## Evaluating a UX change
 

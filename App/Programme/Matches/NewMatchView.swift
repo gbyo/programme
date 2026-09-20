@@ -141,6 +141,7 @@ struct NewMatchView: View {
     private func create(openingScorer: Bool) async {
         guard let store = appModel.store else {
             errorMessage = "Create a team first."
+            Haptics.rejected()
             return
         }
         let currentSeasonID =
@@ -149,6 +150,7 @@ struct NewMatchView: View {
             : try? await store.currentSeasonID(teamID: teamID)
         guard let seasonID = currentSeasonID else {
             errorMessage = "This team has no current season yet. Add a season before creating a match."
+            Haptics.rejected()
             return
         }
         isSaving = true
@@ -158,6 +160,7 @@ struct NewMatchView: View {
             let roster = try await store.roster(teamID: teamID)
             guard !roster.players.isEmpty else {
                 errorMessage = "Add players to your roster before creating a match."
+                Haptics.rejected()
                 ProgrammeStateReporter.reportWorkflow(.browsing)
                 return
             }
@@ -189,6 +192,7 @@ struct NewMatchView: View {
             }
 
             await appModel.refreshWidgetSnapshot()
+            Haptics.success()
             dismiss()
             if openingScorer {
                 // The scorer opens on the lineup editor when a match has no
@@ -202,6 +206,7 @@ struct NewMatchView: View {
         } catch {
             ProgrammeStateReporter.reportWorkflow(.browsing)
             errorMessage = "Programme couldn't create that match. Nothing was changed. Try again."
+            Haptics.error()
         }
     }
 }
@@ -370,9 +375,11 @@ struct TeamSetupView: View {
                 teamID: teamID, name: seasonName, startDate: Date(), endDate: nil)
             await appModel.reloadWorkspace(selecting: teamID)
             onCreated?(teamID)
+            Haptics.success()
             dismiss()
         } catch {
             errorMessage = "Programme couldn't create that team. Try again."
+            Haptics.error()
         }
     }
 }

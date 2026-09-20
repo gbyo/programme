@@ -169,7 +169,7 @@ struct LiveMatchView: View {
                     reduceMotion ? nil : .snappy(duration: 0.22),
                     value: compactLastEventID
                 )
-                .sensoryFeedback(.selection, trigger: session.armedPlayer)
+                .programmeSensoryFeedback(.selection, trigger: session.armedPlayer)
                 .background(Color(.systemBackground))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar(removing: .title)

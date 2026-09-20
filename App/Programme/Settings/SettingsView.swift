@@ -13,7 +13,7 @@ struct SettingsView: View {
 
     @AppStorage("confirmBeforeFinalizing") private var confirmBeforeFinalizing = true
     @AppStorage("keepScreenAwakeWhileScoring") private var keepScreenAwake = true
-    @AppStorage("hapticFeedbackEnabled") private var hapticsEnabled = true
+    @AppStorage(HapticPreferences.key) private var hapticsEnabled = true
 
     @State private var defaultProfileID = StatProfile.maxPreps.id
     @State private var defaultRulesName = MatchRules.highSchool.name
@@ -67,8 +67,17 @@ struct SettingsView: View {
                 .onChange(of: defaultRulesName) { saveTeamDefaults() }
                 .onChange(of: defaultTrackingID) { saveTeamDefaults() }
 
+                Section {
+                    Toggle("Haptic Feedback", isOn: $hapticsEnabled)
+                } header: {
+                    Text("Interaction")
+                } footer: {
+                    Text(
+                        "Controls the feedback Programme adds to custom interactions and completed actions. System controls such as switches and pickers may still provide their own feedback."
+                    )
+                }
+
                 Section("Scoring") {
-                    Toggle("Haptic feedback", isOn: $hapticsEnabled)
                     Toggle("Keep the screen awake while scoring", isOn: $keepScreenAwake)
                     Toggle("Confirm before finalizing", isOn: $confirmBeforeFinalizing)
                 }

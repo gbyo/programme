@@ -396,8 +396,10 @@ struct TeamDetailView: View {
             try await appModel.stopSharing(teamID: teamID)
             participants = []
             await loadShareItem()
+            Haptics.success()
         } catch {
             errorMessage = "Programme couldn't stop sharing. Nothing was changed. Try again."
+            Haptics.error()
         }
     }
 
@@ -429,9 +431,11 @@ struct TeamDetailView: View {
             await appModel.reloadWorkspace(selecting: appModel.workspace.selectedTeamID)
             await load()
             errorMessage = nil
+            Haptics.success()
             dismiss()
         } catch {
             errorMessage = "Programme couldn't save that team. Nothing was changed. Try again."
+            Haptics.error()
         }
     }
 
@@ -445,8 +449,10 @@ struct TeamDetailView: View {
                 await appModel.refreshWidgetSnapshot()
             }
             await load()
+            Haptics.selectionChanged()
         } catch {
             errorMessage = "Programme couldn't change the current season. Nothing was changed."
+            Haptics.error()
         }
     }
 
@@ -466,8 +472,10 @@ struct TeamDetailView: View {
             newSeasonName = ""
             isAddingSeason = false
             await load()
+            Haptics.success()
         } catch {
             errorMessage = "Programme couldn't add that season. Nothing was changed."
+            Haptics.error()
         }
     }
 }

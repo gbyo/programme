@@ -9,6 +9,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(HapticPreferences.key) private var hapticsEnabled = true
     @State private var isCreatingTeam = false
 
     var body: some View {
@@ -24,6 +25,7 @@ struct RootView: View {
                 tabShell
             }
         }
+        .environment(\.programmeHapticsEnabled, hapticsEnabled)
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: navigation.isShowingLiveMatch)
         .alert(
             navigation.errorToShow?.title ?? "",
@@ -251,7 +253,13 @@ struct TeamSwitcherMenu: View {
     var body: some View {
         ForEach(appModel.workspace.teams) { team in
             Button {
-                Task { await appModel.selectTeam(team.id) }
+                Task {
+                    let previous = appModel.workspace.selectedTeamID
+                    await appModel.selectTeam(team.id)
+                    if appModel.workspace.selectedTeamID != previous {
+                        Haptics.selectionChanged()
+                    }
+                }
             } label: {
                 if team.id == appModel.workspace.selectedTeamID {
                     Label(team.name, systemImage: "checkmark")

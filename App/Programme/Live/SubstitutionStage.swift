@@ -48,7 +48,7 @@ struct SubstitutionStage: View {
         // View-state selection is a declarative fact about this screen, so the
         // feedback for it is declarative too. Recording the event stays
         // imperative in the session, where the domain meaning lives.
-        .sensoryFeedback(.selection, trigger: plan)
+        .programmeSensoryFeedback(.selection, trigger: plan)
         .onAppear { Task { await MultiSubstitutionTip.didOpenSubstitution.donate() } }
     }
 

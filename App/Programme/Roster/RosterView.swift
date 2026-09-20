@@ -307,12 +307,14 @@ struct PlayerEditorView: View {
             } else {
                 try await store.updatePlayer(snapshot)
             }
+            Haptics.success()
             dismiss()
         } catch {
             appModel.navigation.errorToShow = ProgrammeError(
                 title: "Couldn't save player",
                 message: "Nothing was changed. Try again.",
                 underlying: error)
+            Haptics.error()
         }
     }
 }
