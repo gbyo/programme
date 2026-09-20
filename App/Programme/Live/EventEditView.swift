@@ -82,12 +82,18 @@ struct EventEditView: View {
             if case .shot(let shot) = current.payload {
                 Section("Outcome") {
                     Picker("Outcome", selection: outcomeBinding(shot)) {
-                        ForEach(ShotOutcome.allCases, id: \.self) { outcome in
+                        ForEach(
+                            ShotOutcome.allCases.filter { $0.isValid(for: shot.phase) },
+                            id: \.self
+                        ) { outcome in
                             Text(outcome.label).tag(outcome)
                         }
                     }
                     Picker("Phase", selection: phaseBinding(shot)) {
-                        ForEach(PlayPhase.allCases, id: \.self) { phase in
+                        ForEach(
+                            PlayPhase.allCases.filter { shot.outcome.isValid(for: $0) },
+                            id: \.self
+                        ) { phase in
                             Text(phase.label).tag(phase)
                         }
                     }
@@ -275,7 +281,6 @@ struct EventEditView: View {
             set: { newValue in
                 var updated = shot
                 updated.outcome = newValue
-                if !newValue.isGoal { updated.assist = nil }
                 session.edit(
                     .replacePayload(
                         current.id, .shot(updated), summary: "Outcome changed to \(newValue.label)"),
@@ -301,7 +306,6 @@ struct EventEditView: View {
             set: { newValue in
                 var updated = shot
                 updated.isOwnGoal = newValue
-                if newValue { updated.assist = nil }
                 session.edit(
                     .replacePayload(
                         current.id, .shot(updated),
